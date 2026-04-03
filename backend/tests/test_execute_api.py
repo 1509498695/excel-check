@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from backend.app.api import source_api
 from backend.run import app
 
 
@@ -195,3 +196,183 @@ async def test_execute_engine_returns_400_for_unknown_source_id() -> None:
 
     assert response.status_code == 400
     assert "unknown source_id" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_local_pick_returns_real_selected_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证本地文件选择接口会返回真实路径，不会复制文件。"""
+
+    monkeypatch.setattr(
+        source_api,
+        "_show_local_file_dialog",
+        lambda source_type: str(TEST_DATA_PATH) if source_type == "local_excel" else "",
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/local-pick",
+            json={"source_type": "local_excel"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["msg"] == "ok"
+    assert payload["data"]["source_type"] == "local_excel"
+    assert payload["data"]["selected_path"] == str(TEST_DATA_PATH.resolve())
+
+
+@pytest.mark.anyio
+async def test_local_pick_returns_cancelled_when_user_closes_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证用户取消选择时接口会返回 cancelled。"""
+
+    monkeypatch.setattr(source_api, "_show_local_file_dialog", lambda _source_type: "")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/local-pick",
+            json={"source_type": "local_excel"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 204
+    assert payload["msg"] == "cancelled"
+    assert payload["data"]["selected_path"] == ""
+
+
+@pytest.mark.anyio
+async def test_source_metadata_returns_excel_sheet_and_column_structure() -> None:
+    """验证变量池元数据接口会返回 Excel 的 Sheet 与列结构。"""
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/metadata",
+            json={
+                "id": "src_test",
+                "type": "local_excel",
+                "path": str(TEST_DATA_PATH),
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["data"]["source_id"] == "src_test"
+    assert payload["data"]["source_type"] == "local_excel"
+    assert payload["data"]["sheets"] == [
+        {"name": "items", "columns": ["ID", "Name"]},
+        {"name": "drops", "columns": ["RefID"]},
+    ]
+
+
+@pytest.mark.anyio
+async def test_source_metadata_rejects_csv_for_variable_pool_dropdown(
+    tmp_path: Path,
+) -> None:
+    """验证 CSV 数据源会被明确拦截。"""
+
+    csv_path = tmp_path / "sample.csv"
+    csv_path.write_text("id\n1\n", encoding="utf-8")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/metadata",
+            json={
+                "id": "src_csv",
+                "type": "local_csv",
+                "path": str(csv_path),
+            },
+        )
+
+    assert response.status_code == 400
+    assert "变量池下拉提取第一版仅支持 Excel 数据源" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_column_preview_returns_top_rows_for_variable_detail() -> None:
+    """验证列预览接口会返回变量详情页签所需的前几行数据。"""
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/column-preview",
+            json={
+                "source": {
+                    "id": "src_test",
+                    "type": "local_excel",
+                    "path": str(TEST_DATA_PATH),
+                },
+                "sheet": "items",
+                "column": "ID",
+                "limit": 3,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["data"]["source_id"] == "src_test"
+    assert payload["data"]["sheet"] == "items"
+    assert payload["data"]["column"] == "ID"
+    assert payload["data"]["preview_limit"] == 3
+    assert payload["data"]["total_rows"] == 5
+    assert payload["data"]["preview_rows"] == [
+        {"row_index": 2, "value": 1},
+        {"row_index": 3, "value": 2},
+        {"row_index": 4, "value": 2},
+    ]
+
+
+@pytest.mark.anyio
+async def test_column_preview_without_limit_returns_full_column_for_detail_dialog() -> None:
+    """验证详情弹窗在不传 limit 时会返回当前列的完整预览。"""
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/column-preview",
+            json={
+                "source": {
+                    "id": "src_test",
+                    "type": "local_excel",
+                    "path": str(TEST_DATA_PATH),
+                },
+                "sheet": "items",
+                "column": "ID",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["data"]["source_path"] == str(TEST_DATA_PATH)
+    assert payload["data"]["total_rows"] == 5
+    assert payload["data"]["loaded_rows"] == 5
+    assert payload["data"]["loaded_all_rows"] is True
+    assert payload["data"]["preview_limit"] == 5
+    assert payload["data"]["preview_rows"] == [
+        {"row_index": 2, "value": 1},
+        {"row_index": 3, "value": 2},
+        {"row_index": 4, "value": 2},
+        {"row_index": 5, "value": None},
+        {"row_index": 6, "value": "   "},
+    ]

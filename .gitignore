@@ -15,3 +15,11 @@ venv/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local runtime artifacts
+.codex/
+backend/.runtime_uploads/
+backend-server*.log
+frontend-server*.log
+*.out.log
+*.err.log

@@ -29,7 +29,7 @@ def execute_engine(task_tree: TaskTree) -> dict[str, Any]:
 
     try:
         execution_artifacts = _run_execution_pipeline(task_tree)
-    except ValueError as exc:
+    except (ValueError, ImportError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -135,6 +135,8 @@ def _load_sources_concurrently(
             source_id = future_map[future]
             try:
                 source_frames = future.result()
+            except ImportError as exc:
+                raise ValueError(str(exc)) from exc
             except (FileNotFoundError, ValueError, NotImplementedError):
                 failed_sources.append(source_id)
                 continue

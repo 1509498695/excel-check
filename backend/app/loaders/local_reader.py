@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import pandas as pd
 
@@ -58,6 +58,115 @@ def load_local_variables(
     return loaded_variables
 
 
+def read_source_metadata(source: DataSource) -> dict[str, Any]:
+    """读取 Excel 数据源的 Sheet 与列结构，用于变量池下拉构建。"""
+    _ensure_excel_metadata_source(source)
+    source_path = _resolve_local_path(source)
+
+    try:
+        workbook = pd.ExcelFile(
+            source_path,
+            engine=_get_excel_engine(source_path),
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Excel 数据源 '{source.id}' 文件不存在：'{source_path}'。"
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(_build_excel_dependency_error(source_path)) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"读取 Excel 数据源 '{source.id}' 失败：{exc}"
+        ) from exc
+
+    sheets: list[dict[str, Any]] = []
+    for sheet_name in workbook.sheet_names:
+        try:
+            sheet_frame = workbook.parse(sheet_name=sheet_name, nrows=0)
+        except ValueError as exc:
+            raise ValueError(
+                f"读取 Excel 数据源 '{source.id}' 的 Sheet '{sheet_name}' 失败：{exc}"
+            ) from exc
+
+        sheets.append(
+            {
+                "name": sheet_name,
+                "columns": [str(column) for column in sheet_frame.columns.tolist()],
+            }
+        )
+
+    return {
+        "source_id": source.id,
+        "source_type": source.type,
+        "sheets": sheets,
+    }
+
+
+def preview_source_column(
+    source: DataSource,
+    *,
+    sheet_name: str,
+    column_name: str,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """返回指定列的预览数据，供变量详情弹窗展示。"""
+    _ensure_excel_metadata_source(source)
+    source_path = _resolve_local_path(source)
+
+    cleaned_sheet = sheet_name.strip()
+    cleaned_column = column_name.strip()
+    if not cleaned_sheet:
+        raise ValueError("变量详情预览缺少 Sheet 名称。")
+    if not cleaned_column:
+        raise ValueError("变量详情预览缺少列名。")
+
+    try:
+        dataframe = pd.read_excel(
+            source_path,
+            sheet_name=cleaned_sheet,
+            usecols=[cleaned_column],
+            engine=_get_excel_engine(source_path),
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Excel 数据源 '{source.id}' 文件不存在：'{source_path}'。"
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(_build_excel_dependency_error(source_path)) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{cleaned_sheet}' 列 "
+            f"'{cleaned_column}' 失败：{exc}"
+        ) from exc
+
+    total_rows = int(len(dataframe))
+    preview_limit = max(1, limit) if limit is not None else total_rows
+    preview_frame = dataframe if limit is None else dataframe.head(preview_limit)
+    preview_rows = [
+        {
+            "row_index": int(row_index),
+            "value": _normalize_preview_value(value),
+        }
+        for row_index, value in zip(
+            preview_frame.index + 2,
+            preview_frame[cleaned_column].tolist(),
+        )
+    ]
+
+    return {
+        "source_id": source.id,
+        "source_type": source.type,
+        "source_path": str(source_path),
+        "sheet": cleaned_sheet,
+        "column": cleaned_column,
+        "preview_rows": preview_rows,
+        "total_rows": total_rows,
+        "loaded_rows": len(preview_rows),
+        "loaded_all_rows": len(preview_rows) == total_rows,
+        "preview_limit": preview_limit,
+    }
+
+
 def load_variables_by_source(
     source: DataSource, variables_for_source: list[VariableTag]
 ) -> dict[str, pd.DataFrame]:
@@ -102,11 +211,14 @@ def read_local_excel(
                 source_path,
                 sheet_name=sheet_name,
                 usecols=requested_columns,
+                engine=_get_excel_engine(source_path),
             )
         except FileNotFoundError as exc:
             raise FileNotFoundError(
                 f"Excel source '{source.id}' file not found: '{source_path}'."
             ) from exc
+        except ImportError as exc:
+            raise ImportError(_build_excel_dependency_error(source_path)) from exc
         except ValueError as exc:
             raise ValueError(
                 f"Failed to read Excel source '{source.id}', sheet '{sheet_name}', "
@@ -158,6 +270,12 @@ def read_local_csv(
         group_label="csv",
     )
     return loaded_variables
+
+
+def _ensure_excel_metadata_source(source: DataSource) -> None:
+    """限制变量池元数据读取仅支持 Excel 数据源。"""
+    if source.type != "local_excel":
+        raise ValueError("变量池下拉提取第一版仅支持 Excel 数据源。")
 
 
 def _ensure_unique_tags(variables: list[VariableTag]) -> None:
@@ -226,6 +344,44 @@ def _build_variable_frame(dataframe: pd.DataFrame, column_name: str) -> pd.DataF
     # 表格首行为表头，因此第一条真实数据对应 Excel/CSV 的第 2 行。
     variable_frame["_row_index"] = variable_frame.index + 2
     return variable_frame
+
+
+def _get_excel_engine(source_path: Path) -> str:
+    """按扩展名显式选择 Excel 引擎，保证 xls 与 xlsx 行为清晰。"""
+    if source_path.suffix.lower() == ".xls":
+        return "xlrd"
+    return "openpyxl"
+
+
+def _build_excel_dependency_error(source_path: Path) -> str:
+    """生成 Excel 依赖缺失时的统一提示。"""
+    if source_path.suffix.lower() == ".xls":
+        return (
+            "读取 .xls 文件需要安装 xlrd 依赖，请执行 "
+            "`pip install -r backend/requirements.txt` 或单独安装 `xlrd`。"
+        )
+
+    return (
+        "读取 .xlsx 文件需要安装 openpyxl 依赖，请执行 "
+        "`pip install -r backend/requirements.txt` 或单独安装 `openpyxl`。"
+    )
+
+
+def _normalize_preview_value(value: Any) -> Any:
+    """把 Pandas/Numpy 值转换为可直接返回给前端的 JSON 兼容结构。"""
+    if pd.isna(value):
+        return None
+
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (TypeError, ValueError):
+            return value
+
+    return value
 
 
 def _unique_preserve_order(items: Iterable[ItemT]) -> list[ItemT]:

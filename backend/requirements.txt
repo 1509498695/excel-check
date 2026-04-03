@@ -3,6 +3,7 @@ uvicorn
 pydantic
 pandas
 openpyxl
+xlrd
 requests
 pytest
 httpx
