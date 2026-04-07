@@ -14,8 +14,8 @@ const store = useWorkbenchStore()
 const dynamicParamsPlaceholder = '{\n  "target_tags": ["[items-id]"]\n}'
 
 const variableOptions = computed(() =>
-  store.variables.map((variable) => ({
-    label: `${variable.tag} · ${variable.sheet}/${variable.column}`,
+  store.singleVariables.map((variable) => ({
+    label: `${variable.tag} · ${variable.sheet}/${variable.column ?? ''}`,
     value: variable.tag,
   })),
 )
@@ -112,11 +112,14 @@ const readyRuleCount = computed(() => store.rules.filter(isRuleReady).length)
 const pendingRuleCount = computed(() => store.rules.length - readyRuleCount.value)
 
 const ruleGuide = computed(() => {
-  if (!store.variables.length) {
+  if (!store.singleVariables.length) {
+    const onlyComposite = store.variables.length > 0
     return {
       type: 'warning' as const,
-      title: '请先完成步骤 2 的变量池配置',
-      description: '至少准备一个变量标签后，再开始添加静态规则或动态规则，能明显减少无效配置。',
+      title: onlyComposite ? '当前只有组合变量，静态规则暂不可用' : '请先完成步骤 2 的单变量配置',
+      description: onlyComposite
+        ? '组合变量已可用于后续 JSON 类扩展，但当前 not_null、unique、cross_table_mapping 仍需至少一个单个变量。'
+        : '至少准备一个单个变量标签后，再开始添加静态规则或动态规则，能明显减少无效配置。',
     }
   }
 
@@ -124,7 +127,8 @@ const ruleGuide = computed(() => {
     return {
       type: 'info' as const,
       title: '规则编排区还没有内容',
-      description: '建议先从 not_null、unique、cross_table_mapping 这三条静态规则模板开始，最快形成完整闭环。',
+      description:
+        '建议先从 not_null、unique、cross_table_mapping 这三条静态规则模板开始，最快形成完整闭环。',
     }
   }
 
@@ -216,7 +220,7 @@ const ruleGuide = computed(() => {
               collapse-tags
               collapse-tags-tooltip
               class="full-width"
-              placeholder="选择一个或多个变量标签"
+              placeholder="选择一个或多个单变量标签"
               @update:model-value="updateTargetTags(rule, $event)"
             >
               <el-option
@@ -273,7 +277,7 @@ const ruleGuide = computed(() => {
       <div class="panel-toolbar">
         <div class="toolbar-copy">
           <strong>动态规则配置</strong>
-          <span>为未来扩展保留自定义 rule_type 与 params JSON 的编辑入口。</span>
+          <span>为未来扩展保留自定义 rule_type 和 params JSON 的编辑入口。</span>
         </div>
         <div class="toolbar-actions">
           <el-button type="primary" plain @click="addDynamicRule">新增动态规则</el-button>
@@ -288,7 +292,7 @@ const ruleGuide = computed(() => {
         <div class="rule-card-head">
           <div>
             <h4>动态规则</h4>
-            <p>直接维护 `rule_type + params`，提交前会自动执行 JSON 校验。</p>
+            <p>直接维护 <code>rule_type + params</code>，提交前会自动执行 JSON 校验。</p>
           </div>
           <el-button link type="danger" @click="removeRule(rule.rule_id)">移除</el-button>
         </div>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -12,6 +13,25 @@ from backend.run import app
 
 
 TEST_DATA_PATH = Path(__file__).resolve().parent / "data" / "minimal_rules.xlsx"
+
+
+def _create_composite_test_workbook(target_path: Path) -> Path:
+    """创建组合变量测试所需的最小 Excel 文件。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "ID": [1, 2, 3],
+                "ItemName": ["Gold", "Wood", "Stone"],
+                "Desc": ["黄金+100", "木头+200", "石头+300"],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+        pd.DataFrame({"RefID": [1, 2, 9]}).to_excel(
+            writer,
+            sheet_name="drops",
+            index=False,
+        )
+
+    return target_path
 
 
 @pytest.mark.anyio
@@ -376,3 +396,122 @@ async def test_column_preview_without_limit_returns_full_column_for_detail_dialo
         {"row_index": 5, "value": None},
         {"row_index": 6, "value": "   "},
     ]
+
+
+@pytest.mark.anyio
+async def test_composite_preview_returns_json_mapping_for_same_sheet(
+    tmp_path: Path,
+) -> None:
+    """验证组合变量预览接口会返回 key->object 的完整 JSON 映射。"""
+
+    workbook_path = _create_composite_test_workbook(tmp_path / "composite_preview.xlsx")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/composite-preview",
+            json={
+                "source": {
+                    "id": "src_combo",
+                    "type": "local_excel",
+                    "path": str(workbook_path),
+                },
+                "sheet": "items",
+                "columns": ["ID", "ItemName", "Desc"],
+                "key_column": "ID",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["data"]["variable_kind"] == "composite"
+    assert payload["data"]["sheet"] == "items"
+    assert payload["data"]["columns"] == ["ID", "ItemName", "Desc"]
+    assert payload["data"]["key_column"] == "ID"
+    assert payload["data"]["total_rows"] == 3
+    assert payload["data"]["loaded_rows"] == 3
+    assert payload["data"]["mapping"] == {
+        "1": {"ItemName": "Gold", "Desc": "黄金+100"},
+        "2": {"ItemName": "Wood", "Desc": "木头+200"},
+        "3": {"ItemName": "Stone", "Desc": "石头+300"},
+    }
+
+
+@pytest.mark.anyio
+async def test_execute_engine_accepts_composite_variable_without_breaking_rules(
+    tmp_path: Path,
+) -> None:
+    """验证 TaskTree 中包含组合变量时，现有三类规则仍可对单变量正常执行。"""
+
+    workbook_path = _create_composite_test_workbook(tmp_path / "composite_execute.xlsx")
+
+    payload = {
+        "sources": [
+            {
+                "id": "src_combo",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-id]",
+                "source_id": "src_combo",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "ID",
+            },
+            {
+                "tag": "[drops-ref]",
+                "source_id": "src_combo",
+                "sheet": "drops",
+                "variable_kind": "single",
+                "column": "RefID",
+            },
+            {
+                "tag": "[items-json]",
+                "source_id": "src_combo",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["ID", "ItemName", "Desc"],
+                "key_column": "ID",
+                "expected_type": "json",
+            },
+        ],
+        "rules": [
+            {
+                "rule_type": "not_null",
+                "params": {"target_tags": ["[items-id]"]},
+            },
+            {
+                "rule_type": "unique",
+                "params": {"target_tags": ["[items-id]"]},
+            },
+            {
+                "rule_type": "cross_table_mapping",
+                "params": {
+                    "dict_tag": "[items-id]",
+                    "target_tag": "[drops-ref]",
+                },
+            },
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    response_payload = response.json()
+    assert response_payload["msg"] == "Execution Completed"
+    assert response_payload["meta"]["failed_sources"] == []
+    assert response_payload["meta"]["total_rows_scanned"] > 0
+    assert any(
+        item["rule_name"] == "cross_table_mapping" and item["raw_value"] == 9
+        for item in response_payload["data"]["abnormal_results"]
+    )

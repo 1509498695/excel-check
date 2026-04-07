@@ -29,6 +29,15 @@ def _get_target_tags(rule: ValidationRule) -> list[str]:
 def _get_variable_frame(
     context: RuleExecutionContext, tag: str, rule_type: str
 ) -> pd.DataFrame:
+    variable = next(
+        (item for item in context.task_tree.variables if item.tag == tag),
+        None,
+    )
+    if variable is not None and variable.variable_kind == "composite":
+        raise ValueError(
+            f"规则 '{rule_type}' 仅支持单个变量，不支持组合变量 '{tag}'。"
+        )
+
     frame = context.loaded_variables.get(tag)
     if frame is None:
         raise ValueError(f"Rule '{rule_type}' references unknown tag '{tag}'.")

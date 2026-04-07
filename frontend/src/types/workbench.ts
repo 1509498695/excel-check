@@ -4,6 +4,8 @@ export type ExpectedType = 'int' | 'str' | 'json'
 
 export type RuleMode = 'static' | 'dynamic'
 
+export type VariableKind = 'single' | 'composite'
+
 export interface DataSource {
   id: string
   type: SourceType
@@ -17,7 +19,10 @@ export interface VariableTag {
   tag: string
   source_id: string
   sheet: string
-  column: string
+  variable_kind?: VariableKind
+  column?: string
+  columns?: string[]
+  key_column?: string
   expected_type?: ExpectedType | null
 }
 
@@ -103,7 +108,8 @@ export interface ColumnPreviewRow {
   value: unknown
 }
 
-export interface VariablePreviewData {
+export interface SingleVariablePreviewData {
+  variable_kind: 'single'
   source_id: string
   source_type: SourceType
   source_path?: string
@@ -116,6 +122,22 @@ export interface VariablePreviewData {
   preview_limit: number
 }
 
+export interface CompositeVariablePreviewData {
+  variable_kind: 'composite'
+  source_id: string
+  source_type: SourceType
+  source_path?: string
+  sheet: string
+  columns: string[]
+  key_column: string
+  mapping: Record<string, Record<string, unknown>>
+  total_rows: number
+  loaded_rows?: number
+  loaded_all_rows?: boolean
+}
+
+export type VariablePreviewData = SingleVariablePreviewData | CompositeVariablePreviewData
+
 export interface ColumnPreviewRequest {
   source: DataSource
   sheet: string
@@ -123,8 +145,21 @@ export interface ColumnPreviewRequest {
   limit?: number
 }
 
+export interface CompositePreviewRequest {
+  source: DataSource
+  sheet: string
+  columns: string[]
+  key_column: string
+}
+
 export interface ColumnPreviewResponse {
   code: number
   msg: string
-  data: VariablePreviewData
+  data: SingleVariablePreviewData
+}
+
+export interface CompositePreviewResponse {
+  code: number
+  msg: string
+  data: CompositeVariablePreviewData
 }

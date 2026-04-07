@@ -6,7 +6,6 @@ function trimValue(value?: string | null): string {
 
 function createCleanObject<T extends Record<string, unknown>>(value: T): T {
   const entries = Object.entries(value).filter(([, item]) => item !== undefined && item !== '')
-
   return Object.fromEntries(entries) as T
 }
 
@@ -46,7 +45,8 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
   const tag = trimValue(variable.tag)
   const sourceId = trimValue(variable.source_id)
   const sheet = trimValue(variable.sheet)
-  const column = trimValue(variable.column)
+  const variableKind = variable.variable_kind ?? 'single'
+  const expectedType = variableKind === 'composite' ? 'json' : variable.expected_type ?? undefined
 
   if (!tag) {
     throw new Error('步骤 2 中存在未填写的变量标签。')
@@ -64,6 +64,36 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
     throw new Error(`变量 "${tag}" 缺少 sheet。`)
   }
 
+  if (variableKind === 'composite') {
+    const columns = Array.isArray(variable.columns)
+      ? [...new Set(variable.columns.map((item) => trimValue(item)).filter(Boolean))]
+      : []
+    const keyColumn = trimValue(variable.key_column)
+
+    if (columns.length < 2) {
+      throw new Error(`组合变量 "${tag}" 至少需要选择 2 列。`)
+    }
+
+    if (!keyColumn) {
+      throw new Error(`组合变量 "${tag}" 缺少 key_column。`)
+    }
+
+    if (!columns.includes(keyColumn)) {
+      throw new Error(`组合变量 "${tag}" 的 key_column 必须包含在 columns 中。`)
+    }
+
+    return createCleanObject({
+      tag,
+      source_id: sourceId,
+      sheet,
+      variable_kind: 'composite' as const,
+      columns,
+      key_column: keyColumn,
+      expected_type: 'json' as const,
+    })
+  }
+
+  const column = trimValue(variable.column)
   if (!column) {
     throw new Error(`变量 "${tag}" 缺少 column。`)
   }
@@ -72,8 +102,9 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
     tag,
     source_id: sourceId,
     sheet,
+    variable_kind: 'single' as const,
     column,
-    expected_type: variable.expected_type ?? undefined,
+    expected_type: expectedType,
   })
 }
 
@@ -155,7 +186,9 @@ function normalizeDynamicRule(rule: ValidationRule): ValidationRule {
     parsed = JSON.parse(rawText)
   } catch (error) {
     throw new Error(
-      `动态规则 "${ruleType}" 的参数 JSON 不合法：${error instanceof Error ? error.message : '无法解析'}。`,
+      `动态规则 "${ruleType}" 的参数 JSON 不合法：${
+        error instanceof Error ? error.message : '无法解析'
+      }。`,
     )
   }
 

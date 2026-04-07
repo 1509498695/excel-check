@@ -9,7 +9,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.api.schemas import DataSource
-from backend.app.loaders.local_reader import preview_source_column, read_source_metadata
+from backend.app.loaders.local_reader import (
+    preview_composite_variable,
+    preview_source_column,
+    read_source_metadata,
+)
 from backend.config import settings
 
 
@@ -30,7 +34,7 @@ class LocalPickRequest(BaseModel):
 
 
 class ColumnPreviewRequest(BaseModel):
-    """列预览请求。"""
+    """单列预览请求。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -40,14 +44,23 @@ class ColumnPreviewRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=20000)
 
 
+class CompositePreviewRequest(BaseModel):
+    """组合变量预览请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: DataSource
+    sheet: str
+    columns: list[str] = Field(default_factory=list)
+    key_column: str
+
+
 def _get_pick_filetypes(source_type: str) -> list[tuple[str, str]]:
     """返回 tkinter 文件对话框需要的文件类型。"""
     if source_type == "local_excel":
         return [("Excel 文件", "*.xlsx *.xls")]
-
     if source_type == "local_csv":
         return [("CSV 文件", "*.csv")]
-
     raise ValueError(f"暂不支持 {source_type} 的本地文件选择。")
 
 
@@ -64,12 +77,14 @@ def _validate_selected_path(source_type: str, selected_path: str) -> str:
         allowed_text = "、".join(sorted(allowed_suffixes))
         raise HTTPException(
             status_code=400,
-            detail=f"{source_type} 仅支持 {allowed_text} 文件，当前选择为 {suffix or '无后缀文件'}。",
+            detail=(
+                f"{source_type} 仅支持 {allowed_text} 文件，当前选择为 "
+                f"{suffix or '无后缀文件'}。"
+            ),
         )
 
     if not path.exists():
         raise HTTPException(status_code=400, detail=f"所选文件不存在：{path}")
-
     if not path.is_file():
         raise HTTPException(status_code=400, detail=f"所选路径不是文件：{path}")
 
@@ -81,8 +96,10 @@ def _show_local_file_dialog(source_type: str) -> str:
     try:
         import tkinter as tk
         from tkinter import filedialog
-    except Exception as error:  # pragma: no cover - 仅在本机缺少 GUI 依赖时触发
-        raise RuntimeError("当前环境无法使用本机文件选择框，请手工输入本地文件路径。") from error
+    except Exception as error:  # pragma: no cover - 仅在 GUI 依赖缺失时触发
+        raise RuntimeError(
+            "当前环境无法使用本机文件选择框，请手动输入本地文件路径。"
+        ) from error
 
     root: tk.Tk | None = None
     try:
@@ -163,13 +180,33 @@ async def get_source_metadata(source: DataSource) -> dict[str, Any]:
 
 @router.post("/column-preview")
 async def get_source_column_preview(payload: ColumnPreviewRequest) -> dict[str, Any]:
-    """返回变量详情弹窗所需的列预览数据。"""
+    """返回单个变量详情弹窗所需的列预览数据。"""
     try:
         preview = preview_source_column(
             payload.source,
             sheet_name=payload.sheet,
             column_name=payload.column,
             limit=payload.limit,
+        )
+    except (FileNotFoundError, ValueError, ImportError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": preview,
+    }
+
+
+@router.post("/composite-preview")
+async def get_composite_variable_preview(payload: CompositePreviewRequest) -> dict[str, Any]:
+    """返回组合变量所需的 JSON 映射预览。"""
+    try:
+        preview = preview_composite_variable(
+            payload.source,
+            sheet_name=payload.sheet,
+            columns=payload.columns,
+            key_column=payload.key_column,
         )
     except (FileNotFoundError, ValueError, ImportError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

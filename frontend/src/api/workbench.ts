@@ -1,11 +1,13 @@
 import type {
   ColumnPreviewRequest,
   ColumnPreviewResponse,
+  CompositePreviewRequest,
+  CompositePreviewResponse,
   DataSource,
   ExecuteResponse,
   LocalPickResponse,
-  SourceMetadataResponse,
   SourceCapabilitiesResponse,
+  SourceMetadataResponse,
   TaskTree,
 } from '../types/workbench'
 
@@ -84,6 +86,24 @@ export async function fetchColumnPreview(
   }
 
   return (await response.json()) as ColumnPreviewResponse
+}
+
+export async function fetchCompositePreview(
+  payload: CompositePreviewRequest,
+): Promise<CompositePreviewResponse> {
+  const response = await fetch('/api/v1/sources/composite-preview', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    await parseApiError(response)
+  }
+
+  return (await response.json()) as CompositePreviewResponse
 }
 
 export async function executeTaskTree(taskTree: TaskTree): Promise<ExecuteResponse> {

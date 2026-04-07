@@ -23,7 +23,6 @@ def load_local_variables(
     if not variables:
         return {}
 
-    # 先校验 tag 全局唯一，避免后续结果字典被覆盖。
     _ensure_unique_tags(variables)
 
     source_map = {source.id: source for source in sources}
@@ -38,20 +37,17 @@ def load_local_variables(
             )
         if source.type not in LOCAL_SOURCE_TYPES:
             continue
-        # 仅按 source_id 聚合同一数据源的变量，后续再按 source.type 分发。
         grouped_variables[variable.source_id].append(variable)
 
     loaded_variables: dict[str, pd.DataFrame] = {}
 
     for source_id, variables_for_source in grouped_variables.items():
-        source = source_map[source_id]
-        # 统一走分发函数，后面接入 feishu/svn 时可保持同样调用方式。
-        source_frames = load_variables_by_source(source, variables_for_source)
+        source_frames = load_variables_by_source(source_map[source_id], variables_for_source)
         overlap_tags = set(loaded_variables).intersection(source_frames)
         if overlap_tags:
             raise ValueError(
-                f"Duplicate variable tags produced while loading source "
-                f"'{source.id}': {sorted(overlap_tags)}."
+                "Duplicate variable tags produced while loading source "
+                f"'{source_id}': {sorted(overlap_tags)}."
             )
         loaded_variables.update(source_frames)
 
@@ -75,9 +71,7 @@ def read_source_metadata(source: DataSource) -> dict[str, Any]:
     except ImportError as exc:
         raise ImportError(_build_excel_dependency_error(source_path)) from exc
     except ValueError as exc:
-        raise ValueError(
-            f"读取 Excel 数据源 '{source.id}' 失败：{exc}"
-        ) from exc
+        raise ValueError(f"读取 Excel 数据源 '{source.id}' 失败：{exc}") from exc
 
     sheets: list[dict[str, Any]] = []
     for sheet_name in workbook.sheet_names:
@@ -154,6 +148,7 @@ def preview_source_column(
     ]
 
     return {
+        "variable_kind": "single",
         "source_id": source.id,
         "source_type": source.type,
         "source_path": str(source_path),
@@ -164,6 +159,71 @@ def preview_source_column(
         "loaded_rows": len(preview_rows),
         "loaded_all_rows": len(preview_rows) == total_rows,
         "preview_limit": preview_limit,
+    }
+
+
+def preview_composite_variable(
+    source: DataSource,
+    *,
+    sheet_name: str,
+    columns: list[str],
+    key_column: str,
+) -> dict[str, Any]:
+    """返回同一数据源同一 Sheet 内多列组合后的 JSON 映射预览。"""
+    _ensure_excel_metadata_source(source)
+    source_path = _resolve_local_path(source)
+
+    cleaned_sheet = sheet_name.strip()
+    cleaned_columns = [column.strip() for column in columns if column and column.strip()]
+    cleaned_columns = _unique_preserve_order(cleaned_columns)
+    cleaned_key_column = key_column.strip()
+
+    if not cleaned_sheet:
+        raise ValueError("组合变量预览缺少 Sheet 名称。")
+    if len(cleaned_columns) < 2:
+        raise ValueError("组合变量至少需要选择 2 列。")
+    if not cleaned_key_column:
+        raise ValueError("组合变量缺少 key 列。")
+    if cleaned_key_column not in cleaned_columns:
+        raise ValueError("组合变量的 key 列必须包含在关联列中。")
+
+    try:
+        dataframe = pd.read_excel(
+            source_path,
+            sheet_name=cleaned_sheet,
+            usecols=cleaned_columns,
+            engine=_get_excel_engine(source_path),
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Excel 数据源 '{source.id}' 文件不存在：'{source_path}'。"
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(_build_excel_dependency_error(source_path)) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{cleaned_sheet}' 组合列 "
+            f"{cleaned_columns} 失败：{exc}"
+        ) from exc
+
+    mapping, loaded_rows = _build_composite_mapping(
+        dataframe,
+        columns=cleaned_columns,
+        key_column=cleaned_key_column,
+    )
+
+    return {
+        "variable_kind": "composite",
+        "source_id": source.id,
+        "source_type": source.type,
+        "source_path": str(source_path),
+        "sheet": cleaned_sheet,
+        "columns": cleaned_columns,
+        "key_column": cleaned_key_column,
+        "mapping": mapping,
+        "total_rows": int(len(dataframe)),
+        "loaded_rows": loaded_rows,
+        "loaded_all_rows": loaded_rows == int(len(dataframe)),
     }
 
 
@@ -191,7 +251,6 @@ def read_local_excel(
     variables_by_sheet: dict[str, list[VariableTag]] = defaultdict(list)
 
     for variable in variables_for_source:
-        # Excel 必须显式指定 sheet；空字符串通常意味着前端配置不完整。
         if not variable.sheet.strip():
             raise ValueError(
                 f"Excel source '{source.id}' requires a non-empty sheet for "
@@ -202,10 +261,7 @@ def read_local_excel(
     loaded_variables: dict[str, pd.DataFrame] = {}
 
     for sheet_name, sheet_variables in variables_by_sheet.items():
-        # 同一 sheet 的多个列一次性读取，避免重复打开工作表并降低内存消耗。
-        requested_columns = _unique_preserve_order(
-            variable.column for variable in sheet_variables
-        )
+        requested_columns = _collect_requested_columns(sheet_variables)
         try:
             dataframe = pd.read_excel(
                 source_path,
@@ -225,7 +281,7 @@ def read_local_excel(
                 f"columns {requested_columns}: {exc}"
             ) from exc
 
-        _merge_loaded_columns(
+        _merge_loaded_variables(
             loaded_variables,
             dataframe=dataframe,
             variables_for_group=sheet_variables,
@@ -243,11 +299,11 @@ def read_local_csv(
     if not variables_for_source:
         return {}
 
+    if any(_get_variable_kind(variable) == "composite" for variable in variables_for_source):
+        raise ValueError("组合变量当前仅支持本地 Excel 数据源。")
+
     source_path = _resolve_local_path(source)
-    # CSV 没有 sheet 概念，因此直接合并当前 source 下的所有目标列。
-    requested_columns = _unique_preserve_order(
-        variable.column for variable in variables_for_source
-    )
+    requested_columns = _collect_requested_columns(variables_for_source)
 
     try:
         dataframe = pd.read_csv(source_path, usecols=requested_columns)
@@ -262,7 +318,7 @@ def read_local_csv(
         ) from exc
 
     loaded_variables: dict[str, pd.DataFrame] = {}
-    _merge_loaded_columns(
+    _merge_loaded_variables(
         loaded_variables,
         dataframe=dataframe,
         variables_for_group=variables_for_source,
@@ -279,7 +335,7 @@ def _ensure_excel_metadata_source(source: DataSource) -> None:
 
 
 def _ensure_unique_tags(variables: list[VariableTag]) -> None:
-    # tag 是变量池中的全局唯一键，重复时会导致结果覆盖，因此提前拦截。
+    """保证 tag 在整次请求中全局唯一。"""
     seen_tags: set[str] = set()
     duplicate_tags: set[str] = set()
 
@@ -295,7 +351,7 @@ def _ensure_unique_tags(variables: list[VariableTag]) -> None:
 
 
 def _resolve_local_path(source: DataSource) -> Path:
-    # 本地路径优先使用 path，pathOrUrl 作为兼容字段回退。
+    """解析本地文件路径，优先使用 path，其次回退到 pathOrUrl。"""
     raw_path = source.path or source.pathOrUrl
     if not raw_path:
         raise ValueError(
@@ -303,7 +359,6 @@ def _resolve_local_path(source: DataSource) -> Path:
         )
 
     source_path = Path(raw_path).expanduser()
-    # 这里同时校验“存在”与“是文件”，避免把目录误当成数据源。
     if not source_path.exists():
         raise FileNotFoundError(
             f"Local source '{source.id}' file not found: '{source_path}'."
@@ -315,7 +370,38 @@ def _resolve_local_path(source: DataSource) -> Path:
     return source_path
 
 
-def _merge_loaded_columns(
+def _get_variable_kind(variable: VariableTag) -> str:
+    """读取变量类型，兼容旧请求默认视为单个变量。"""
+    return variable.variable_kind or "single"
+
+
+def _collect_requested_columns(variables: list[VariableTag]) -> list[str]:
+    """聚合一组变量真正依赖的列名。"""
+    requested_columns: list[str] = []
+
+    for variable in variables:
+        if _get_variable_kind(variable) == "composite":
+            columns = [
+                column.strip()
+                for column in (variable.columns or [])
+                if column and column.strip()
+            ]
+            if len(columns) < 2:
+                raise ValueError(
+                    f"Composite variable '{variable.tag}' must provide at least two columns."
+                )
+            requested_columns.extend(columns)
+            continue
+
+        column_name = (variable.column or "").strip()
+        if not column_name:
+            raise ValueError(f"Variable '{variable.tag}' is missing column.")
+        requested_columns.append(column_name)
+
+    return _unique_preserve_order(requested_columns)
+
+
+def _merge_loaded_variables(
     target: dict[str, pd.DataFrame],
     *,
     dataframe: pd.DataFrame,
@@ -323,31 +409,113 @@ def _merge_loaded_columns(
     source_id: str,
     group_label: str,
 ) -> None:
-    # 将一次批量读取的 DataFrame 再拆成按 tag 索引的单列结果。
+    """将批量读取结果拆成按 tag 索引的单变量或组合变量结果。"""
     for variable in variables_for_group:
-        if variable.column not in dataframe.columns:
-            raise ValueError(
-                f"Source '{source_id}' {group_label} does not contain column "
-                f"'{variable.column}' for variable tag '{variable.tag}'."
-            )
         if variable.tag in target:
             raise ValueError(
                 f"Duplicate variable tag '{variable.tag}' encountered while "
                 f"loading source '{source_id}'."
             )
-        target[variable.tag] = _build_variable_frame(dataframe, variable.column)
+
+        if _get_variable_kind(variable) == "composite":
+            columns = [column.strip() for column in (variable.columns or []) if column and column.strip()]
+            key_column = (variable.key_column or "").strip()
+
+            if len(columns) < 2:
+                raise ValueError(
+                    f"Composite variable '{variable.tag}' must provide at least two columns."
+                )
+            if not key_column:
+                raise ValueError(
+                    f"Composite variable '{variable.tag}' must provide key_column."
+                )
+            if key_column not in columns:
+                raise ValueError(
+                    f"Composite variable '{variable.tag}' requires key_column '{key_column}' "
+                    "to be included in columns."
+                )
+            missing_columns = [column for column in columns if column not in dataframe.columns]
+            if missing_columns:
+                raise ValueError(
+                    f"Source '{source_id}' {group_label} does not contain columns "
+                    f"{missing_columns} for composite variable '{variable.tag}'."
+                )
+
+            target[variable.tag] = _build_composite_variable_frame(
+                dataframe,
+                columns=columns,
+                key_column=key_column,
+            )
+            continue
+
+        column_name = (variable.column or "").strip()
+        if column_name not in dataframe.columns:
+            raise ValueError(
+                f"Source '{source_id}' {group_label} does not contain column "
+                f"'{column_name}' for variable tag '{variable.tag}'."
+            )
+        target[variable.tag] = _build_variable_frame(dataframe, column_name)
 
 
 def _build_variable_frame(dataframe: pd.DataFrame, column_name: str) -> pd.DataFrame:
-    # 返回单列 DataFrame 而不是 Series，方便后续统一追加元数据。
+    """返回单列 DataFrame，并统一附带真实表格行号。"""
     variable_frame = dataframe[[column_name]].copy()
-    # 表格首行为表头，因此第一条真实数据对应 Excel/CSV 的第 2 行。
     variable_frame["_row_index"] = variable_frame.index + 2
     return variable_frame
 
 
+def _build_composite_variable_frame(
+    dataframe: pd.DataFrame,
+    *,
+    columns: list[str],
+    key_column: str,
+) -> pd.DataFrame:
+    """把组合变量转换成一列 JSON 映射值，供 TaskTree 全链路持有。"""
+    mapping, _loaded_rows = _build_composite_mapping(
+        dataframe,
+        columns=columns,
+        key_column=key_column,
+    )
+    json_values = list(mapping.values())
+    frame = pd.DataFrame({"json_value": json_values})
+    frame["_row_index"] = frame.index + 2
+    return frame
+
+
+def _build_composite_mapping(
+    dataframe: pd.DataFrame,
+    *,
+    columns: list[str],
+    key_column: str,
+) -> tuple[dict[str, dict[str, Any]], int]:
+    """基于 key 列把多列聚合成字典结构，并排除 key 列本身。"""
+    mapping: dict[str, dict[str, Any]] = {}
+    loaded_rows = 0
+
+    for _, row in dataframe[columns].iterrows():
+        raw_key = row[key_column]
+        normalized_key = _normalize_preview_value(raw_key)
+        if _is_empty_preview_value(normalized_key):
+            continue
+
+        key = str(normalized_key)
+        if key in mapping:
+            raise ValueError(
+                f"组合变量的 key 列 '{key_column}' 存在重复值 '{key}'，无法生成唯一映射。"
+            )
+
+        mapping[key] = {
+            column: _normalize_preview_value(row[column])
+            for column in columns
+            if column != key_column
+        }
+        loaded_rows += 1
+
+    return mapping, loaded_rows
+
+
 def _get_excel_engine(source_path: Path) -> str:
-    """按扩展名显式选择 Excel 引擎，保证 xls 与 xlsx 行为清晰。"""
+    """按扩展名显式选择 Excel 引擎。"""
     if source_path.suffix.lower() == ".xls":
         return "xlrd"
     return "openpyxl"
@@ -365,6 +533,15 @@ def _build_excel_dependency_error(source_path: Path) -> str:
         "读取 .xlsx 文件需要安装 openpyxl 依赖，请执行 "
         "`pip install -r backend/requirements.txt` 或单独安装 `openpyxl`。"
     )
+
+
+def _is_empty_preview_value(value: Any) -> bool:
+    """判断预览值是否为空，用于组合变量过滤空 key。"""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
 
 
 def _normalize_preview_value(value: Any) -> Any:
@@ -385,5 +562,5 @@ def _normalize_preview_value(value: Any) -> Any:
 
 
 def _unique_preserve_order(items: Iterable[ItemT]) -> list[ItemT]:
-    # 去重但保持原有顺序，避免 usecols 顺序被打乱。
+    """去重但保持原有顺序，避免 usecols 顺序被打乱。"""
     return list(dict.fromkeys(items))

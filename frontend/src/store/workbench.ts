@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import {
   executeTaskTree,
   fetchColumnPreview,
+  fetchCompositePreview,
   fetchSourceCapabilities,
   fetchSourceMetadata,
 } from '../api/workbench'
@@ -172,6 +173,10 @@ export const useWorkbenchStore = defineStore('workbench', {
       return state.rules.filter((rule) => rule.mode === 'dynamic')
     },
 
+    singleVariables(state): VariableTag[] {
+      return state.variables.filter((variable) => (variable.variable_kind ?? 'single') === 'single')
+    },
+
     resultCount(state): number {
       return state.abnormalResults.length
     },
@@ -245,9 +250,16 @@ export const useWorkbenchStore = defineStore('workbench', {
 
       if (cached && !forceRefresh) {
         const cachedLoadsAllRows =
-          cached.loaded_all_rows ?? cached.preview_rows.length === cached.total_rows
+          cached.variable_kind === 'single'
+            ? cached.loaded_all_rows ?? cached.preview_rows.length === cached.total_rows
+            : cached.loaded_all_rows ?? (cached.loaded_rows ?? 0) === cached.total_rows
 
-        if ((wantsAllRows && cachedLoadsAllRows) || (!wantsAllRows && cached.preview_limit === limit)) {
+        const cachedMatchesLimit =
+          cached.variable_kind === 'single'
+            ? cached.preview_limit === limit
+            : wantsAllRows
+
+        if ((wantsAllRows && cachedLoadsAllRows) || (!wantsAllRows && cachedMatchesLimit)) {
           return cached
         }
       }
@@ -257,12 +269,20 @@ export const useWorkbenchStore = defineStore('workbench', {
         throw new Error(`变量 "${variable.tag}" 引用了不存在的数据源 "${variable.source_id}"。`)
       }
 
-      const response = await fetchColumnPreview({
-        source,
-        sheet: variable.sheet,
-        column: variable.column,
-        limit,
-      })
+      const response =
+        (variable.variable_kind ?? 'single') === 'composite'
+          ? await fetchCompositePreview({
+              source,
+              sheet: variable.sheet,
+              columns: variable.columns ?? [],
+              key_column: variable.key_column ?? '',
+            })
+          : await fetchColumnPreview({
+              source,
+              sheet: variable.sheet,
+              column: variable.column ?? '',
+              limit,
+            })
       this.variablePreviewMap[variable.tag] = response.data
       return response.data
     },
@@ -393,6 +413,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         tag: '[items-id]',
         source_id: sourceId,
         sheet: 'items',
+        variable_kind: 'single',
         column: 'ID',
         expected_type: 'str',
       })
@@ -400,6 +421,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         tag: '[drops-ref]',
         source_id: sourceId,
         sheet: 'drops',
+        variable_kind: 'single',
         column: 'RefID',
         expected_type: 'str',
       })

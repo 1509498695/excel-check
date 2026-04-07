@@ -26,7 +26,10 @@ class VariableTag(BaseModel):
     tag: str
     source_id: str
     sheet: str
-    column: str
+    variable_kind: Literal["single", "composite"] = "single"
+    column: str | None = None
+    columns: list[str] | None = None
+    key_column: str | None = None
     expected_type: Literal["int", "str", "json"] | None = None
 
 
