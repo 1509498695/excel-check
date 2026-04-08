@@ -2,6 +2,55 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-07 20:43
+
+### 本次目标
+- 收口步骤 3“规则编排”页面，只保留静态规则模板和静态规则配置区。
+- 隐藏动态规则配置入口，并避免隐藏的动态规则继续进入执行请求。
+- 完成前后端回归验证、启动项目并同步更新说明文档。
+
+### 本次完成
+- 收口 `frontend/src/components/workbench/RuleComposerPanel.vue`，删除动态规则可见区、`新增动态规则` 按钮和 JSON 编辑器。
+- 步骤 3 页面文案统一改为“当前仅开放静态规则模板配置”，不再向界面用户暴露动态规则入口。
+- 调整前端执行组包逻辑，执行时只提交静态规则；当前内存中的动态规则不会进入最终 `TaskTree.rules`。
+- 完成回归验证：
+  - `python -m pytest backend/tests -q` -> `12 passed`
+  - `cd frontend && npm run build` -> 通过
+- 重新启动本地前后端服务并确认：
+  - `http://127.0.0.1:8000/health` 返回 `200`
+  - `http://127.0.0.1:5173` 返回 `200`
+- 使用最小样例再次完成执行链路回归，结果保持：
+  - `msg = "Execution Completed"`
+  - `total_rows_scanned = 8`
+  - `failed_sources = []`
+  - `abnormal_results = 5`
+- 同步更新 `README.md`、`frontend/README.md`、`CHANGELOG.md`。
+
+### 当前项目进度
+- 模块 1 的本地数据源接入、单个变量、组合变量、详情预览和变量池仍保持可用。
+- 模块 4 当前继续只开放三类静态规则：`not_null`、`unique`、`cross_table_mapping`。
+- 动态规则底层类型兼容仍保留在前端状态和后端主契约中，但本轮已从步骤 3 页面隐藏，不再作为当前界面能力开放。
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 本次仅处理步骤 3 前端切片，不顺手扩展新的规则类型或第二个模块。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+
+### 未完成项与风险
+- 当前环境仍未提供浏览器自动化回放能力，步骤 3 页面可见性验证以代码变更、前端构建和运行态服务检查为主。
+- 动态规则底层兼容仍保留在代码中，后续如要彻底移除，需要单独开切片处理状态模型与协议清理。
+
+### 下一步建议
+1. 如果后续要继续收口规则能力，可以单独规划 `regex` 规则闭环，而不是重新开放动态规则编辑器。
+2. 若要进一步提升步骤 3 可用性，建议下一轮只做静态规则的筛选、排序或模板说明增强。
+
 ## 进度记录 2026-04-07 10:11
 
 ### 本次目标

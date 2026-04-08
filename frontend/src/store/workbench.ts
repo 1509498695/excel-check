@@ -161,7 +161,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       return {
         sources: state.sources,
         variables: state.variables,
-        rules: state.rules,
+        rules: state.rules.filter((rule) => rule.mode !== 'dynamic'),
       }
     },
 
@@ -530,7 +530,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     buildTaskTreePayload(): TaskTree {
-      return buildTaskTreePayload(this.sources, this.variables, this.rules)
+      return buildTaskTreePayload(this.sources, this.variables, this.staticRules)
     },
 
     async executeValidation(): Promise<void> {

@@ -166,43 +166,6 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
   return rule
 }
 
-function normalizeDynamicRule(rule: ValidationRule): ValidationRule {
-  const ruleType = trimValue(rule.rule_type)
-  if (!ruleType) {
-    throw new Error('动态规则缺少 rule_type。')
-  }
-
-  const rawText = trimValue(rule.draftState?.paramsText ?? '')
-  if (!rawText) {
-    return {
-      rule_id: rule.rule_id,
-      rule_type: ruleType,
-      params: {},
-    }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawText)
-  } catch (error) {
-    throw new Error(
-      `动态规则 "${ruleType}" 的参数 JSON 不合法：${
-        error instanceof Error ? error.message : '无法解析'
-      }。`,
-    )
-  }
-
-  if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error(`动态规则 "${ruleType}" 的参数必须是 JSON 对象。`)
-  }
-
-  return {
-    rule_id: rule.rule_id,
-    rule_type: ruleType,
-    params: parsed as Record<string, unknown>,
-  }
-}
-
 export function buildTaskTreePayload(
   sources: DataSource[],
   variables: VariableTag[],
@@ -228,13 +191,9 @@ export function buildTaskTreePayload(
     variableTags.add(variable.tag)
   })
 
-  const normalizedRules = rules.map((rule) => {
-    if (rule.mode === 'dynamic') {
-      return normalizeDynamicRule(rule)
-    }
-
-    return normalizeKnownRule(rule, variableTags)
-  })
+  const normalizedRules = rules
+    .filter((rule) => rule.mode !== 'dynamic')
+    .map((rule) => normalizeKnownRule(rule, variableTags))
 
   return {
     sources: normalizedSources,

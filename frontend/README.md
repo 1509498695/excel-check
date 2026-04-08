@@ -1,6 +1,17 @@
 # Excel Check Frontend
 
-文档更新时间：2026-04-07 14:36
+文档更新时间：2026-04-07 20:43
+
+## 2026-04-07 步骤 3 静态规则工作区收口说明
+- 步骤 3 当前只保留静态规则模板和静态规则配置区，不再展示动态规则配置侧栏。
+- 页面已移除 `新增动态规则` 按钮、`rule_type` 输入框、`params(JSON)` 编辑器和相关说明文案。
+- 执行请求现在只提交静态规则；即使内存里残留动态规则，也不会进入最终执行。
+- 本次回归结果：
+  - `python -m pytest backend/tests -q`：`12 passed`
+  - `cd frontend && npm run build`：通过
+  - `GET http://127.0.0.1:8000/health`：返回 `200`
+  - `GET http://127.0.0.1:5173`：返回 `200`
+  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
 
 ## 2026-04-07 组合变量对话框按钮位置调整说明
 - “添加组合变量”对话框现在会先显示可编辑表单区，再显示 `取消 / 保存变量` 操作区，最后显示 JSON 预览区。
@@ -57,7 +68,7 @@
   - `not_null`
   - `unique`
   - `cross_table_mapping`
-- 动态规则编辑区
+- 纯静态规则编排区
 - 调用 `/api/v1/sources/capabilities`
 - 调用 `/api/v1/sources/metadata`
 - 调用 `/api/v1/sources/column-preview`

@@ -836,8 +836,8 @@ a {
 }
 
 .rule-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.92fr);
+  display: flex;
+  flex-direction: column;
   gap: 18px;
 }
 
