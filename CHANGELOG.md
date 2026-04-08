@@ -1,10 +1,42 @@
 # 更新日志
 
-文档更新时间：2026-04-07 20:43
+文档更新时间：2026-04-08 18:52
 
 ## [Unreleased]
 
 ### 变更
+- 固定规则模块从“全局单文件配置”升级为“规则级文件绑定”，每条规则改为独立维护 `binding.file_path / binding.sheet / binding.column`。
+- 固定规则持久化结构升级为 `version = 2`，读取旧版配置时会自动迁移到新版规则级绑定结构。
+- 固定规则执行改为按所有规则聚合数据源，一键执行时会按 `(file_path, sheet)` 去重数据源、按 `(source, column)` 去重变量。
+- `/fixed-rules` 页面改为上下布局：上方规则组搜索与横向导航，下方规则列表、规则弹窗与结果看板。
+- `SVN 更新` 改为页面固定按钮，不再依赖开关；点击后会按所有已配置规则路径的父目录去重后统一执行更新。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q` => `21 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+- qa88 固定规则真样例已基于新版模型通过：
+  - `items.xls -> items -> INT_ID > 0` => `abnormal_results = 0`
+  - `items.xls -> items -> INT_ID > 10000` => `abnormal_results = 770`
+- 新增固定规则模块，提供独立页面 `/fixed-rules`，用于维护固定 Excel 文件、固定列、规则组和长期复用的固定规则。
+- 新增固定规则接口：
+  - `GET /api/v1/fixed-rules/config`
+  - `PUT /api/v1/fixed-rules/config`
+  - `POST /api/v1/fixed-rules/svn-update`
+  - `POST /api/v1/fixed-rules/execute`
+- 新增 `fixed_value_compare` 规则类型，支持单列常量比较 `eq / ne / gt / lt`，并继续复用统一结果结构。
+- 固定规则配置持久化到 `backend/.runtime/fixed-rules/default.json`，页面重新打开后会自动回填上次已保存配置。
+- 固定规则页面新增规则组搜索、规则数量徽标、规则分页与结果看板，默认执行全部规则组。
+- 当前环境缺少 `svn` CLI 时，固定规则模块的 `SVN 更新` 会返回明确降级提示，不阻断本地 Excel 主流程。
+- 基于 `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0` 的固定规则验收样例已经验证通过：
+  - `Execution Completed`
+  - `total_rows_scanned = 3917`
+  - `failed_sources = []`
+  - `abnormal_results = 0`
+- 反向压测 `INT_ID > 10000` 当前实测返回 `abnormal_results = 770`。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q` => `18 passed`
+  - `cd frontend && npm run build` => 通过
 - 步骤 3 的规则编排页面已收口为纯静态规则工作区，只保留静态规则模板和静态规则配置区。
 - 页面不再展示动态规则配置侧栏、`新增动态规则` 按钮、`rule_type` 输入框和 `params(JSON)` 编辑器。
 - 前端执行时现在只会提交静态规则，隐藏的动态规则不会再进入最终 `TaskTree.rules`。

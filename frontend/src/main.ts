@@ -7,6 +7,7 @@ import App from './App.vue'
 import { router } from './router'
 import { useWorkbenchStore } from './store/workbench'
 import './style.css'
+import './fixed-rules.css'
 
 const app = createApp(App)
 const pinia = createPinia()

@@ -18,6 +18,7 @@ Thumbs.db
 
 # Local runtime artifacts
 .codex/
+backend/.runtime/
 backend/.runtime_uploads/
 backend-server*.log
 frontend-server*.log

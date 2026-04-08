@@ -243,4 +243,10 @@ def _extract_rule_tags(rule: ValidationRule) -> list[str]:
             raise ValueError("Rule 'cross_table_mapping' requires params.target_tag.")
         return [dict_tag, target_tag]
 
+    if rule.rule_type == "fixed_value_compare":
+        target_tag = rule.params.get("target_tag")
+        if not isinstance(target_tag, str) or not target_tag:
+            raise ValueError("Rule 'fixed_value_compare' requires params.target_tag.")
+        return [target_tag]
+
     return []

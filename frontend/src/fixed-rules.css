@@ -1,0 +1,347 @@
+.rule-binding-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rule-binding-header,
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card {
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--shadow-panel);
+}
+
+.rule-binding-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 26px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.98)),
+    linear-gradient(120deg, rgba(255, 122, 26, 0.05), rgba(59, 130, 246, 0.04));
+}
+
+.rule-binding-header-main {
+  max-width: 780px;
+}
+
+.rule-binding-header-main h1 {
+  margin: 12px 0 0;
+  color: var(--text-main);
+  font-size: 1.72rem;
+  line-height: 1.12;
+  letter-spacing: -0.05em;
+}
+
+.rule-binding-header-main p {
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+.rule-binding-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rule-binding-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card {
+  padding: 20px 22px 22px;
+}
+
+.group-band-head,
+.rule-workspace-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.group-band-head strong,
+.rule-workspace-copy strong {
+  display: block;
+  color: var(--text-main);
+  font-size: 1rem;
+}
+
+.group-band-head p,
+.rule-workspace-copy p {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.group-band-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.group-band-search {
+  width: 240px;
+}
+
+.group-pill-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.group-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #fbfcff);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.group-pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.2);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.group-pill.is-active {
+  border-color: rgba(255, 122, 26, 0.28);
+  background: linear-gradient(180deg, rgba(255, 248, 241, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 16px 28px rgba(255, 122, 26, 0.08);
+}
+
+.group-pill-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group-pill-main strong {
+  min-width: 0;
+  font-size: 14px;
+}
+
+.group-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--brand-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.group-pill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.group-pill-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.group-pill-tag.is-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.rule-workspace-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rule-table-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.rule-name-cell,
+.rule-binding-cell,
+.rule-operator-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-name-cell strong,
+.rule-binding-top strong,
+.rule-operator-cell strong {
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.rule-name-cell span,
+.rule-binding-top span,
+.rule-operator-cell span,
+.rule-binding-cell small,
+.pagination-caption {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.rule-binding-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rule-empty-state {
+  margin-top: 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdff, #ffffff);
+}
+
+.rule-result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.svn-result-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.svn-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.svn-result-item strong {
+  color: var(--text-main);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.svn-result-item span,
+.svn-result-item small {
+  color: var(--text-soft);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.svn-result-item.is-error {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.96), #ffffff);
+}
+
+.rule-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.rule-dialog-hint {
+  margin-top: -2px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.rule-dialog-hint span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .rule-binding-header,
+  .group-band-head,
+  .rule-workspace-head,
+  .result-kpi-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .group-band-actions,
+  .rule-binding-actions {
+    justify-content: flex-start;
+  }
+
+  .group-band-search {
+    width: min(100%, 320px);
+  }
+
+  .rule-dialog-grid,
+  .rule-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .rule-binding-header,
+  .group-band-card,
+  .rule-workspace-card,
+  .rule-result-card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .rule-binding-header-main h1 {
+    font-size: 1.42rem;
+  }
+
+  .group-band-actions,
+  .rule-binding-actions,
+  .toolbar-actions {
+    width: 100%;
+  }
+
+  .group-pill-row,
+  .svn-result-list {
+    grid-template-columns: 1fr;
+  }
+
+  .pagination-caption {
+    display: none;
+  }
+}

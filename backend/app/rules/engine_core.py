@@ -57,4 +57,4 @@ def execute_rules(
     return abnormal_results
 
 
-from backend.app.rules import rule_basics, rule_cross  # noqa: E402,F401
+from backend.app.rules import rule_basics, rule_cross, rule_fixed  # noqa: E402,F401

@@ -1,0 +1,813 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  CircleCheckFilled,
+  Delete,
+  EditPen,
+  FolderOpened,
+  Plus,
+  RefreshRight,
+  Search,
+  VideoPlay,
+} from '@element-plus/icons-vue'
+
+import { pickLocalSourcePath } from '../api/workbench'
+import { useFixedRulesStore } from '../store/fixedRules'
+import type {
+  FixedRuleBinding,
+  FixedRuleDefinition,
+  FixedRuleOperator,
+} from '../types/fixedRules'
+
+const store = useFixedRulesStore()
+
+const isBootstrapping = ref(true)
+const isRuleDialogVisible = ref(false)
+const isRuleMetadataLoading = ref(false)
+const ruleDialogMode = ref<'create' | 'edit'>('create')
+const ruleMetadataMessage = ref('')
+const ruleForm = reactive<{
+  rule_id: string
+  group_id: string
+  rule_name: string
+  binding: FixedRuleBinding
+  operator: FixedRuleOperator
+  expected_value: string
+}>({
+  rule_id: '',
+  group_id: 'ungrouped',
+  rule_name: '',
+  binding: {
+    file_path: '',
+    sheet: '',
+    column: '',
+  },
+  operator: 'gt',
+  expected_value: '0',
+})
+
+const operatorOptions: Array<{ label: string; value: FixedRuleOperator }> = [
+  { label: '等于 (=)', value: 'eq' },
+  { label: '不等于 (!=)', value: 'ne' },
+  { label: '大于 (>)', value: 'gt' },
+  { label: '小于 (<)', value: 'lt' },
+]
+
+const invalidRuleIdSet = computed(() => new Set(store.invalidRuleIds))
+const invalidGroupIdSet = computed(() => new Set(store.invalidGroupIds))
+
+const ruleFormMetadata = computed(() => store.getMetadataByPath(ruleForm.binding.file_path))
+
+const ruleFormSheets = computed(() => ruleFormMetadata.value?.sheets ?? [])
+const ruleFormColumns = computed(() => {
+  const currentSheet = ruleFormSheets.value.find((sheet) => sheet.name === ruleForm.binding.sheet)
+  return currentSheet?.columns ?? []
+})
+
+const overviewItems = computed(() => [
+  { label: '规则组', value: store.allGroups.length },
+  { label: '规则总数', value: store.totalRuleCount },
+  { label: '固定路径', value: store.pathCount },
+  { label: '异常结果', value: store.abnormalResults.length },
+])
+
+const currentGroupCount = computed(
+  () => store.groupRuleCounts[store.selectedGroup.group_id] ?? 0,
+)
+
+const currentGroupPathCount = computed(() => {
+  const paths = new Set(
+    store.currentGroupRules.map((rule) => rule.binding.file_path.trim()).filter(Boolean),
+  )
+  return paths.size
+})
+
+const svnResultStats = computed(() => {
+  const successCount = store.svnUpdateResults.filter((item) => item.status === 'success').length
+  const failedCount = store.svnUpdateResults.length - successCount
+  return { successCount, failedCount }
+})
+
+const executionSummary = computed(() => {
+  if (!store.executionMeta) {
+    return {
+      title: '固定规则结果看板',
+      description: '保存规则后点击“执行全部规则”，这里会显示本轮扫描统计与异常明细。',
+    }
+  }
+
+  return {
+    title: `最近一次执行扫描 ${store.executionMeta.total_rows_scanned} 行`,
+    description: `失败数据源 ${store.executionMeta.failed_sources.length} 个，返回 ${store.abnormalResults.length} 条异常结果。`,
+  }
+})
+
+watch(
+  () => ruleForm.binding.sheet,
+  () => {
+    if (!ruleFormColumns.value.includes(ruleForm.binding.column)) {
+      ruleForm.binding.column = ruleFormColumns.value[0] ?? ''
+    }
+  },
+)
+
+onMounted(async () => {
+  try {
+    await store.loadConfig()
+  } catch {
+    // 页面错误由 store 托管，这里不重复覆盖。
+  } finally {
+    isBootstrapping.value = false
+  }
+})
+
+function createEmptyBinding(): FixedRuleBinding {
+  return {
+    file_path: '',
+    sheet: '',
+    column: '',
+  }
+}
+
+function extractFileName(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath
+}
+
+function getOperatorLabel(value: FixedRuleOperator): string {
+  return operatorOptions.find((item) => item.value === value)?.label ?? value
+}
+
+function buildRuleCondition(rule: FixedRuleDefinition): string {
+  return `${rule.binding.column} ${getOperatorLabel(rule.operator)} ${rule.expected_value}`
+}
+
+async function hydrateRuleBindingMetadata(filePath: string): Promise<void> {
+  const normalizedPath = filePath.trim()
+  if (!normalizedPath) {
+    ruleMetadataMessage.value = ''
+    return
+  }
+
+  isRuleMetadataLoading.value = true
+  ruleMetadataMessage.value = ''
+
+  try {
+    const metadata = await store.loadMetadataForPath(normalizedPath)
+    if (!metadata?.sheets.length) {
+      ruleMetadataMessage.value = '当前文件未读取到可用的 Sheet。'
+      return
+    }
+
+    const matchedSheet = metadata.sheets.find((sheet) => sheet.name === ruleForm.binding.sheet)
+    const nextSheet = matchedSheet?.name ?? metadata.sheets[0]?.name ?? ''
+    ruleForm.binding.sheet = nextSheet
+
+    const nextColumns = metadata.sheets.find((sheet) => sheet.name === nextSheet)?.columns ?? []
+    if (!nextColumns.includes(ruleForm.binding.column)) {
+      ruleForm.binding.column = nextColumns[0] ?? ''
+    }
+
+    ruleMetadataMessage.value = `已读取 ${extractFileName(normalizedPath)} 的 ${metadata.sheets.length} 个 Sheet。`
+  } catch (error) {
+    ruleMetadataMessage.value = error instanceof Error ? error.message : '读取规则文件结构失败。'
+    throw error
+  } finally {
+    isRuleMetadataLoading.value = false
+  }
+}
+
+async function handleChooseRuleFile(): Promise<void> {
+  try {
+    const response = await pickLocalSourcePath('local_excel')
+    if (response.msg === 'cancelled' || !response.data.selected_path) {
+      return
+    }
+
+    ruleForm.binding.file_path = response.data.selected_path
+    ruleForm.binding.sheet = ''
+    ruleForm.binding.column = ''
+    await hydrateRuleBindingMetadata(ruleForm.binding.file_path)
+    ElMessage.success('规则文件已选中，表结构已刷新。')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '选择规则文件失败。')
+  }
+}
+
+async function handleLoadRuleMetadata(): Promise<void> {
+  if (!ruleForm.binding.file_path.trim()) {
+    ElMessage.warning('请先填写规则文件路径。')
+    return
+  }
+
+  try {
+    await hydrateRuleBindingMetadata(ruleForm.binding.file_path)
+    ElMessage.success('规则文件结构读取成功。')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '读取规则文件结构失败。')
+  }
+}
+
+async function handleCreateGroup(): Promise<void> {
+  try {
+    const result = await ElMessageBox.prompt('输入新的规则组名称。', '新建规则组', {
+      confirmButtonText: '创建',
+      cancelButtonText: '取消',
+      inputPlaceholder: '例如：基础校验',
+      inputValidator: (value) => Boolean(value.trim()) || '规则组名称不能为空。',
+    })
+    store.createGroup(result.value)
+    ElMessage.success('规则组已创建。')
+  } catch {
+    // 用户取消时不提示。
+  }
+}
+
+async function handleRenameGroup(): Promise<void> {
+  if (store.selectedGroup.builtin) {
+    return
+  }
+
+  try {
+    const result = await ElMessageBox.prompt('修改当前规则组名称。', '编辑规则组', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: store.selectedGroup.group_name,
+      inputValidator: (value) => Boolean(value.trim()) || '规则组名称不能为空。',
+    })
+    store.renameGroup(store.selectedGroup.group_id, result.value)
+    ElMessage.success('规则组名称已更新。')
+  } catch {
+    // 用户取消时不提示。
+  }
+}
+
+async function handleRemoveGroup(): Promise<void> {
+  if (store.selectedGroup.builtin) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `删除规则组“${store.selectedGroup.group_name}”后，组内规则会自动迁移到“未分组”。`,
+      '删除规则组',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    store.removeGroup(store.selectedGroup.group_id)
+    ElMessage.success('规则组已删除，组内规则已迁移到未分组。')
+  } catch {
+    // 用户取消时不提示。
+  }
+}
+
+function openCreateRuleDialog(): void {
+  ruleDialogMode.value = 'create'
+  ruleForm.rule_id = ''
+  ruleForm.group_id = store.selectedGroup.group_id
+  ruleForm.rule_name = ''
+  ruleForm.binding = createEmptyBinding()
+  ruleForm.operator = 'gt'
+  ruleForm.expected_value = '0'
+  ruleMetadataMessage.value = ''
+  isRuleDialogVisible.value = true
+}
+
+async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
+  ruleDialogMode.value = 'edit'
+  ruleForm.rule_id = rule.rule_id
+  ruleForm.group_id = rule.group_id
+  ruleForm.rule_name = rule.rule_name
+  ruleForm.binding = { ...rule.binding }
+  ruleForm.operator = rule.operator
+  ruleForm.expected_value = rule.expected_value
+  ruleMetadataMessage.value = ''
+  isRuleDialogVisible.value = true
+
+  try {
+    await hydrateRuleBindingMetadata(rule.binding.file_path)
+  } catch {
+    // 错误提示已由上方消息条处理。
+  }
+}
+
+function validateRuleForm(): boolean {
+  if (!ruleForm.rule_name.trim()) {
+    ElMessage.warning('规则名称不能为空。')
+    return false
+  }
+  if (!ruleForm.binding.file_path.trim()) {
+    ElMessage.warning('请先选择规则文件路径。')
+    return false
+  }
+  if (!ruleForm.binding.sheet.trim()) {
+    ElMessage.warning('请先选择 Sheet。')
+    return false
+  }
+  if (!ruleForm.binding.column.trim()) {
+    ElMessage.warning('请先选择目标列。')
+    return false
+  }
+  if (!ruleForm.expected_value.trim()) {
+    ElMessage.warning('请填写比较值。')
+    return false
+  }
+  if ((ruleForm.operator === 'gt' || ruleForm.operator === 'lt') && Number.isNaN(Number(ruleForm.expected_value))) {
+    ElMessage.warning('大于/小于规则的比较值必须是合法数值。')
+    return false
+  }
+
+  return true
+}
+
+function handleSaveRule(): void {
+  if (!validateRuleForm()) {
+    return
+  }
+
+  store.upsertRule({
+    rule_id: ruleForm.rule_id || undefined,
+    group_id: ruleForm.group_id,
+    rule_name: ruleForm.rule_name,
+    binding: ruleForm.binding,
+    operator: ruleForm.operator,
+    expected_value: ruleForm.expected_value,
+  })
+  isRuleDialogVisible.value = false
+  ElMessage.success(ruleDialogMode.value === 'create' ? '规则已创建。' : '规则已更新。')
+}
+
+async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除规则“${rule.rule_name}”？`, '删除规则', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    store.removeRule(rule.rule_id)
+    ElMessage.success('规则已删除。')
+  } catch {
+    // 用户取消时不提示。
+  }
+}
+
+async function handleSaveConfig(): Promise<void> {
+  try {
+    await store.saveConfig()
+    ElMessage.success('固定规则配置已保存。')
+  } catch {
+    // 页面错误由 store 托管。
+  }
+}
+
+async function handleExecute(): Promise<void> {
+  try {
+    await store.executeConfig()
+    if (store.abnormalResults.length) {
+      ElMessage.warning(`执行完成，发现 ${store.abnormalResults.length} 条异常结果。`)
+      return
+    }
+    ElMessage.success('执行完成，当前没有命中异常。')
+  } catch {
+    // 页面错误由 store 托管。
+  }
+}
+
+async function handleSvnUpdate(): Promise<void> {
+  try {
+    await store.runSvnUpdate()
+    ElMessage.success(store.svnUpdateSummary || 'SVN 更新完成。')
+  } catch {
+    // 页面错误由 store 托管。
+  }
+}
+</script>
+
+<template>
+  <div class="fixed-rules-board rule-binding-board">
+    <header class="rule-binding-header">
+      <div class="rule-binding-header-main">
+        <span class="guide-badge">固定规则检查</span>
+        <h1>按规则绑定文件的一键校验工作区</h1>
+        <p>
+          每条规则独立维护文件路径、Sheet 和目标列，适合长期维护多份本地 Excel 校验规则。当前选中的规则组只影响查看和编辑，不影响“执行全部规则”。
+        </p>
+      </div>
+
+      <div class="rule-binding-actions">
+        <el-button :icon="CircleCheckFilled" plain :loading="store.isSaving" @click="handleSaveConfig">
+          保存配置
+        </el-button>
+        <el-button
+          :icon="RefreshRight"
+          plain
+          :loading="store.isUpdatingSvn"
+          :disabled="!store.canRunSvnUpdate"
+          @click="handleSvnUpdate"
+        >
+          SVN 更新
+        </el-button>
+        <el-button
+          type="primary"
+          :icon="VideoPlay"
+          :loading="store.isExecuting"
+          :disabled="!store.canExecute"
+          @click="handleExecute"
+        >
+          执行全部规则
+        </el-button>
+      </div>
+    </header>
+
+    <section class="overview-strip">
+      <div class="overview-grid">
+        <article v-for="item in overviewItems" :key="item.label" class="overview-item">
+          <div>
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
+        </article>
+      </div>
+      <div class="overview-actions">
+        <el-tag v-if="store.config.configured" type="success" effect="light" round>
+          已读取固定规则配置
+        </el-tag>
+        <el-tag v-else type="info" effect="light" round>
+          当前还没有已保存的固定规则配置
+        </el-tag>
+      </div>
+    </section>
+
+    <el-alert
+      v-if="store.pageError"
+      class="result-alert"
+      type="error"
+      show-icon
+      :closable="false"
+      :title="store.pageError"
+    />
+
+    <el-alert
+      v-if="store.invalidRuleIds.length"
+      class="result-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="当前存在待修复规则"
+      description="有规则缺少文件绑定或比较值不合法，页面会阻止执行，直到这些规则被修复或删除。"
+    />
+
+    <div class="rule-binding-layout" v-loading="isBootstrapping || store.isLoading">
+      <section class="group-band-card">
+        <div class="group-band-head">
+          <div>
+            <strong>规则组导航</strong>
+            <p>在上方快速切换查看分组，确认每个分组下有多少条规则以及是否存在待修复项。</p>
+          </div>
+
+          <div class="group-band-actions">
+            <el-input
+              v-model="store.groupKeyword"
+              class="group-band-search"
+              placeholder="搜索规则组"
+              :prefix-icon="Search"
+              clearable
+            />
+            <el-button :icon="Plus" plain @click="handleCreateGroup">新建规则组</el-button>
+          </div>
+        </div>
+
+        <div class="group-pill-row">
+          <button
+            v-for="group in store.filteredGroups"
+            :key="group.group_id"
+            type="button"
+            class="group-pill"
+            :class="{ 'is-active': group.group_id === store.selectedGroup.group_id }"
+            @click="store.setSelectedGroup(group.group_id)"
+          >
+            <div class="group-pill-main">
+              <strong>{{ group.group_name }}</strong>
+              <span class="group-pill-badge">
+                {{ store.groupRuleCounts[group.group_id] ?? 0 }}
+              </span>
+            </div>
+            <div class="group-pill-meta">
+              <span class="group-pill-tag">
+                {{ group.builtin ? '系统默认组' : '自定义组' }}
+              </span>
+              <span
+                v-if="invalidGroupIdSet.has(group.group_id)"
+                class="group-pill-tag is-danger"
+              >
+                待修复
+              </span>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <section class="rule-workspace-card">
+        <div class="rule-workspace-head">
+          <div class="rule-workspace-copy">
+            <div class="rule-workspace-title">
+              <strong>{{ store.selectedGroup.group_name }}</strong>
+              <el-tag type="info" effect="light" round>
+                当前组 {{ currentGroupCount }} 条规则
+              </el-tag>
+              <el-tag type="warning" effect="light" round>
+                当前组 {{ currentGroupPathCount }} 个固定路径
+              </el-tag>
+            </div>
+            <p>
+              规则列表里直接展示每条规则绑定的文件、Sheet 和目标列。新增规则时需要重新配置文件路径，执行时会自动聚合所有规则并一键校验。
+            </p>
+          </div>
+
+          <div class="toolbar-actions">
+            <el-button
+              :icon="EditPen"
+              plain
+              :disabled="store.selectedGroup.builtin"
+              @click="handleRenameGroup"
+            >
+              编辑组名
+            </el-button>
+            <el-button
+              :icon="Delete"
+              plain
+              :disabled="store.selectedGroup.builtin"
+              @click="handleRemoveGroup"
+            >
+              删除规则组
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreateRuleDialog">新增规则</el-button>
+          </div>
+        </div>
+
+        <div v-if="!store.currentGroupRules.length" class="compact-empty-state rule-empty-state">
+          当前规则组还没有规则，可以先新增一条绑定文件路径的固定规则。
+        </div>
+
+        <div v-else class="rule-table-shell">
+          <el-table class="workbench-table" :data="store.pagedCurrentGroupRules">
+            <el-table-column prop="rule_name" label="规则名称" min-width="220">
+              <template #default="{ row }">
+                <div class="rule-name-cell">
+                  <strong :class="{ 'fixed-invalid-text': invalidRuleIdSet.has(row.rule_id) }">
+                    {{ row.rule_name }}
+                  </strong>
+                  <span>{{ buildRuleCondition(row) }}</span>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="文件绑定" min-width="360">
+              <template #default="{ row }">
+                <div class="rule-binding-cell">
+                  <div class="rule-binding-top">
+                    <strong>{{ extractFileName(row.binding.file_path) }}</strong>
+                    <span>{{ row.binding.sheet }} / {{ row.binding.column }}</span>
+                  </div>
+                  <small>{{ row.binding.file_path }}</small>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="比较规则" min-width="180">
+              <template #default="{ row }">
+                <div class="rule-operator-cell">
+                  <span>{{ getOperatorLabel(row.operator) }}</span>
+                  <strong>{{ row.expected_value }}</strong>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <div class="table-actions">
+                  <el-button link type="primary" @click="openEditRuleDialog(row)">编辑</el-button>
+                  <el-button link type="danger" @click="handleRemoveRule(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div v-if="store.currentGroupRuleTotal > 20" class="fixed-pagination-row">
+            <span class="pagination-caption">
+              第 {{ store.currentPage }} 页 / 共 {{ store.currentGroupRuleTotal }} 条
+            </span>
+            <el-pagination
+              layout="prev, pager, next"
+              :page-size="20"
+              :total="store.currentGroupRuleTotal"
+              :current-page="store.currentPage"
+              @current-change="store.setCurrentPage"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="rule-result-card">
+        <div class="result-kpi-bar">
+          <div class="result-kpi-main">
+            <div class="result-kpi-icon">
+              <CircleCheckFilled />
+            </div>
+            <div>
+              <strong>{{ executionSummary.title }}</strong>
+              <p>{{ executionSummary.description }}</p>
+            </div>
+          </div>
+
+          <div class="result-kpi-progress">
+            <div class="progress-caption">
+              <span>执行耗时</span>
+              <strong>{{ store.executionMeta?.execution_time_ms ?? 0 }} ms</strong>
+            </div>
+            <el-progress
+              :percentage="store.executionMeta ? 100 : 0"
+              :show-text="false"
+              :stroke-width="8"
+              status="success"
+            />
+          </div>
+
+          <div class="overview-actions">
+            <el-tag v-if="store.executionMeta" type="success" effect="light" round>
+              已完成最近一次执行
+            </el-tag>
+            <el-tag v-else type="info" effect="light" round>
+              等待执行
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="result-summary">
+          <article class="summary-tile">
+            <span>扫描总行数</span>
+            <strong>{{ store.executionMeta?.total_rows_scanned ?? 0 }}</strong>
+          </article>
+          <article class="summary-tile">
+            <span>失败数据源</span>
+            <strong>{{ store.executionMeta?.failed_sources.length ?? 0 }}</strong>
+          </article>
+          <article class="summary-tile">
+            <span>异常结果</span>
+            <strong>{{ store.abnormalResults.length }}</strong>
+          </article>
+          <article class="summary-tile">
+            <span>固定路径</span>
+            <strong>{{ store.pathCount }}</strong>
+          </article>
+        </div>
+
+        <el-alert
+          v-if="store.svnUpdateSummary"
+          class="result-alert"
+          type="info"
+          show-icon
+          :closable="false"
+          :title="store.svnUpdateSummary"
+          :description="`成功 ${svnResultStats.successCount} 个，失败 ${svnResultStats.failedCount} 个。`"
+        />
+
+        <div v-if="store.svnUpdateResults.length" class="svn-result-list">
+          <article
+            v-for="item in store.svnUpdateResults"
+            :key="item.working_copy"
+            class="svn-result-item"
+            :class="{ 'is-error': item.status === 'error' }"
+          >
+            <strong>{{ item.working_copy }}</strong>
+            <span>{{ item.status === 'success' ? '更新成功' : '更新失败' }}</span>
+            <small>{{ item.output || item.error || '无额外输出' }}</small>
+          </article>
+        </div>
+
+        <div v-if="!store.abnormalResults.length" class="compact-empty-state rule-empty-state">
+          当前还没有异常结果。若规则与数据都满足要求，执行后这里会保持为空。
+        </div>
+
+        <el-table v-else class="workbench-table" :data="store.abnormalResults">
+          <el-table-column prop="rule_name" label="命中规则" min-width="200" />
+          <el-table-column prop="location" label="定位" min-width="240" />
+          <el-table-column prop="row_index" label="行号" width="100" />
+          <el-table-column prop="raw_value" label="原始值" min-width="160" />
+          <el-table-column prop="message" label="说明" min-width="240" />
+        </el-table>
+      </section>
+    </div>
+
+    <el-dialog
+      v-model="isRuleDialogVisible"
+      width="760px"
+      :title="ruleDialogMode === 'create' ? '新增固定规则' : '编辑固定规则'"
+    >
+      <el-form label-position="top" class="dialog-form">
+        <div class="rule-dialog-grid">
+          <el-form-item label="规则组">
+            <el-select v-model="ruleForm.group_id" class="full-width">
+              <el-option
+                v-for="group in store.allGroups"
+                :key="group.group_id"
+                :label="group.group_name"
+                :value="group.group_id"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="规则名称">
+            <el-input v-model="ruleForm.rule_name" placeholder="例如：INT_ID 必须大于 0" />
+          </el-form-item>
+        </div>
+
+        <el-form-item label="规则文件路径">
+          <div class="field-with-action">
+            <el-input
+              v-model="ruleForm.binding.file_path"
+              placeholder="选择或输入本地 Excel 文件路径"
+            />
+            <el-button :icon="FolderOpened" @click="handleChooseRuleFile">选择文件</el-button>
+            <el-button
+              plain
+              :icon="RefreshRight"
+              :loading="isRuleMetadataLoading"
+              @click="handleLoadRuleMetadata"
+            >
+              读取结构
+            </el-button>
+          </div>
+        </el-form-item>
+
+        <div class="rule-dialog-hint">
+          <span>{{ ruleMetadataMessage || '每新增一条规则，都需要绑定一份文件路径、Sheet 和目标列。' }}</span>
+        </div>
+
+        <div class="rule-grid">
+          <el-form-item label="Sheet">
+            <el-select
+              v-model="ruleForm.binding.sheet"
+              class="full-width"
+              placeholder="先读取文件结构"
+              filterable
+            >
+              <el-option
+                v-for="sheet in ruleFormSheets"
+                :key="sheet.name"
+                :label="sheet.name"
+                :value="sheet.name"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="目标列">
+            <el-select
+              v-model="ruleForm.binding.column"
+              class="full-width"
+              placeholder="先选择 Sheet"
+              filterable
+            >
+              <el-option
+                v-for="column in ruleFormColumns"
+                :key="column"
+                :label="column"
+                :value="column"
+              />
+            </el-select>
+          </el-form-item>
+        </div>
+
+        <div class="rule-grid">
+          <el-form-item label="比较符">
+            <el-select v-model="ruleForm.operator" class="full-width">
+              <el-option
+                v-for="operator in operatorOptions"
+                :key="operator.value"
+                :label="operator.label"
+                :value="operator.value"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="比较值">
+            <el-input
+              v-model="ruleForm.expected_value"
+              placeholder="eq/ne 输入精确值；gt/lt 输入数值"
+            />
+          </el-form-item>
+        </div>
+      </el-form>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="isRuleDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveRule">保存规则</el-button>
+        </div>
+      </template>
+    </el-dialog>
+  </div>
+</template>

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import FixedRulesBoard from '../views/FixedRulesBoard.vue'
 import MainBoard from '../views/MainBoard.vue'
 
 export const router = createRouter({
@@ -9,6 +10,11 @@ export const router = createRouter({
       path: '/',
       name: 'main-board',
       component: MainBoard,
+    },
+    {
+      path: '/fixed-rules',
+      name: 'fixed-rules-board',
+      component: FixedRulesBoard,
     },
   ],
 })

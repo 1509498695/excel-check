@@ -2,6 +2,143 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-08 18:52
+
+### 本次目标
+- 把固定规则模块从“全局单文件配置”升级为“每条规则独立绑定文件路径”的模型。
+- 将固定规则页面改为上方规则组导航、下方规则配置与结果区的纵向布局。
+- 完成 qa88 真样例联调、本地服务重启验证，并同步更新中文文档。
+
+### 本次完成
+- 后端固定规则配置结构升级为 `version = 2`，每条规则新增 `binding.file_path / binding.sheet / binding.column`。
+- 固定规则读取时支持旧版单文件配置自动迁移；执行时会按规则聚合数据源、按 `(file_path, sheet)` 去重数据源、按 `(source, column)` 去重变量。
+- `POST /api/v1/fixed-rules/svn-update` 改为聚合当前所有已配置规则路径，并按父目录去重后统一更新。
+- `/fixed-rules` 页面已调整为：
+  - 顶部固定操作条：`保存配置` / `SVN 更新` / `执行全部规则`
+  - 上方规则组搜索与横向导航
+  - 下方规则列表、规则弹窗与结果看板
+- 新增/编辑规则时必须逐条配置文件路径、Sheet、目标列和比较值；不再保留全局固定文件配置卡。
+- 完成回归验证：
+  - `python -m pytest backend/tests -q` -> `21 passed`
+  - `cd frontend && npm run build` -> 通过
+- 重启本地前后端服务并验证：
+  - `http://127.0.0.1:8000/health` -> `200`
+  - `http://127.0.0.1:5173` -> `200`
+  - `http://127.0.0.1:5173/fixed-rules` -> `200`
+- 使用 qa88 真样例完成固定规则验收：
+  - `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`
+  - `Execution Completed / total_rows_scanned = 3917 / failed_sources = [] / abnormal_results = 0`
+- 完成反向压测：
+  - `INT_ID > 10000`
+  - `Execution Completed / total_rows_scanned = 3917 / failed_sources = [] / abnormal_results = 770`
+- 回归旧工作台最小执行链路：
+  - `POST /api/v1/engine/execute`
+  - `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
+### 当前项目进度
+
+#### 已完成功能
+- 四步工作台仍可完成本地 Excel 校验主流程。
+- 固定规则模块已独立落地为 `/fixed-rules` 页面。
+- 固定规则支持规则组、规则 CRUD、规则级文件绑定、配置持久化和一键执行全部规则。
+- 固定规则支持固定显示的 `SVN 更新` 按钮，并按所有已配置路径聚合更新。
+- 后端继续保持统一执行入口、统一任务结构与统一结果结构稳定。
+
+#### 已实现但未打通 / 占位功能
+- `svn` CLI 仍未安装到当前环境，真实工作副本更新只完成接口级降级提示和聚合逻辑，尚未在本机形成完整同步闭环。
+- 飞书数据源与真实 SVN 数据源主流程仍为占位实现。
+- 动态规则平台能力仍未重新开放；步骤 3 继续是纯静态规则工作区。
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- `regex` 规则闭环
+- 结果筛选、高级搜索与报告导出
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 固定规则模块继续通过 `/api/v1/fixed-rules/*` 接口和后端内部临时 `TaskTree` 复用已有执行引擎。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+
+### 未完成项与风险
+- 当前没有浏览器自动化回放能力，固定规则页面的可见性交互仍以构建、接口回归和运行态访问为主。
+- 当前固定规则模块只支持本地 Excel 文件，不扩展到 CSV、飞书或多配置集。
+- 当前环境缺少 `svn` CLI，因此 `SVN 更新` 仍以明确降级提示为主。
+
+### 下一步建议
+1. 如果继续增强固定规则模块，建议单独规划“结果导出”或“多配置集切换”其中一个切片，不要与其他模块混做。
+2. 如果要推进真实 SVN 联动，建议先补环境检测、可执行文件配置和多工作副本冲突提示，再补页面操作流。
+
+## 进度记录 2026-04-08 18:02
+
+### 本次目标
+- 继续在 Codex worktree `C:\Users\chenzhen\.codex\worktrees\9ac8\excel-check` 收口固定规则模块，避免已有实现停留在 `detached HEAD`。
+- 完成固定规则模块的文档同步、qa88 实测验收、本地服务启动与联调说明补齐。
+- 保持四步工作台主流程、统一执行入口和统一结果结构稳定。
+
+### 本次完成
+- 在当前 worktree 创建本地分支 `feature/fixed-rules-module`，后续固定规则模块收尾都落在该分支。
+- 固定规则模块当前已在 worktree 中落地：
+  - 新增 `/fixed-rules` 前端页面
+  - 新增固定规则配置读写、执行和 SVN 更新接口
+  - 新增 `fixed_value_compare` 规则类型
+  - 支持规则组导航、规则 CRUD、规则分页与固定配置持久化
+- 重新执行固定规则模块回归验证：
+  - `python -m pytest backend/tests -q` -> `18 passed`
+  - `cd frontend && npm run build` -> 通过
+- 使用 qa88 真样例完成固定规则验收：
+  - 文件：`D:\projact_samo\GameDatas\datas_qa88\items.xls`
+  - Sheet：`items`
+  - 固定列：`INT_ID`
+  - 规则：`INT_ID > 0`
+  - 结果：`Execution Completed / total_rows_scanned = 3917 / failed_sources = [] / abnormal_results = 0`
+- 追加完成反向压测：
+  - `INT_ID > 10000`
+  - 结果：`Execution Completed / total_rows_scanned = 3917 / failed_sources = [] / abnormal_results = 770`
+- 确认当前环境在 `svn_enabled = true` 时会返回明确降级提示：
+  - `当前环境未检测到 svn 命令，请先安装 SVN CLI，或在后端配置中指定 svn 可执行文件路径。`
+- 同步更新 `README.md`、`frontend/README.md`、`CHANGELOG.md`、`CODEX_DEVELOPMENT_WORKFLOW.md`。
+
+### 当前项目进度
+- 原四步工作台继续保持可用：
+  - 模块 1：本地数据源、单变量、组合变量、元数据读取与详情预览可用
+  - 模块 4：`not_null`、`unique`、`cross_table_mapping` 三类静态规则可用
+- 固定规则模块已新增为独立工作页：
+  - 支持单个本地 Excel 文件、单个 Sheet、单份持久化配置
+  - 支持规则组和规则的长期维护
+  - 支持页面自动回填已保存配置
+  - 支持默认执行全部规则组
+- 动态规则主能力仍未重新开放；步骤 3 继续是纯静态规则工作区。
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 固定规则模块通过新增 `/api/v1/fixed-rules/*` 接口和后端内部临时 `TaskTree` 复用已有执行引擎，不复制第二套结果协议。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `CODEX_DEVELOPMENT_WORKFLOW.md`
+
+### 未完成项与风险
+- 当前环境仍没有浏览器自动化能力，`/fixed-rules` 的页面可见性与交互验证仍以构建、接口回归和运行态服务检查为主。
+- 固定规则模块第一版仍只支持单配置、单 Excel、单 Sheet，不支持多配置集、CSV、飞书或多文件固定规则。
+- 当前环境缺少 `svn` CLI，因此 `SVN 更新` 只有降级提示，尚未形成真实可用的工作副本同步闭环。
+
+### 下一步建议
+1. 如果要继续增强固定规则模块，可单独规划“结果导出”或“多配置集切换”其中一个切片，不要和其他模块混做。
+2. 如果要推进真实 SVN 联动，建议下一轮先补环境检测、可执行文件配置和工作副本冲突提示，再补页面操作流。
+
 ## 进度记录 2026-04-07 20:43
 
 ### 本次目标

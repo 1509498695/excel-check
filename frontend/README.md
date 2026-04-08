@@ -1,6 +1,40 @@
 # Excel Check Frontend
 
-文档更新时间：2026-04-07 20:43
+文档更新时间：2026-04-08 18:52
+
+## 2026-04-08 固定规则模块规则级文件绑定说明
+- `/fixed-rules` 页面已从“全局单文件配置”升级为“每条规则独立绑定文件路径、Sheet 和目标列”的固定规则工作区。
+- 页面布局改为上下结构：
+  - 上方是规则组搜索与横向分组导航
+  - 下方是当前规则组的规则配置列表、规则弹窗与结果看板
+- 顶部固定显示 `保存配置`、`SVN 更新`、`执行全部规则` 三个操作按钮。
+- `SVN 更新` 不再依赖开关，点击后会汇总当前所有已配置规则的固定路径，并按父目录去重后统一更新。
+- 固定规则配置结构已升级为 `version = 2`，规则本身通过 `binding.file_path / binding.sheet / binding.column` 维护自己的文件绑定。
+- 当前回归结果：
+  - `python -m pytest backend/tests -q`：`21 passed`
+  - `cd frontend && npm run build`：通过
+  - `http://127.0.0.1:5173/fixed-rules`：`200`
+  - qa88 验收样例：`items.xls -> items -> INT_ID > 0 -> abnormal_results = 0`
+
+## 2026-04-08 固定规则模块说明
+- 新增独立路由 `/fixed-rules`，作为“固定 Excel 文件 + 固定列 + 规则组”的长期复用校验页。
+- 固定规则页采用双栏企业后台布局：
+  - 左侧规则组搜索、规则组列表与规则数量徽标
+  - 右侧固定文件配置、当前组规则列表、分页与结果看板
+- 固定规则支持：
+  - 自动读取已保存配置
+  - 默认组 `未分组`
+  - 自定义规则组新增、改名、删除
+  - 单列常量比较规则 `eq / ne / gt / lt`
+- 固定规则后端接口：
+  - `GET /api/v1/fixed-rules/config`
+  - `PUT /api/v1/fixed-rules/config`
+  - `POST /api/v1/fixed-rules/svn-update`
+  - `POST /api/v1/fixed-rules/execute`
+- 当前回归结果：
+  - `python -m pytest backend/tests -q`：`18 passed`
+  - `cd frontend && npm run build`：通过
+  - qa88 固定规则验收样例：`items.xls -> items -> INT_ID > 0 -> abnormal_results = 0`
 
 ## 2026-04-07 步骤 3 静态规则工作区收口说明
 - 步骤 3 当前只保留静态规则模板和静态规则配置区，不再展示动态规则配置侧栏。
@@ -61,18 +95,29 @@
 ## 当前已实现内容
 
 - `MainBoard` 四步工作台页面
+- `/fixed-rules` 固定规则检查页面
 - `Pinia` 状态管理
-- `Vue Router` 单路由入口
+- `Vue Router` 双入口：
+  - `/`
+  - `/fixed-rules`
 - `Element Plus` 组件接入与主题化样式
 - 静态规则模板：
   - `not_null`
   - `unique`
   - `cross_table_mapping`
 - 纯静态规则编排区
+- 固定规则模块：
+  - 规则级文件绑定持久化
+  - 顶部规则组导航与计数
+  - 规则 CRUD 与文件结构读取
+  - 聚合执行结果看板
 - 调用 `/api/v1/sources/capabilities`
 - 调用 `/api/v1/sources/metadata`
 - 调用 `/api/v1/sources/column-preview`
 - 调用 `/api/v1/engine/execute`
+- 调用 `/api/v1/fixed-rules/config`
+- 调用 `/api/v1/fixed-rules/svn-update`
+- 调用 `/api/v1/fixed-rules/execute`
 - Vite 开发代理转发到 `http://127.0.0.1:8000`
 - 一键“填充联调示例”入口
 - 模块 1 的变量池页签化工作流：
@@ -208,12 +253,48 @@ npm run dev
 ### 默认访问地址
 
 - 前端工作台：`http://127.0.0.1:5173`
+- 固定规则页面：`http://127.0.0.1:5173/fixed-rules`
 - 后端健康检查：`http://127.0.0.1:8000/health`
 - 后端文档：`http://127.0.0.1:8000/docs`
+
+### 固定规则模块验收路径
+
+1. 启动后端：
+
+```powershell
+python backend/run.py
+```
+
+2. 启动前端：
+
+```powershell
+cd frontend
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+3. 打开 `http://127.0.0.1:5173/fixed-rules`
+4. 确认顶部可见固定的 `SVN 更新` 与 `执行全部规则` 按钮
+5. 新建规则组 `基础校验`
+6. 新建规则 `INT_ID 必须大于 0`
+7. 在规则弹窗中填写：
+   - 文件路径：`D:\projact_samo\GameDatas\datas_qa88\items.xls`
+   - Sheet：`items`
+   - 目标列：`INT_ID`
+   - 比较符：`gt`
+   - 比较值：`0`
+8. 点击“执行全部规则”
+
+当前实测结果：
+- `Execution Completed`
+- `total_rows_scanned = 3917`
+- `failed_sources = []`
+- `abnormal_results = 0`
 
 ## 当前未完成项
 
 - CSV 数据源的变量池下拉提取
+- 固定规则模块的多配置集切换
+- 固定规则结果导出
 - 真实拖拽式变量编排
 - 报告导出
 - 结果筛选与高级搜索

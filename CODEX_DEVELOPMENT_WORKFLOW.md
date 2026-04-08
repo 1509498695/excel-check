@@ -1,6 +1,6 @@
 # Codex 开发执行指南
 
-文档更新时间：2026-04-02 12:26
+文档更新时间：2026-04-08 18:02
 
 ## 目的
 
@@ -30,6 +30,11 @@
 2. 正则校验
 3. 动态规则检查和看板
 4. 静态规则检查和看板
+
+补充说明：
+
+- 允许新增独立补充页 `/fixed-rules`，用于“固定 Excel 文件 + 固定列 + 规则组”的长期复用校验场景。
+- `/fixed-rules` 不替代原四步工作台；它是额外补充能力，但仍需继续复用统一结果结构和后端规则引擎。
 
 这里要明确区分“页面模块划分”和“实际开发顺序”：
 
@@ -67,6 +72,12 @@
 - 目标：逐步把规则能力平台化。
 - 范围：`rule_type + params` 编辑、JSON 校验、未注册规则报错、已注册规则执行、统一看板复用。
 - 边界：第一阶段不追求“任意规则全支持”，先把最基本的输入校验和执行闭环做稳。
+
+### 补充页：固定规则检查
+
+- 目标：承接“固定文件、固定 Sheet、固定列、长期复用规则组”的校验场景。
+- 范围：`/fixed-rules` 页面、`/api/v1/fixed-rules/*` 接口、固定规则配置持久化、规则组导航与固定规则结果看板。
+- 边界：允许新增专用接口与页面，但执行结果仍保持 `code / msg / meta / data.abnormal_results` 一致，不破坏主工作台与 `POST /api/v1/engine/execute` 契约。
 
 ## 通用提示词模板
 
@@ -150,6 +161,8 @@
 
 - 保持 `POST /api/v1/engine/execute` 的主结构稳定，继续使用 `TaskTree -> sources / variables / rules`。
 - 保持标准响应结构稳定，继续使用 `code / msg / meta / data.abnormal_results`。
+- 允许新增 `/api/v1/fixed-rules/*` 专用接口，但其执行结果必须继续复用统一结果结构。
+- 固定规则模块允许由后端内部构造临时 `TaskTree` 复用既有执行引擎，而不是新建第二套执行协议。
 - 新规则优先复用现有 `ValidationRule.rule_type`，不要新增平行接口。
 - 数据源模型建议统一为：
   - 本地和 SVN 使用 `path`
@@ -164,10 +177,11 @@
 1. 后端有变更时运行：`python -m pytest backend/tests -q`
 2. 前端有变更时运行：`cd frontend && npm run build`
 3. 涉及联调时，用 `backend/tests/data/minimal_rules.xlsx` 跑一轮最小闭环
-4. 更新 `README.md`，同步项目当前全貌
-5. 向 `PROJECT_RECORD.md` 追加分钟级记录
-6. 形成阶段里程碑时，同步更新 `CHANGELOG.md`
-7. 最终总结必须写清：本次完成、验证结果、遗留风险、建议下一步
+4. 涉及固定规则模块时，再补跑一轮 `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0` 验收样例
+5. 更新 `README.md`，同步项目当前全貌
+6. 向 `PROJECT_RECORD.md` 追加分钟级记录
+7. 形成阶段里程碑时，同步更新 `CHANGELOG.md`
+8. 最终总结必须写清：本次完成、验证结果、遗留风险、建议下一步
 
 ## 当前推荐下一步
 

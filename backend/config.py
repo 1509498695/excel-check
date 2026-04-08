@@ -1,6 +1,7 @@
 """应用配置定义。"""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,17 @@ class Settings:
     port: int = 8000
     api_v1_prefix: str = "/api/v1"
     default_thread_pool_size: int = 4
+    backend_root: Path = field(default_factory=lambda: Path(__file__).resolve().parent)
+    runtime_dir: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent / ".runtime"
+    )
+    fixed_rules_config_path: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent
+        / ".runtime"
+        / "fixed-rules"
+        / "default.json"
+    )
+    svn_executable: str = "svn"
     supported_source_types: tuple[str, ...] = field(
         default_factory=lambda: ("local_excel", "local_csv", "feishu", "svn")
     )
