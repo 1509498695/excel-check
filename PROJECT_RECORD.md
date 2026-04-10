@@ -2,6 +2,245 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-10 16:21
+
+### 本次目标
+- 补齐 `/fixed-rules` 规则弹窗的默认规则名生成逻辑。
+- 把 `unique` 的用户可见文案统一收口为 `唯一校验`。
+- 在不修改固定规则后端协议的前提下，完成一次前端交互切片回归和文档同步。
+
+### 本次完成
+- `FixedRulesBoard.vue` 现在会按表单自动生成默认规则名：
+  - 比较类：`sheet-目标列-规则选择名称+值`
+  - 非比较类：`sheet-目标列-规则选择名称`
+- 默认规则名只在“用户未手动改名”时自动同步；如果用户主动修改或清空规则名称，后续字段变化不再自动覆盖。
+- 保存前继续保留 `规则名称不能为空` 的前端校验；由于有默认名称，正常新增流程无需手填，但用户主动清空后仍无法保存。
+- `unique` 的用户可见文案已统一改为 `唯一校验`，覆盖：
+  - 规则选择下拉
+  - 规则摘要
+  - 规则名称占位提示
+  - 默认规则名
+- 本次未改动固定规则后端协议和执行链路，`rule_type = unique` 保持不变。
+- 完成回归验证：
+  - `python -m pytest backend/tests -q` -> `29 passed`
+  - `cd frontend && npm run build` -> 通过
+- 运行中的本地服务继续可访问：
+  - `http://127.0.0.1:8000/health` -> `200`
+  - `http://127.0.0.1:5173` -> `200`
+  - `http://127.0.0.1:5173/fixed-rules` -> `200`
+- 固定规则与主工作台联调链路保持不变：
+  - `/fixed-rules` -> `Execution Completed / total_rows_scanned = 3 / failed_sources = [] / abnormal_results = 3`
+  - `/api/v1/engine/execute` -> `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
+### 当前项目进度
+
+#### 已完成功能
+- 四步工作台仍可完成本地 Excel 校验主流程。
+- 固定规则模块 `/fixed-rules` 当前已支持：
+  - 规则级文件绑定
+  - 规则组与规则 CRUD
+  - `version = 3` 配置持久化与旧版迁移
+  - 比较 / 非空 / 唯一三类固定规则
+  - 默认规则名自动生成与手动改名保护
+  - 聚合执行与统一结果看板
+  - `SVN 更新`
+
+#### 已实现但未打通 / 占位功能
+- `svn` 作为主工作台独立 `source` 类型的完整闭环仍未开放；当前已打通的是固定规则模块的工作副本更新能力。
+- 飞书数据源仍为占位实现。
+- 动态规则平台能力仍未重新开放；步骤 3 继续是纯静态规则工作区。
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- `regex` 规则闭环
+- 结果筛选、高级搜索与报告导出
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 固定规则模块继续通过 `/api/v1/fixed-rules/*` 和后端内部临时 `TaskTree` 复用已有执行引擎。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `需求文档.md`
+
+### 未完成项与风险
+- 当前终端环境没有浏览器自动化回放能力，本轮对“默认规则名自动同步”的验收以代码逻辑校验、前端构建和运行态服务可访问性为主。
+- 固定规则模块当前仍只支持本地 Excel 文件，不扩展到 CSV、飞书或多配置集。
+
+### 下一步建议
+1. 如果继续增强固定规则模块，优先考虑“结果导出”或“多配置集切换”其中一个切片。
+2. 如果后续继续扩展固定规则类型，建议继续沿用“默认规则名可自动生成，但用户手动改名优先”的交互约束。
+
+## 进度记录 2026-04-10 15:57
+
+### 本次目标
+- 扩展 `/fixed-rules` 的“新增固定规则”弹窗，把 `比较符` 收口为 `规则选择`，并新增 `非空校验`、`唯一校验`。
+- 升级固定规则配置协议，使固定规则模块不再只支持比较型规则。
+- 完成前后端联调回归，并同步更新主 README、前端 README、变更日志和需求文档。
+
+### 本次完成
+- 前端 `FixedRulesBoard` 已将弹窗标签改为 `规则选择`，下拉当前固定为 6 项：
+  - `等于 (=)`
+  - `不等于 (!=)`
+  - `大于 (>)`
+  - `小于 (<)`
+  - `非空校验`
+  - `唯一校验`
+- 比较类规则仍使用 `operator + expected_value`；非空和唯一规则会隐藏 `比较值`，保存时自动清理残留比较值。
+- 固定规则前端状态和后端协议已升级为显式 `rule_type`：
+  - `fixed_value_compare`
+  - `not_null`
+  - `unique`
+- 固定规则持久化结构已从 `version = 2` 升级为 `version = 3`；后端读取旧版比较型配置时会自动迁移，不要求手工清空旧数据。
+- 固定规则转临时 `TaskTree` 时已按 `rule_type` 分发到对应执行规则；`/fixed-rules` 结果中的 `rule_name` 和 `location` 也已补齐兼容读取。
+- 新增并通过固定规则相关后端测试，覆盖：
+  - `version = 3` 配置保存与读取
+  - `version = 2` 比较型旧配置自动迁移
+  - 比较 / 非空 / 唯一三类固定规则执行
+  - 混合规则集执行
+- 完成回归验证：
+  - `python -m pytest backend/tests -q` -> `29 passed`
+  - `cd frontend && npm run build` -> 通过
+- 已重启本地前后端服务并确认：
+  - `http://127.0.0.1:8000/health` -> `200`
+  - `http://127.0.0.1:5173` -> `200`
+  - `http://127.0.0.1:5173/fixed-rules` -> `200`
+- 使用运行中的固定规则服务完成一次真实最小联调：
+  - 规则：`INT_ID > 0`、`INT_ID 非空`、`INT_ID 唯一校验`
+  - 结果：`Execution Completed / total_rows_scanned = 3 / failed_sources = [] / abnormal_results = 3`
+- 主工作台最小链路再次回归：
+  - `POST /api/v1/engine/execute`
+  - `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
+### 当前项目进度
+
+#### 已完成功能
+- 四步工作台仍可完成本地 Excel 校验主流程。
+- 固定规则模块 `/fixed-rules` 当前已支持：
+  - 规则级文件绑定
+  - 规则组与规则 CRUD
+  - `version = 3` 配置持久化与旧版迁移
+  - 比较 / 非空 / 唯一三类固定规则
+  - 聚合执行与统一结果看板
+  - `SVN 更新`
+
+#### 已实现但未打通 / 占位功能
+- `svn` 作为主工作台独立 `source` 类型的完整闭环仍未开放；当前已打通的是固定规则模块的工作副本更新能力。
+- 飞书数据源仍为占位实现。
+- 动态规则平台能力仍未重新开放；步骤 3 继续是纯静态规则工作区。
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- `regex` 规则闭环
+- 结果筛选、高级搜索与报告导出
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 固定规则模块继续通过 `/api/v1/fixed-rules/*` 和后端内部临时 `TaskTree` 复用已有执行引擎。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `需求文档.md`
+
+### 未完成项与风险
+- 当前终端环境仍没有浏览器自动化回放能力，本轮以前后端构建、运行态访问和真实接口回归作为联调依据。
+- 固定规则模块当前仍只支持本地 Excel 文件，不扩展到 CSV、飞书或多配置集。
+
+### 下一步建议
+1. 如果继续增强固定规则模块，优先考虑“结果导出”或“多配置集切换”其中一个切片。
+2. 如果后续需要让固定规则支持更多规则类型，建议继续沿用 `rule_type + 条件字段` 的协议方式，不再回到单一比较模型。
+
+## 进度记录 2026-04-09 12:28
+
+### 本次目标
+- 修复固定规则模块在当前 Windows 环境下无法发现 `svn.exe` 的问题。
+- 完成 `/fixed-rules` 的真实 `SVN 更新` 联调，并确认共享执行链路不受影响。
+- 同步更新项目说明、前端说明、变更日志和需求文档。
+
+### 本次完成
+- 后端 `svn` 发现逻辑已改为分层解析：
+  - 显式配置的 `svn_executable`
+  - `PATH` 中的 `svn`
+  - Windows 下 TortoiseSVN 常见安装路径与注册表信息
+- `backend/config.py` 已支持环境变量 `SVN_EXECUTABLE` 覆盖默认值，未设置时仍回退到 `svn`。
+- 新增 `backend/tests/test_svn_manager.py`，覆盖：
+  - 显式绝对路径命中
+  - `PATH` 命中
+  - Windows 自动探测命中
+  - 更新成功返回 `used_executable`
+  - CLI 缺失时的明确中文错误
+- 完成回归验证：
+  - `python -m pytest backend/tests -q` -> `26 passed`
+  - `cd frontend && npm run build` -> 通过
+- 重启本地前后端服务并确认：
+  - `http://127.0.0.1:8000/health` -> `200`
+  - `http://127.0.0.1:5173` -> `200`
+  - `http://127.0.0.1:5173/fixed-rules` -> `200`
+- 使用运行中的固定规则服务完成真实 `SVN 更新` 联调：
+  - 工作副本：`D:\projact_samo\GameDatas\datas_qa88`
+  - `updated_paths = 1`
+  - `used_executable = C:\Program Files\TortoiseSVN\bin\svn.exe`
+  - `output = Updating '.' / At revision 449960.`
+- 运行中的固定规则执行保持通过：
+  - `items.xls -> items -> INT_ID > 0`
+  - `Execution Completed / total_rows_scanned = 3917 / failed_sources = [] / abnormal_results = 0`
+- 回归主工作台最小链路：
+  - `POST /api/v1/engine/execute`
+  - `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
+### 当前项目进度
+
+#### 已完成功能
+- 四步工作台本地 Excel 校验主流程可用。
+- 固定规则模块 `/fixed-rules` 已支持规则组、规则 CRUD、规则级文件绑定、配置持久化和一键执行全部规则。
+- 固定规则模块的 `SVN 更新` 现在已能在当前 Windows 环境下真实执行工作副本更新。
+- 后端继续保持统一执行入口、统一任务结构与统一结果结构稳定。
+
+#### 已实现但未打通 / 占位功能
+- `svn` 作为主工作台独立 `source` 类型的完整闭环仍未开放；当前已打通的是固定规则模块的工作副本更新能力。
+- 飞书数据源仍为占位实现。
+- 动态规则平台能力仍未重新开放；步骤 3 继续是纯静态规则工作区。
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- `regex` 规则闭环
+- 结果筛选、高级搜索与报告导出
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变。
+- 保持 `TaskTree -> sources / variables / rules` 不变。
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变。
+- 固定规则模块继续通过 `/api/v1/fixed-rules/*` 接口和后端内部临时 `TaskTree` 复用已有执行引擎。
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `需求文档.md`
+
+### 未完成项与风险
+- 当前终端环境没有浏览器自动化回放能力，本轮以运行中接口、路由可访问性和真实更新结果作为固定规则联调依据。
+- 当前自动探测优先围绕 Windows + TortoiseSVN 场景实现；若后续环境更换为其他 SVN CLI 发行版，建议通过 `SVN_EXECUTABLE` 显式覆盖。
+- 固定规则模块仍只支持本地 Excel 文件，不扩展到 CSV、飞书或多配置集。
+
+### 下一步建议
+1. 如果后续要推进 SVN 主流程，建议单独补“`svn` 作为 source 类型”这一切片，不与固定规则继续混做。
+2. 如果继续增强固定规则模块，优先考虑“结果导出”或“多配置集切换”其中一个切片。
+
 ## 进度记录 2026-04-08 18:52
 
 ### 本次目标

@@ -11,6 +11,7 @@ import type {
   FixedRuleBinding,
   FixedRuleDefinition,
   FixedRuleGroup,
+  FixedRuleOperator,
   FixedRulesConfig,
   FixedRulesSvnUpdateItem,
 } from '../types/fixedRules'
@@ -44,7 +45,7 @@ interface FixedRulesState {
 
 function createDefaultConfig(): FixedRulesConfig {
   return {
-    version: 2,
+    version: 3,
     configured: false,
     groups: [{ ...UNGROUPED_GROUP }],
     rules: [],
@@ -79,6 +80,20 @@ function normalizeBinding(binding: FixedRuleBinding): FixedRuleBinding {
     sheet: binding.sheet.trim(),
     column: binding.column.trim(),
   }
+}
+
+function normalizeExpectedValue(value: string | undefined): string | undefined {
+  const normalized = value?.trim() ?? ''
+  return normalized ? normalized : undefined
+}
+
+function isCompareRule(
+  rule: Pick<FixedRuleDefinition, 'rule_type' | 'operator'>,
+): rule is Pick<FixedRuleDefinition, 'rule_type' | 'operator'> & {
+  rule_type: 'fixed_value_compare'
+  operator: FixedRuleOperator
+} {
+  return rule.rule_type === 'fixed_value_compare' && Boolean(rule.operator)
 }
 
 export const useFixedRulesStore = defineStore('fixed-rules', {
@@ -161,10 +176,13 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           if (!rule.binding.file_path.trim() || !rule.binding.sheet.trim() || !rule.binding.column.trim()) {
             return true
           }
-          if (!rule.expected_value.trim()) {
+          if (!/\.xlsx?$/i.test(rule.binding.file_path.trim())) {
             return true
           }
-          if (!/\.xlsx?$/i.test(rule.binding.file_path.trim())) {
+          if (!isCompareRule(rule)) {
+            return false
+          }
+          if (!normalizeExpectedValue(rule.expected_value)) {
             return true
           }
           if ((rule.operator === 'gt' || rule.operator === 'lt') && Number.isNaN(Number(rule.expected_value))) {
@@ -387,8 +405,12 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         group_id: rule.group_id,
         rule_name: rule.rule_name.trim(),
         binding: normalizeBinding(rule.binding),
-        operator: rule.operator,
-        expected_value: rule.expected_value.trim(),
+        rule_type: rule.rule_type,
+        operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
+        expected_value:
+          rule.rule_type === 'fixed_value_compare'
+            ? normalizeExpectedValue(rule.expected_value)
+            : undefined,
       }
 
       const index = this.config.rules.findIndex((item) => item.rule_id === nextRule.rule_id)

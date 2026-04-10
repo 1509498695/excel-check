@@ -22,6 +22,8 @@ from backend.config import settings
 
 
 FIXED_RULES_SOURCE_PREFIX = "fixed_source"
+FIXED_RULES_CONFIG_VERSION = 3
+SUPPORTED_FIXED_RULE_TYPES = {"fixed_value_compare", "not_null", "unique"}
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SUPPORTED_FIXED_RULE_SUFFIXES = {".xls", ".xlsx"}
 LEGACY_FIXED_RULE_KEYS = {"file_path", "sheet", "columns", "svn_enabled"}
@@ -30,7 +32,7 @@ LEGACY_FIXED_RULE_KEYS = {"file_path", "sheet", "columns", "svn_enabled"}
 def build_default_fixed_rules_config() -> FixedRulesConfig:
     """返回未配置状态下的固定规则默认结构。"""
     return FixedRulesConfig(
-        version=2,
+        version=FIXED_RULES_CONFIG_VERSION,
         configured=False,
         groups=[_build_default_group()],
         rules=[],
@@ -171,13 +173,8 @@ def build_fixed_rules_task_tree(config: FixedRulesConfig) -> TaskTree:
         task_rules.append(
             ValidationRule(
                 rule_id=rule.rule_id,
-                rule_type="fixed_value_compare",
-                params={
-                    "target_tag": target_tag,
-                    "operator": rule.operator,
-                    "expected_value": rule.expected_value,
-                    "rule_name": rule.rule_name,
-                },
+                rule_type=rule.rule_type,
+                params=_build_fixed_rule_params(rule, target_tag),
             )
         )
 
@@ -198,7 +195,7 @@ def validate_and_normalize_fixed_rules_config(
     )
 
     return FixedRulesConfig(
-        version=2,
+        version=FIXED_RULES_CONFIG_VERSION,
         configured=True,
         groups=groups,
         rules=normalized_rules,
@@ -213,7 +210,25 @@ def _parse_fixed_rules_payload(payload: object) -> FixedRulesConfig:
     if LEGACY_FIXED_RULE_KEYS.intersection(payload):
         return _migrate_legacy_payload(payload)
 
+    if _requires_v2_migration(payload):
+        return _migrate_v2_payload(payload)
+
     return FixedRulesConfig.model_validate(payload)
+
+
+def _requires_v2_migration(payload: dict[str, object]) -> bool:
+    """识别旧版 version=2 固定规则配置，补上显式 rule_type。"""
+    if int(payload.get("version") or 0) == 2:
+        return True
+
+    raw_rules = payload.get("rules")
+    if not isinstance(raw_rules, list):
+        return False
+
+    return any(
+        isinstance(raw_rule, dict) and "rule_type" not in raw_rule
+        for raw_rule in raw_rules
+    )
 
 
 def _migrate_legacy_payload(payload: dict[str, object]) -> FixedRulesConfig:
@@ -244,13 +259,46 @@ def _migrate_legacy_payload(payload: dict[str, object]) -> FixedRulesConfig:
                     "sheet": sheet,
                     "column": column,
                 },
+                "rule_type": "fixed_value_compare",
                 "operator": raw_rule.get("operator"),
                 "expected_value": raw_rule.get("expected_value", ""),
             }
         )
 
     migrated_payload = {
-        "version": 2,
+        "version": FIXED_RULES_CONFIG_VERSION,
+        "configured": bool(payload.get("configured", False)),
+        "groups": payload.get("groups") or [],
+        "rules": migrated_rules,
+    }
+    return FixedRulesConfig.model_validate(migrated_payload)
+
+
+def _migrate_v2_payload(payload: dict[str, object]) -> FixedRulesConfig:
+    """把旧版比较型固定规则配置补齐为显式 rule_type 结构。"""
+    raw_rules = payload.get("rules") or []
+    if not isinstance(raw_rules, list):
+        raise ValueError("旧版固定规则配置中的 rules 字段格式不正确。")
+
+    migrated_rules: list[dict[str, object]] = []
+    for raw_rule in raw_rules:
+        if not isinstance(raw_rule, dict):
+            raise ValueError("旧版固定规则配置中的单条规则格式不正确。")
+
+        migrated_rules.append(
+            {
+                "rule_id": raw_rule.get("rule_id", ""),
+                "group_id": raw_rule.get("group_id") or UNGROUPED_GROUP_ID,
+                "rule_name": raw_rule.get("rule_name", ""),
+                "binding": raw_rule.get("binding") or {},
+                "rule_type": raw_rule.get("rule_type") or "fixed_value_compare",
+                "operator": raw_rule.get("operator"),
+                "expected_value": raw_rule.get("expected_value"),
+            }
+        )
+
+    migrated_payload = {
+        "version": FIXED_RULES_CONFIG_VERSION,
         "configured": bool(payload.get("configured", False)),
         "groups": payload.get("groups") or [],
         "rules": migrated_rules,
@@ -329,8 +377,9 @@ def _normalize_rules(
         rule_id = rule.rule_id.strip()
         group_id = rule.group_id.strip() or UNGROUPED_GROUP_ID
         rule_name = rule.rule_name.strip()
-        operator = rule.operator.strip()
-        expected_value = rule.expected_value.strip()
+        rule_type = str(rule.rule_type).strip()
+        operator = rule.operator.strip() if rule.operator else ""
+        expected_value = rule.expected_value.strip() if rule.expected_value else ""
 
         if not rule_id:
             raise ValueError("固定规则缺少 rule_id。")
@@ -340,17 +389,25 @@ def _normalize_rules(
             raise ValueError(f"固定规则 '{rule_id}' 引用了不存在的规则组 '{group_id}'。")
         if not rule_name:
             raise ValueError(f"固定规则 '{rule_id}' 缺少 rule_name。")
-        if operator not in SUPPORTED_FIXED_RULE_OPERATORS:
-            raise ValueError(f"固定规则 '{rule_id}' 使用了不支持的比较符 '{operator}'。")
-        if not expected_value:
-            raise ValueError(f"固定规则 '{rule_id}' 缺少 expected_value。")
-        if operator in {"gt", "lt"}:
-            try:
-                float(expected_value)
-            except ValueError as exc:
-                raise ValueError(
-                    f"固定规则 '{rule_id}' 的 expected_value 必须是合法数值。"
-                ) from exc
+        if rule_type not in SUPPORTED_FIXED_RULE_TYPES:
+            raise ValueError(f"固定规则 '{rule_id}' 使用了不支持的规则类型 '{rule_type}'。")
+
+        normalized_operator: str | None = None
+        normalized_expected_value: str | None = None
+        if rule_type == "fixed_value_compare":
+            if operator not in SUPPORTED_FIXED_RULE_OPERATORS:
+                raise ValueError(f"固定规则 '{rule_id}' 使用了不支持的比较符 '{operator}'。")
+            if not expected_value:
+                raise ValueError(f"固定规则 '{rule_id}' 缺少 expected_value。")
+            if operator in {"gt", "lt"}:
+                try:
+                    float(expected_value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"固定规则 '{rule_id}' 的 expected_value 必须是合法数值。"
+                    ) from exc
+            normalized_operator = operator
+            normalized_expected_value = expected_value
 
         binding = _normalize_rule_binding(
             rule.rule_id,
@@ -363,8 +420,9 @@ def _normalize_rules(
                 group_id=group_id,
                 rule_name=rule_name,
                 binding=binding,
-                operator=operator,
-                expected_value=expected_value,
+                rule_type=rule_type,
+                operator=normalized_operator,
+                expected_value=normalized_expected_value,
             )
         )
         seen_rule_ids.add(rule_id)
@@ -454,3 +512,26 @@ def _build_fixed_source_id(index: int) -> str:
 def _build_fixed_variable_tag(*, source_id: str, sheet: str, column: str) -> str:
     """生成固定规则执行时使用的内部变量标签。"""
     return f"[fixed-{source_id}-{sheet}-{column}]"
+
+
+def _build_fixed_rule_params(
+    rule: FixedRuleDefinition,
+    target_tag: str,
+) -> dict[str, object]:
+    """把固定规则定义转换为统一执行入口可消费的规则参数。"""
+    location = f"{rule.binding.sheet} -> {rule.binding.column}"
+
+    if rule.rule_type == "fixed_value_compare":
+        return {
+            "target_tag": target_tag,
+            "operator": rule.operator,
+            "expected_value": rule.expected_value,
+            "rule_name": rule.rule_name,
+            "location": location,
+        }
+
+    return {
+        "target_tags": [target_tag],
+        "rule_name": rule.rule_name,
+        "location": location,
+    }

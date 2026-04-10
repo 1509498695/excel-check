@@ -7,6 +7,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+FixedRuleType = Literal["fixed_value_compare", "not_null", "unique"]
+FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
+
+
 UNGROUPED_GROUP_ID = "ungrouped"
 UNGROUPED_GROUP_NAME = "未分组"
 
@@ -40,8 +44,9 @@ class FixedRuleDefinition(BaseModel):
     group_id: str
     rule_name: str
     binding: FixedRuleBinding
-    operator: Literal["eq", "ne", "gt", "lt"]
-    expected_value: str
+    rule_type: FixedRuleType = "fixed_value_compare"
+    operator: FixedRuleOperator | None = None
+    expected_value: str | None = None
 
 
 class FixedRulesConfig(BaseModel):
@@ -49,7 +54,7 @@ class FixedRulesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int = 2
+    version: int = 3
     configured: bool = False
     groups: list[FixedRuleGroup] = Field(default_factory=list)
     rules: list[FixedRuleDefinition] = Field(default_factory=list)

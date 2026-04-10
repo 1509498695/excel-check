@@ -1,6 +1,8 @@
 import type { AbnormalResult, ExecutionMeta } from './workbench'
 
 export type FixedRuleOperator = 'eq' | 'ne' | 'gt' | 'lt'
+export type FixedRuleType = 'fixed_value_compare' | 'not_null' | 'unique'
+export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique'
 
 export interface FixedRuleBinding {
   file_path: string
@@ -19,8 +21,9 @@ export interface FixedRuleDefinition {
   group_id: string
   rule_name: string
   binding: FixedRuleBinding
-  operator: FixedRuleOperator
-  expected_value: string
+  rule_type: FixedRuleType
+  operator?: FixedRuleOperator
+  expected_value?: string
 }
 
 export interface FixedRulesConfig {

@@ -1,6 +1,49 @@
 # Excel Check Frontend
 
-文档更新时间：2026-04-08 18:52
+文档更新时间：2026-04-10 16:21
+
+## 2026-04-10 固定规则默认命名与唯一校验文案说明
+- `/fixed-rules` 的 `规则名称` 现在会自动生成默认值：
+  - 比较类：`sheet-目标列-规则选择名称+值`
+  - 非比较类：`sheet-目标列-规则选择名称`
+- 默认名称仅在用户未手动改名时自动同步；如果用户主动修改或清空规则名称，后续字段变化不再覆盖，且空名称不能保存。
+- `unique` 的所有用户可见文案已统一改为 `唯一校验`。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q`：`29 passed`
+  - `cd frontend && npm run build`：通过
+  - `http://127.0.0.1:5173/fixed-rules`：`200`
+
+## 2026-04-10 固定规则“规则选择”弹窗扩展说明
+- `/fixed-rules` 规则弹窗中的 `比较符` 已改名为 `规则选择`。
+- 下拉选项当前固定为：
+  - `等于 (=)`
+  - `不等于 (!=)`
+  - `大于 (>)`
+  - `小于 (<)`
+  - `非空校验`
+  - `唯一校验`
+- 当前仅比较类规则显示 `比较值`；选择 `非空校验` 或 `唯一校验` 时，表单会隐藏 `比较值` 并在保存前清理残留值。
+- 固定规则前端状态已兼容 `rule_type`：
+  - `fixed_value_compare`
+  - `not_null`
+  - `unique`
+- 固定规则页摘要文案和规则列表已同步改为泛化规则表达，不再把全部规则都渲染为“比较规则”。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q`：`29 passed`
+  - `cd frontend && npm run build`：通过
+  - `http://127.0.0.1:5173/fixed-rules`：`200`
+
+## 2026-04-09 固定规则模块 SVN 联调修复说明
+- `/fixed-rules` 页面无需新增配置表单，继续复用现有 `SVN 更新` 按钮和结果区。
+- 后端已经补齐 Windows 下的 `svn.exe` 自动探测逻辑；当 shell 的 `PATH` 配错时，仍可自动命中 TortoiseSVN 安装路径。
+- 本机当前实测 `SVN 更新` 已通过：
+  - `updated_paths = 1`
+  - `used_executable = C:\Program Files\TortoiseSVN\bin\svn.exe`
+  - `output = Updating '.' / At revision 449960.`
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q`：`26 passed`
+  - `cd frontend && npm run build`：通过
+  - `http://127.0.0.1:5173/fixed-rules`：`200`
 
 ## 2026-04-08 固定规则模块规则级文件绑定说明
 - `/fixed-rules` 页面已从“全局单文件配置”升级为“每条规则独立绑定文件路径、Sheet 和目标列”的固定规则工作区。
@@ -108,8 +151,10 @@
 - 纯静态规则编排区
 - 固定规则模块：
   - 规则级文件绑定持久化
+  - `version = 3` 配置结构与旧版比较规则自动迁移
   - 顶部规则组导航与计数
   - 规则 CRUD 与文件结构读取
+  - `规则选择` 弹窗与比较 / 非空 / 唯一三类固定规则
   - 聚合执行结果看板
 - 调用 `/api/v1/sources/capabilities`
 - 调用 `/api/v1/sources/metadata`
@@ -200,7 +245,7 @@ npm install
 启动开发环境：
 
 ```powershell
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 构建生产包：
@@ -238,7 +283,7 @@ python backend/run.py
 2. 在 `frontend` 目录启动前端：
 
 ```powershell
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 3. 打开 `http://127.0.0.1:5173`
@@ -280,15 +325,27 @@ npm run dev -- --host 127.0.0.1 --port 5173
    - 文件路径：`D:\projact_samo\GameDatas\datas_qa88\items.xls`
    - Sheet：`items`
    - 目标列：`INT_ID`
-   - 比较符：`gt`
+   - 规则选择：`大于 (>)`
    - 比较值：`0`
-8. 点击“执行全部规则”
+8. 如需验证扩展后的弹窗能力，可继续新增：
+   - `INT_ID 不能为空`，规则选择：`非空校验`
+   - `INT_ID 唯一校验`，规则选择：`唯一校验`
+9. 点击“SVN 更新”
+10. 确认结果区返回：
+   - `updated_paths = 1`
+   - `used_executable = C:\Program Files\TortoiseSVN\bin\svn.exe`
+11. 点击“执行全部规则”
 
 当前实测结果：
 - `Execution Completed`
 - `total_rows_scanned = 3917`
 - `failed_sources = []`
 - `abnormal_results = 0`
+- 若使用最小临时样例同时验证 `大于 / 非空 / 唯一` 三类固定规则，当前实测结果为：
+  - `Execution Completed`
+  - `total_rows_scanned = 3`
+  - `failed_sources = []`
+  - `abnormal_results = 3`
 
 ## 当前未完成项
 

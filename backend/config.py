@@ -1,5 +1,6 @@
 """应用配置定义。"""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +25,10 @@ class Settings:
         / "fixed-rules"
         / "default.json"
     )
-    svn_executable: str = "svn"
+    svn_executable: str = field(
+        default_factory=lambda: (os.getenv("SVN_EXECUTABLE") or "svn").strip()
+        or "svn"
+    )
     supported_source_types: tuple[str, ...] = field(
         default_factory=lambda: ("local_excel", "local_csv", "feishu", "svn")
     )

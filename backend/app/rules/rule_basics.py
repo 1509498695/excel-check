@@ -75,17 +75,34 @@ def _build_abnormal_result(
     row_index: int,
     raw_value: Any,
     message: str,
+    location: str | None = None,
 ) -> dict[str, Any]:
     if hasattr(raw_value, "item"):
         raw_value = raw_value.item()
     return {
         "level": level,
         "rule_name": rule_name,
-        "location": f"{tag} -> {column_name}",
+        "location": location or f"{tag} -> {column_name}",
         "row_index": int(row_index),
         "raw_value": raw_value,
         "message": message,
     }
+
+
+def _get_rule_display_name(rule: ValidationRule) -> str:
+    """优先使用规则自定义展示名，否则回退到 rule_type。"""
+    display_name = rule.params.get("rule_name")
+    if isinstance(display_name, str) and display_name.strip():
+        return display_name.strip()
+    return rule.rule_type
+
+
+def _get_rule_location(rule: ValidationRule, *, tag: str, column_name: str) -> str:
+    """优先使用规则传入的展示定位，避免固定规则页退化成 tag 定位。"""
+    location = rule.params.get("location")
+    if isinstance(location, str) and location.strip():
+        return location.strip()
+    return f"{tag} -> {column_name}"
 
 
 @register_rule("not_null")
@@ -105,12 +122,13 @@ def check_not_null(
             abnormal_results.append(
                 _build_abnormal_result(
                     level="error",
-                    rule_name=rule.rule_type,
+                    rule_name=_get_rule_display_name(rule),
                     tag=tag,
                     column_name=column_name,
                     row_index=row["_row_index"],
                     raw_value=row[column_name],
                     message="该字段不能为空。",
+                    location=_get_rule_location(rule, tag=tag, column_name=column_name),
                 )
             )
 
@@ -136,12 +154,13 @@ def check_unique(
             abnormal_results.append(
                 _build_abnormal_result(
                     level="warning",
-                    rule_name=rule.rule_type,
+                    rule_name=_get_rule_display_name(rule),
                     tag=tag,
                     column_name=column_name,
                     row_index=row["_row_index"],
                     raw_value=row[column_name],
                     message="该值存在重复项。",
+                    location=_get_rule_location(rule, tag=tag, column_name=column_name),
                 )
             )
 

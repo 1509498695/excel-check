@@ -16,48 +16,42 @@ from backend.run import app
 
 def _create_fixed_rules_workbook(
     target_path: Path,
-    values: list[object],
-    *,
-    desc_prefix: str = "item",
+    columns: dict[str, list[object]],
 ) -> Path:
     """创建固定规则测试所需的最小 Excel 文件。"""
     with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
-        pd.DataFrame(
-            {
-                "INT_ID": values,
-                "DESC": [f"{desc_prefix}-{index}" for index, _ in enumerate(values, start=1)],
-            }
-        ).to_excel(writer, sheet_name="items", index=False)
+        pd.DataFrame(columns).to_excel(writer, sheet_name="items", index=False)
 
     return target_path
 
 
-def _build_v2_payload(
+def _build_v3_payload(
     workbook_path: Path,
     *,
-    expected_value: str = "0",
-    operator: str = "gt",
+    rules: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """构建一份最小可用的 v2 固定规则配置。"""
+    """构建一份最小可用的 v3 固定规则配置。"""
     return {
-        "version": 2,
+        "version": 3,
         "configured": True,
         "groups": [
             {"group_id": "ungrouped", "group_name": "未分组", "builtin": True},
             {"group_id": "basic-checks", "group_name": "基础校验", "builtin": False},
         ],
-        "rules": [
+        "rules": rules
+        or [
             {
                 "rule_id": "rule-int-id",
                 "group_id": "basic-checks",
-                "rule_name": "INT_ID 必须满足阈值",
+                "rule_name": "INT_ID 必须大于 0",
                 "binding": {
                     "file_path": str(workbook_path),
                     "sheet": "items",
                     "column": "INT_ID",
                 },
-                "operator": operator,
-                "expected_value": expected_value,
+                "rule_type": "fixed_value_compare",
+                "operator": "gt",
+                "expected_value": "0",
             }
         ],
     }
@@ -85,7 +79,7 @@ def isolated_fixed_rules_config(
 async def test_get_fixed_rules_config_returns_default_when_missing(
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证未保存配置时会返回新版默认空结构。"""
+    """验证未保存配置时会返回 v3 默认空结构。"""
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",
@@ -95,7 +89,7 @@ async def test_get_fixed_rules_config_returns_default_when_missing(
     assert response.status_code == 200
     payload = response.json()
     assert payload["code"] == 200
-    assert payload["data"]["version"] == 2
+    assert payload["data"]["version"] == 3
     assert payload["data"]["configured"] is False
     assert payload["data"]["groups"] == [
         {
@@ -108,13 +102,16 @@ async def test_get_fixed_rules_config_returns_default_when_missing(
 
 
 @pytest.mark.anyio
-async def test_put_fixed_rules_config_persists_valid_v2_payload(
+async def test_put_fixed_rules_config_persists_valid_v3_payload(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证合法的新版固定规则配置可以保存并再次读取。"""
-    workbook_path = _create_fixed_rules_workbook(tmp_path / "fixed_rules.xlsx", [1, 2, 3])
-    payload = _build_v2_payload(workbook_path)
+    """验证合法的 v3 固定规则配置可以保存并再次读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(workbook_path)
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -126,9 +123,11 @@ async def test_put_fixed_rules_config_persists_valid_v2_payload(
     assert save_response.status_code == 200
     assert isolated_fixed_rules_config.exists() is True
 
-    get_payload = get_response.json()
-    rule = get_payload["data"]["rules"][0]
-    assert get_payload["data"]["configured"] is True
+    get_payload = get_response.json()["data"]
+    rule = get_payload["rules"][0]
+    assert get_payload["version"] == 3
+    assert get_payload["configured"] is True
+    assert rule["rule_type"] == "fixed_value_compare"
     assert rule["binding"]["file_path"] == str(workbook_path.resolve())
     assert rule["binding"]["sheet"] == "items"
     assert rule["binding"]["column"] == "INT_ID"
@@ -139,8 +138,11 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证旧版单文件配置在读取时会自动迁移为规则级绑定。"""
-    workbook_path = _create_fixed_rules_workbook(tmp_path / "legacy.xlsx", [1, 2, 3])
+    """验证旧版全局单文件配置读取时会自动迁移到 v3。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "legacy.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
     legacy_payload = {
         "version": 1,
         "configured": True,
@@ -174,7 +176,8 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["version"] == 2
+    assert payload["version"] == 3
+    assert payload["rules"][0]["rule_type"] == "fixed_value_compare"
     assert payload["rules"][0]["binding"] == {
         "file_path": str(workbook_path.resolve()),
         "sheet": "items",
@@ -183,13 +186,65 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
 
 
 @pytest.mark.anyio
+async def test_get_fixed_rules_config_migrates_v2_compare_rules(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    """验证旧版 version=2 比较型规则会自动补齐 rule_type。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "v2.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    v2_payload = {
+        "version": 2,
+        "configured": True,
+        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "rules": [
+            {
+                "rule_id": "rule-int-id",
+                "group_id": "ungrouped",
+                "rule_name": "INT_ID 必须大于 0",
+                "binding": {
+                    "file_path": str(workbook_path),
+                    "sheet": "items",
+                    "column": "INT_ID",
+                },
+                "operator": "gt",
+                "expected_value": "0",
+            }
+        ],
+    }
+    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
+    isolated_fixed_rules_config.write_text(
+        json.dumps(v2_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/api/v1/fixed-rules/config")
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["version"] == 3
+    assert payload["rules"][0]["rule_type"] == "fixed_value_compare"
+    assert payload["rules"][0]["operator"] == "gt"
+    assert payload["rules"][0]["expected_value"] == "0"
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_unknown_column(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
     """验证规则绑定引用不存在列时会返回 400。"""
-    workbook_path = _create_fixed_rules_workbook(tmp_path / "invalid_rule.xlsx", [1, 2, 3])
-    payload = _build_v2_payload(workbook_path)
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "invalid_rule.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(workbook_path)
     payload["rules"][0]["binding"]["column"] = "UNKNOWN_COL"
 
     async with AsyncClient(
@@ -203,13 +258,39 @@ async def test_put_fixed_rules_config_rejects_unknown_column(
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_compare_rule_without_expected_value(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    """验证比较类规则缺少 expected_value 时会返回 400。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "missing_expected.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(workbook_path)
+    payload["rules"][0]["expected_value"] = ""
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "expected_value" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_execute_fixed_rules_passes_gt_zero_rule(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证 `INT_ID > 0` 的固定规则在合法数据上返回 0 条异常。"""
-    workbook_path = _create_fixed_rules_workbook(tmp_path / "gt_zero.xlsx", [1, 2, 3])
-    payload = _build_v2_payload(workbook_path, expected_value="0", operator="gt")
+    """验证 INT_ID > 0 在合法数据上返回 0 条异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "gt_zero.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(workbook_path)
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -227,16 +308,31 @@ async def test_execute_fixed_rules_passes_gt_zero_rule(
 
 
 @pytest.mark.anyio
-async def test_execute_fixed_rules_reports_threshold_and_non_numeric_rows(
+async def test_execute_fixed_rules_reports_not_null_with_fixed_rule_location(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证固定规则会返回比较失败和非数值异常。"""
+    """验证固定规则页的非空校验沿用 error，并保留自定义规则名和定位。"""
     workbook_path = _create_fixed_rules_workbook(
-        tmp_path / "gt_threshold.xlsx",
-        [1, "oops", 5],
+        tmp_path / "not_null.xlsx",
+        {"INT_ID": [1, None, 3], "DESC": ["a", "b", "c"]},
     )
-    payload = _build_v2_payload(workbook_path, expected_value="2", operator="gt")
+    payload = _build_v3_payload(
+        workbook_path,
+        rules=[
+            {
+                "rule_id": "rule-not-null",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 不能为空",
+                "binding": {
+                    "file_path": str(workbook_path),
+                    "sheet": "items",
+                    "column": "INT_ID",
+                },
+                "rule_type": "not_null",
+            }
+        ],
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -247,54 +343,109 @@ async def test_execute_fixed_rules_reports_threshold_and_non_numeric_rows(
 
     assert execute_response.status_code == 200
     abnormal_results = execute_response.json()["data"]["abnormal_results"]
-    assert any(item["raw_value"] == 1 for item in abnormal_results)
-    assert any(item["raw_value"] == "oops" for item in abnormal_results)
-    assert any("数值" in item["message"] for item in abnormal_results)
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["level"] == "error"
+    assert abnormal_results[0]["rule_name"] == "INT_ID 不能为空"
+    assert abnormal_results[0]["location"] == "items -> INT_ID"
+    assert "不能为空" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_reports_unique_with_warning_level(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    """验证目标列唯一不重复校验沿用 warning 语义。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "unique.xlsx",
+        {"INT_ID": [1, 1, 2], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(
+        workbook_path,
+        rules=[
+            {
+                "rule_id": "rule-unique",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 必须唯一",
+                "binding": {
+                    "file_path": str(workbook_path),
+                    "sheet": "items",
+                    "column": "INT_ID",
+                },
+                "rule_type": "unique",
+            }
+        ],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert all(item["level"] == "warning" for item in abnormal_results)
+    assert all(item["rule_name"] == "INT_ID 必须唯一" for item in abnormal_results)
     assert all(item["location"] == "items -> INT_ID" for item in abnormal_results)
 
 
 @pytest.mark.anyio
-async def test_execute_fixed_rules_supports_multiple_bound_files_in_one_run(
+async def test_execute_fixed_rules_supports_mixed_rule_types_in_one_run(
     tmp_path: Path,
     isolated_fixed_rules_config: Path,
 ) -> None:
-    """验证多文件规则可以在一次执行中聚合运行。"""
-    workbook_a = _create_fixed_rules_workbook(tmp_path / "items_a.xlsx", [1, 2, 3], desc_prefix="a")
-    workbook_b = _create_fixed_rules_workbook(tmp_path / "items_b.xlsx", [10, 20, 30], desc_prefix="b")
-    payload = {
-        "version": 2,
-        "configured": True,
-        "groups": [
-            {"group_id": "ungrouped", "group_name": "未分组", "builtin": True},
-            {"group_id": "mixed", "group_name": "混合校验", "builtin": False},
-        ],
-        "rules": [
+    """验证比较类、非空和唯一规则可以在一次执行中混合运行。"""
+    workbook_a = _create_fixed_rules_workbook(
+        tmp_path / "items_a.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a-1", "a-2", "a-3"]},
+    )
+    workbook_b = _create_fixed_rules_workbook(
+        tmp_path / "items_b.xlsx",
+        {"INT_ID": [10, 10, 30], "DESC": ["", "b-2", "b-3"]},
+    )
+    payload = _build_v3_payload(
+        workbook_a,
+        rules=[
             {
                 "rule_id": "rule-a",
-                "group_id": "mixed",
+                "group_id": "basic-checks",
                 "rule_name": "A 文件 INT_ID > 0",
                 "binding": {
                     "file_path": str(workbook_a),
                     "sheet": "items",
                     "column": "INT_ID",
                 },
+                "rule_type": "fixed_value_compare",
                 "operator": "gt",
                 "expected_value": "0",
             },
             {
-                "rule_id": "rule-b",
-                "group_id": "mixed",
-                "rule_name": "B 文件 DESC 必须等于 b-1",
+                "rule_id": "rule-b1",
+                "group_id": "basic-checks",
+                "rule_name": "B 文件 DESC 不能为空",
                 "binding": {
                     "file_path": str(workbook_b),
                     "sheet": "items",
                     "column": "DESC",
                 },
-                "operator": "eq",
-                "expected_value": "b-1",
+                "rule_type": "not_null",
+            },
+            {
+                "rule_id": "rule-b2",
+                "group_id": "basic-checks",
+                "rule_name": "B 文件 INT_ID 必须唯一",
+                "binding": {
+                    "file_path": str(workbook_b),
+                    "sheet": "items",
+                    "column": "INT_ID",
+                },
+                "rule_type": "unique",
             },
         ],
-    }
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -306,8 +457,9 @@ async def test_execute_fixed_rules_supports_multiple_bound_files_in_one_run(
     assert execute_response.status_code == 200
     execute_payload = execute_response.json()
     abnormal_results = execute_payload["data"]["abnormal_results"]
-    assert execute_payload["meta"]["total_rows_scanned"] == 6
-    assert any(item["rule_name"] == "B 文件 DESC 必须等于 b-1" for item in abnormal_results)
+    assert execute_payload["meta"]["total_rows_scanned"] == 9
+    assert any(item["rule_name"] == "B 文件 DESC 不能为空" for item in abnormal_results)
+    assert any(item["rule_name"] == "B 文件 INT_ID 必须唯一" for item in abnormal_results)
     assert all(item["rule_name"] != "A 文件 INT_ID > 0" for item in abnormal_results)
 
 
@@ -322,14 +474,21 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies(
     dir_b = tmp_path / "svn-b"
     dir_a.mkdir()
     dir_b.mkdir()
-    workbook_a1 = _create_fixed_rules_workbook(dir_a / "items_a1.xlsx", [1, 2, 3])
-    workbook_a2 = _create_fixed_rules_workbook(dir_a / "items_a2.xlsx", [4, 5, 6])
-    workbook_b = _create_fixed_rules_workbook(dir_b / "items_b.xlsx", [7, 8, 9])
-    payload = {
-        "version": 2,
-        "configured": True,
-        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
-        "rules": [
+    workbook_a1 = _create_fixed_rules_workbook(
+        dir_a / "items_a1.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a1", "a2", "a3"]},
+    )
+    workbook_a2 = _create_fixed_rules_workbook(
+        dir_a / "items_a2.xlsx",
+        {"INT_ID": [4, 5, 6], "DESC": ["b1", "b2", "b3"]},
+    )
+    workbook_b = _create_fixed_rules_workbook(
+        dir_b / "items_b.xlsx",
+        {"INT_ID": [7, 8, 9], "DESC": ["c1", "c2", "c3"]},
+    )
+    payload = _build_v3_payload(
+        workbook_a1,
+        rules=[
             {
                 "rule_id": "rule-a1",
                 "group_id": "ungrouped",
@@ -339,6 +498,7 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies(
                     "sheet": "items",
                     "column": "INT_ID",
                 },
+                "rule_type": "fixed_value_compare",
                 "operator": "gt",
                 "expected_value": "0",
             },
@@ -351,6 +511,7 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies(
                     "sheet": "items",
                     "column": "INT_ID",
                 },
+                "rule_type": "fixed_value_compare",
                 "operator": "gt",
                 "expected_value": "0",
             },
@@ -363,11 +524,12 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies(
                     "sheet": "items",
                     "column": "INT_ID",
                 },
+                "rule_type": "fixed_value_compare",
                 "operator": "gt",
                 "expected_value": "0",
             },
         ],
-    }
+    )
     called_working_copies: list[str] = []
 
     def fake_update(working_copy: Path) -> dict[str, str]:
@@ -402,8 +564,11 @@ async def test_fixed_rules_svn_update_returns_clear_error_when_cli_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """验证当前环境缺少 svn CLI 时会返回明确提示。"""
-    workbook_path = _create_fixed_rules_workbook(tmp_path / "svn_sample.xlsx", [1, 2, 3])
-    payload = _build_v2_payload(workbook_path)
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "svn_sample.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v3_payload(workbook_path)
 
     def raise_missing_cli(_: Path) -> dict[str, str]:
         raise NotImplementedError(

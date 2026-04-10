@@ -1,10 +1,35 @@
 # 更新日志
 
-文档更新时间：2026-04-08 18:52
+文档更新时间：2026-04-10 16:21
 
 ## [Unreleased]
 
 ### 变更
+- 固定规则弹窗新增默认规则名生成逻辑：比较类按 `sheet-目标列-规则选择名称+值` 自动生成，非比较类按 `sheet-目标列-规则选择名称` 自动生成。
+- 默认规则名仅在用户未手动改名时自动同步；用户手动改名或主动清空后，后续字段变化不再自动覆盖，且空规则名无法保存。
+- `unique` 的所有用户可见文案统一收口为 `唯一校验`。
+- 固定规则弹窗字段 `比较符` 更名为 `规则选择`，并把下拉扩展为 6 项：`等于`、`不等于`、`大于`、`小于`、`非空校验`、`唯一校验`。
+- 固定规则配置结构从 `version = 2` 升级为 `version = 3`，每条规则新增 `rule_type`；读取旧版比较型配置时会自动迁移为 `fixed_value_compare`。
+- `/api/v1/fixed-rules/execute` 现在支持三类固定规则：`fixed_value_compare`、`not_null`、`unique`；其中 `not_null` 维持 `error`，`unique` 维持 `warning`。
+- 固定规则结果构建补齐 `params.rule_name` 与 `params.location` 兼容，避免 `/fixed-rules` 执行结果退化成主工作台默认规则名和定位文案。
+- 本轮联调结果：
+  - `python -m pytest backend/tests -q` => `29 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+  - `/fixed-rules` 最小链路 => `Execution Completed / total_rows_scanned = 3 / failed_sources = [] / abnormal_results = 3`
+  - 主工作台最小链路 => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+- 修复固定规则模块的 `svn.exe` 发现逻辑：现在会依次尝试显式配置、`PATH`、Windows 常见 TortoiseSVN 安装路径和注册表信息。
+- `backend/config.py` 现已支持通过环境变量 `SVN_EXECUTABLE` 覆盖默认的 `svn` 命令。
+- 使用运行中的本地服务实际验证 `POST /api/v1/fixed-rules/svn-update`：
+  - `updated_paths = 1`
+  - `used_executable = C:\Program Files\TortoiseSVN\bin\svn.exe`
+  - `output = Updating '.' / At revision 449960.`
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q` => `26 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
 - 固定规则模块从“全局单文件配置”升级为“规则级文件绑定”，每条规则改为独立维护 `binding.file_path / binding.sheet / binding.column`。
 - 固定规则持久化结构升级为 `version = 2`，读取旧版配置时会自动迁移到新版规则级绑定结构。
 - 固定规则执行改为按所有规则聚合数据源，一键执行时会按 `(file_path, sheet)` 去重数据源、按 `(source, column)` 去重变量。
@@ -27,7 +52,7 @@
 - 新增 `fixed_value_compare` 规则类型，支持单列常量比较 `eq / ne / gt / lt`，并继续复用统一结果结构。
 - 固定规则配置持久化到 `backend/.runtime/fixed-rules/default.json`，页面重新打开后会自动回填上次已保存配置。
 - 固定规则页面新增规则组搜索、规则数量徽标、规则分页与结果看板，默认执行全部规则组。
-- 当前环境缺少 `svn` CLI 时，固定规则模块的 `SVN 更新` 会返回明确降级提示，不阻断本地 Excel 主流程。
+- 当 shell `PATH` 未正确包含 `svn.exe` 时，固定规则模块仍可自动探测 TortoiseSVN CLI，不阻断当前固定规则主流程。
 - 基于 `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0` 的固定规则验收样例已经验证通过：
   - `Execution Completed`
   - `total_rows_scanned = 3917`
