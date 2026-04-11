@@ -1,9 +1,10 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { fetchCompositePreview } from '../../api/workbench'
 import { useWorkbenchStore } from '../../store/workbench'
+import type { VariablePoolStoreLike } from '../../types/panelStores'
 import type {
   CompositeVariablePreviewData,
   DataSource,
@@ -12,13 +13,22 @@ import type {
 } from '../../types/workbench'
 import { EXPECTED_TYPE_OPTIONS } from '../../utils/workbenchMeta'
 
-const store = useWorkbenchStore()
-const emit = defineEmits<{ saved: [tag: string] }>()
+const props = withDefaults(
+  defineProps<{
+    store?: VariablePoolStoreLike
+    variant?: 'workbench' | 'fixed-rules'
+  }>(),
+  {
+    variant: 'workbench',
+  },
+)
+const emit = defineEmits<{ saved: [tag: string]; changed: [] }>()
+
+const defaultStore = useWorkbenchStore()
+const store = props.store ?? defaultStore
 
 const singleDialogVisible = ref(false)
 const compositeDialogVisible = ref(false)
-const singleEditorVisible = ref(false)
-const compositeEditorVisible = ref(false)
 const singleEditingTag = ref<string | null>(null)
 const compositeEditingTag = ref<string | null>(null)
 const singleTagTouched = ref(false)
@@ -64,13 +74,46 @@ const compositeErrors = reactive({
 
 const sourceOptions = computed<DataSource[]>(() => store.sources)
 const singleDialogTitle = computed(() =>
-  singleEditingTag.value ? '编辑单个变量' : '添加单个变量',
+  singleEditingTag.value ? '编辑单个变量' : '新增单个变量',
 )
 const compositeDialogTitle = computed(() =>
-  compositeEditingTag.value ? '编辑组合变量' : '添加组合变量',
+  compositeEditingTag.value ? '编辑组合变量' : '新增组合变量',
 )
-const singleTabLabel = computed(() => singleDialogTitle.value)
-const compositeTabLabel = computed(() => compositeDialogTitle.value)
+const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
+const panelCopy = computed(() => ({
+  heading: isFixedRulesVariant.value ? '配置固定规则变量池' : '配置变量与后端字段映射',
+  description: isFixedRulesVariant.value
+    ? '这里维护固定规则页自己的变量池。保存后会沉淀到固定规则配置，不与主工作台共享。'
+    : '点击上方按钮会在步骤 2 内打开独立子页签。保存后自动关闭当前页签，并回到变量列表。',
+  emptySourceTitle: isFixedRulesVariant.value ? '请先完成固定规则数据源接入' : '请先完成步骤 1 的数据源接入',
+  emptySourceDescription: isFixedRulesVariant.value
+    ? '先保存至少一个固定规则数据源，再在这里添加单个变量或组合变量。'
+    : '先保存至少一个数据源，再在这里添加单个变量或组合变量。',
+  readyTitle: isFixedRulesVariant.value ? '数据源已就绪，可以开始构建固定规则变量池' : '数据源已就绪，可以开始构建变量池',
+  readyDescription: isFixedRulesVariant.value
+    ? '点击上方按钮会打开固定规则页专用的变量编辑对话框。保存后会自动回写到当前固定规则配置。'
+    : '点击上方按钮会打开独立的变量编辑对话框。保存后会自动关闭当前对话框，并把变量写回下方列表和变量池。',
+  poolTitle: isFixedRulesVariant.value ? '固定规则变量池已可复用' : '变量池已可复用',
+  poolDescription: isFixedRulesVariant.value
+    ? `当前已配置 ${store.variables.length} 个固定规则变量。点击变量标签或“查看详情”可继续核对映射与预览。`
+    : `当前已配置 ${store.variables.length} 个变量。点击变量标签或“查看详情”可继续核对映射与预览。`,
+  sourceTypeError: isFixedRulesVariant.value
+    ? '当前固定规则页的字段映射提取先支持本地 Excel。'
+    : '当前步骤 2 的字段映射提取先支持本地 Excel。',
+  compositeTypeError: isFixedRulesVariant.value
+    ? '当前固定规则页的组合变量提取先支持本地 Excel。'
+    : '当前步骤 2 的组合变量提取先支持本地 Excel。',
+  poolHeading: isFixedRulesVariant.value ? '当前固定规则变量池' : '当前变量池',
+  poolDescriptionSecondary: isFixedRulesVariant.value
+    ? '保存变量后，下方会形成固定规则页专用的标签池；点击标签可弹出变量详情窗口。'
+    : '保存变量后，下方会形成可直接用于规则编排的标签池；点击标签可查看详情。',
+  emptyPool: isFixedRulesVariant.value
+    ? '变量保存后，下方会形成固定规则页专用的标签池；点击任意标签可弹出变量详情窗口。'
+    : '变量保存后，下方会形成可直接用于规则编排的标签池；点击任意标签可弹出变量详情窗口。',
+  singleDialogDescription: isFixedRulesVariant.value
+    ? '按来源数据、Sheet 和列名提取一个可复用字段，用于后续固定规则编排。'
+    : '按来源数据、Sheet 和列名提取一个可复用字段，用于后续静态规则编排。',
+}))
 const singleSource = computed<DataSource | null>(
   () => sourceOptions.value.find((item) => item.id === singleDraft.source_id) ?? null,
 )
@@ -145,22 +188,23 @@ const variableGuide = computed(() => {
   if (!store.sources.length) {
     return {
       type: 'warning' as const,
-      title: '请先完成步骤 1 的数据源接入',
-      description: '先保存至少一个数据源，再在这里添加单个变量或组合变量。',
+      title: panelCopy.value.emptySourceTitle,
+      description: panelCopy.value.emptySourceDescription,
     }
   }
+
   if (!store.variables.length) {
-      return {
-        type: 'info' as const,
-        title: '数据源已就绪，可以开始构建变量池',
-        description:
-          '点击上方按钮会打开独立的变量编辑对话框。保存后会自动关闭当前对话框，并把变量写回下方列表和变量池。',
-      }
+    return {
+      type: 'info' as const,
+      title: panelCopy.value.readyTitle,
+      description: panelCopy.value.readyDescription,
+    }
   }
+
   return {
     type: 'success' as const,
-    title: '变量池已可复用',
-    description: `当前已配置 ${store.variables.length} 个变量。点击变量标签或“查看详情”可继续核对映射与预览。`,
+    title: panelCopy.value.poolTitle,
+    description: panelCopy.value.poolDescription,
   }
 })
 
@@ -240,7 +284,7 @@ function resetCompositeDraft(): void {
 async function prepareSingleEditorForSource(sourceId: string, preserve = false): Promise<void> {
   if (!sourceId) return
   if (singleSource.value?.type !== 'local_excel') {
-    singleMetadataError.value = '当前步骤 2 的字段映射提取先支持本地 Excel。'
+    singleMetadataError.value = panelCopy.value.sourceTypeError
     if (!preserve) {
       singleDraft.sheet = ''
       singleDraft.column = ''
@@ -277,7 +321,7 @@ async function prepareSingleEditorForSource(sourceId: string, preserve = false):
 async function prepareCompositeEditorForSource(sourceId: string, preserve = false): Promise<void> {
   if (!sourceId) return
   if (compositeSource.value?.type !== 'local_excel') {
-    compositeMetadataError.value = '当前步骤 2 的组合变量提取先支持本地 Excel。'
+    compositeMetadataError.value = panelCopy.value.compositeTypeError
     if (!preserve) {
       compositeDraft.sheet = ''
       compositeDraft.columns = []
@@ -546,6 +590,7 @@ async function saveSingleVariable(): Promise<void> {
     singleEditingTag.value ?? undefined,
   )
   emit('saved', nextTag)
+  emit('changed')
   closeSingleEditorTab()
   ElMessage.success(singleEditingTag.value ? '单个变量已更新。' : '单个变量已添加。')
 }
@@ -570,12 +615,14 @@ async function saveCompositeVariable(): Promise<void> {
     compositeEditingTag.value ?? undefined,
   )
   emit('saved', nextTag)
+  emit('changed')
   closeCompositeEditorTab()
   ElMessage.success(compositeEditingTag.value ? '组合变量已更新。' : '组合变量已添加。')
 }
 
 function removeVariable(tag: string): void {
   store.removeVariable(tag)
+  emit('changed')
   if (detailDialogTag.value === tag) detailDialogVisible.value = false
   ElMessage.success('变量已移除。')
 }
@@ -608,7 +655,7 @@ function formatJsonPreview(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2)
   } catch {
-    return '[无法格式化的 JSON]'
+    return '[无法格式化 JSON]'
   }
 }
 
@@ -632,8 +679,8 @@ function getVariableFieldSummary(variable: VariableTag): string {
     <div class="variable-config-panel">
       <div class="panel-toolbar">
         <div class="toolbar-copy">
-          <strong>配置变量与后端字段映射</strong>
-          <span>点击上方按钮会在步骤 2 内打开独立子页签。保存后自动关闭当前页签，并回到变量列表。</span>
+          <strong>{{ panelCopy.heading }}</strong>
+          <span>{{ panelCopy.description }}</span>
         </div>
         <div class="toolbar-actions">
           <el-button plain :disabled="!store.sources.length" @click="openCompositeCreateTab">添加组合变量</el-button>
@@ -684,165 +731,13 @@ function getVariableFieldSummary(variable: VariableTag): string {
           </el-table-column>
         </el-table>
       </div>
-      <!-- 保留旧页签结构仅作过渡，后续以独立对话框为准。 -->
-      <el-tabs v-if="false" class="variable-workspace-tabs">
-        <el-tab-pane label="变量列表" name="summary">
-          <el-table :data="store.variables" class="workbench-table" empty-text="请先添加单个变量或组合变量。">
-            <el-table-column label="变量标签" min-width="180">
-              <template #default="{ row }">
-                <button class="tag-button" type="button" @click="chooseTag(row.tag)">{{ row.tag }}</button>
-              </template>
-            </el-table-column>
-            <el-table-column label="变量类型" min-width="130">
-              <template #default="{ row }">{{ getVariableKindLabel(row) }}</template>
-            </el-table-column>
-            <el-table-column prop="source_id" label="来源" min-width="120" />
-            <el-table-column prop="sheet" label="Sheet" min-width="120" />
-            <el-table-column label="字段结构" min-width="220">
-              <template #default="{ row }">{{ getVariableFieldSummary(row) }}</template>
-            </el-table-column>
-            <el-table-column label="期望类型" min-width="120">
-              <template #default="{ row }">{{ getExpectedTypeLabel(row.expected_type) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="210" align="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button link type="primary" @click="chooseTag(row.tag)">查看详情</el-button>
-                  <el-button link type="primary" @click="openEditTab(row)">编辑</el-button>
-                  <el-button link type="danger" @click="removeVariable(row.tag)">删除</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-        <el-tab-pane
-          v-if="singleEditorVisible"
-          :label="singleTabLabel"
-          name="single-editor"
-          closable
-        >
-          <div class="variable-editor-panel">
-            <el-alert
-              v-if="singleMetadataError"
-              :title="singleMetadataError"
-              type="warning"
-              :closable="false"
-              show-icon
-            />
-
-            <el-form label-position="top">
-              <el-form-item label="来源数据" :error="singleErrors.source_id">
-                <el-select :model-value="singleDraft.source_id" class="full-width" filterable placeholder="请选择已保存的数据源" @update:model-value="handleSingleSourceChange">
-                  <el-option v-for="source in sourceOptions" :key="source.id" :label="source.id" :value="source.id" />
-                </el-select>
-              </el-form-item>
-              <div class="dual-field">
-                <el-form-item label="Sheet" :error="singleErrors.sheet">
-                  <el-select :model-value="singleDraft.sheet" class="full-width" filterable placeholder="请选择 Sheet" :loading="singleMetadataLoading" :disabled="!singleDraft.source_id || !singleSheetOptions.length" @update:model-value="handleSingleSheetChange">
-                    <el-option v-for="sheet in singleSheetOptions" :key="sheet.name" :label="sheet.name" :value="sheet.name" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="列名" :error="singleErrors.column">
-                  <el-select :model-value="singleDraft.column" class="full-width" filterable placeholder="请选择列名" :disabled="!singleDraft.sheet || !singleColumnOptions.length" @update:model-value="handleSingleColumnChange">
-                    <el-option v-for="column in singleColumnOptions" :key="column" :label="column" :value="column" />
-                  </el-select>
-                </el-form-item>
-              </div>
-              <el-form-item label="变量标签" :error="singleErrors.tag">
-                <el-input :model-value="singleDraft.tag" placeholder="[source-sheet-column]" @input="handleSingleTagInput" />
-              </el-form-item>
-              <el-form-item label="期望类型" :error="singleErrors.expected_type">
-                <el-select v-model="singleDraft.expected_type" class="full-width" placeholder="请选择期望类型">
-                  <el-option v-for="option in EXPECTED_TYPE_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
-                </el-select>
-              </el-form-item>
-            </el-form>
-            <div class="editor-footbar">
-              <el-button plain @click="closeSingleEditorTab">取消</el-button>
-              <el-button type="primary" :disabled="!canSaveSingle" @click="saveSingleVariable">保存变量</el-button>
-            </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane
-          v-if="compositeEditorVisible"
-          :label="compositeTabLabel"
-          name="composite-editor"
-          closable
-        >
-          <div class="variable-editor-panel">
-            <el-alert
-              v-if="compositeMetadataError"
-              :title="compositeMetadataError"
-              type="warning"
-              :closable="false"
-              show-icon
-            />
-
-            <el-form label-position="top">
-              <el-form-item label="来源数据" :error="compositeErrors.source_id">
-                <el-select :model-value="compositeDraft.source_id" class="full-width" filterable placeholder="请选择已保存的数据源" @update:model-value="handleCompositeSourceChange">
-                  <el-option v-for="source in sourceOptions" :key="source.id" :label="source.id" :value="source.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="Sheet" :error="compositeErrors.sheet">
-                <el-select :model-value="compositeDraft.sheet" class="full-width" filterable placeholder="请选择 Sheet" :loading="compositeMetadataLoading" :disabled="!compositeDraft.source_id || !compositeSheetOptions.length" @update:model-value="handleCompositeSheetChange">
-                  <el-option v-for="sheet in compositeSheetOptions" :key="sheet.name" :label="sheet.name" :value="sheet.name" />
-                </el-select>
-              </el-form-item>
-              <div class="dual-field">
-                <el-form-item label="关联列" :error="compositeErrors.columns">
-                  <el-select :model-value="compositeDraft.columns" multiple filterable collapse-tags collapse-tags-tooltip class="full-width" placeholder="至少选择 2 列" :disabled="!compositeDraft.sheet || !compositeColumnOptions.length" @update:model-value="handleCompositeColumnsChange">
-                    <el-option v-for="column in compositeColumnOptions" :key="column" :label="column" :value="column" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="key 列" :error="compositeErrors.key_column">
-                  <el-select :model-value="compositeDraft.key_column" class="full-width" placeholder="从已选关联列中指定 key" :disabled="!compositeKeyOptions.length" @update:model-value="handleCompositeKeyChange">
-                    <el-option v-for="column in compositeKeyOptions" :key="column" :label="column" :value="column" />
-                  </el-select>
-                </el-form-item>
-              </div>
-              <el-form-item label="变量标签" :error="compositeErrors.tag">
-                <el-input :model-value="compositeDraft.tag" placeholder="[source-sheet-key-mapping]" @input="handleCompositeTagInput" />
-              </el-form-item>
-              <el-form-item label="期望类型">
-                <el-input model-value="json" disabled />
-              </el-form-item>
-            </el-form>
-
-            <div class="composite-preview-panel">
-              <div class="detail-copy">
-                <strong>JSON 预览</strong>
-                <span>外层 key 来自 key 列的每行值，内层对象只保留其余关联列字段。</span>
-              </div>
-              <el-alert v-if="compositePreviewError" :title="compositePreviewError" type="warning" :closable="false" show-icon />
-              <div v-else-if="compositePreviewLoading" class="empty-pool">正在生成组合变量预览，请稍候。</div>
-              <div v-else-if="!compositePreview" class="empty-pool">完成来源、Sheet、关联列与 key 列选择后，这里会生成字典格式的 JSON 预览。</div>
-              <div v-else class="json-preview-shell">
-                <div class="preview-summary">
-                  <span>预览概览</span>
-                  <strong>{{ compositePreview!.total_rows }} 行 / {{ Object.keys(compositePreview!.mapping).length }} 个 key</strong>
-                  <small>当前 key 列：{{ compositePreview!.key_column }}；内层对象不会重复包含 key 列本身。</small>
-                </div>
-                <pre class="json-preview-block">{{ formatJsonPreview(compositePreview!.mapping) }}</pre>
-              </div>
-            </div>
-
-            <div class="editor-footbar">
-              <el-button plain @click="closeCompositeEditorTab">取消</el-button>
-              <el-button type="primary" :disabled="!canSaveComposite" @click="saveCompositeVariable">保存变量</el-button>
-            </div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
     </div>
 
     <aside class="variable-pool-panel">
       <div class="pool-heading">
         <div>
-          <h3>当前变量池</h3>
-          <p>保存变量后，下方会形成可直接用于规则编排的标签池；点击标签可查看详情。</p>
+          <h3>{{ panelCopy.poolHeading }}</h3>
+          <p>{{ panelCopy.poolDescriptionSecondary }}</p>
         </div>
         <el-tag v-if="store.activeTag" type="warning" round effect="light">高亮中</el-tag>
       </div>
@@ -858,7 +753,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
           <span>{{ variable.tag }}</span>
           <small>{{ getVariableKindLabel(variable) }} / {{ variable.source_id }} / {{ variable.sheet }} / {{ getVariableFieldSummary(variable) }}</small>
         </button>
-        <div v-if="!store.variables.length" class="empty-pool">变量保存后，下方会形成可直接用于规则编排的标签池；点击任意标签可弹出变量详情窗口。</div>
+        <div v-if="!store.variables.length" class="empty-pool">{{ panelCopy.emptyPool }}</div>
       </div>
     </aside>
   </div>
@@ -874,7 +769,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
     <div class="dialog-form variable-editor-panel">
       <div class="detail-copy">
         <strong>单个变量配置</strong>
-        <span>按来源数据、Sheet 和列名提取一个可复用字段，用于后续静态规则编排。</span>
+        <span>{{ panelCopy.singleDialogDescription }}</span>
       </div>
 
       <el-alert
@@ -891,7 +786,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
             :model-value="singleDraft.source_id"
             class="full-width"
             filterable
-            placeholder="请选择已保存的数据源"
+            placeholder="请选择来源数据"
             @update:model-value="handleSingleSourceChange"
           >
             <el-option
@@ -984,7 +879,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
     <div class="dialog-form variable-editor-panel">
       <div class="detail-copy">
         <strong>组合变量配置</strong>
-        <span>在同一数据源、同一 Sheet 中关联多列，以其中一列作为 key 生成 JSON 字典结构。</span>
+        <span>选择同一来源、同一 Sheet 下的多列字段，并指定主键列后生成 JSON 映射变量。</span>
       </div>
 
       <el-alert
@@ -1001,7 +896,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
             :model-value="compositeDraft.source_id"
             class="full-width"
             filterable
-            placeholder="请选择已保存的数据源"
+            placeholder="请选择来源数据"
             @update:model-value="handleCompositeSourceChange"
           >
             <el-option
@@ -1051,11 +946,11 @@ function getVariableFieldSummary(variable: VariableTag): string {
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="key 列" :error="compositeErrors.key_column">
+          <el-form-item label="Key 列" :error="compositeErrors.key_column">
             <el-select
               :model-value="compositeDraft.key_column"
               class="full-width"
-              placeholder="从已选关联列中指定 key"
+              placeholder="请选择作为主键的 Key 列"
               :disabled="!compositeKeyOptions.length"
               @update:model-value="handleCompositeKeyChange"
             >
@@ -1090,7 +985,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
       <div class="composite-preview-panel">
         <div class="detail-copy">
           <strong>JSON 预览</strong>
-          <span>外层 key 来自 key 列的每行值，内层对象只保留其余关联列字段。</span>
+          <span>下方会按当前 Key 列生成映射预览，用于确认组合变量的最终 JSON 结构。</span>
         </div>
         <el-alert
           v-if="compositePreviewError"
@@ -1103,21 +998,22 @@ function getVariableFieldSummary(variable: VariableTag): string {
           正在生成组合变量预览，请稍候。
         </div>
         <div v-else-if="!compositePreview" class="empty-pool">
-          完成来源、Sheet、关联列和 key 列选择后，这里会生成字典格式的 JSON 预览。
+          请选择来源、Sheet、关联列和 Key 列，系统会在这里生成对应的 JSON 预览。
         </div>
         <div v-else class="json-preview-shell">
           <div class="preview-summary">
-            <span>预览概览</span>
+            <span>预览统计</span>
             <strong>
               {{ compositePreview!.total_rows }} 行 /
               {{ Object.keys(compositePreview!.mapping).length }} 个 key
             </strong>
             <small>
-              当前 key 列：{{ compositePreview!.key_column }}；内层对象不会重复包含 key 列本身。
+              当前以 key 列 {{ compositePreview!.key_column }} 作为映射主键生成 JSON 结构。
             </small>
           </div>
           <pre class="json-preview-block">{{ formatJsonPreview(compositePreview!.mapping) }}</pre>
         </div>
+
       </div>
     </div>
   </el-dialog>
@@ -1132,8 +1028,8 @@ function getVariableFieldSummary(variable: VariableTag): string {
   >
     <template #header>
       <div class="detail-dialog-header">
-        <strong>{{ detailVariable?.tag ?? '变量详情' }}</strong>
-        <p>在当前窗口内查看变量映射信息和预览数据，确认无误后再继续进入规则编排。</p>
+        <strong>{{ detailVariable?.tag ?? '未命名变量' }}</strong>
+        <p>这里展示当前变量的来源信息、字段结构和预览数据，方便继续核对映射是否正确。</p>
       </div>
     </template>
 
@@ -1141,9 +1037,9 @@ function getVariableFieldSummary(variable: VariableTag): string {
       <div class="detail-topbar">
         <div class="detail-copy">
           <strong>变量详情</strong>
-          <span>详情窗口保持只读，支持单个变量列预览与组合变量 JSON 预览。</span>
+          <span>单变量会展示列预览，组合变量会展示 JSON 映射预览。</span>
         </div>
-        <el-button plain @click="chooseTag(detailVariable.tag)">刷新预览</el-button>
+        <el-button plain @click="chooseTag(detailVariable.tag)">高亮变量</el-button>
       </div>
       <div class="detail-meta-grid" :class="{ 'detail-meta-grid--composite': detailPreview?.variable_kind === 'composite' }">
         <article class="detail-meta-item"><span>来源数据</span><strong>{{ detailVariable.source_id }}</strong></article>
@@ -1152,30 +1048,30 @@ function getVariableFieldSummary(variable: VariableTag): string {
         <article class="detail-meta-item"><span>期望类型</span><strong>{{ getExpectedTypeLabel(detailVariable.expected_type) }}</strong></article>
       </div>
       <div class="preview-summary preview-source-summary">
-        <span>当前来源文件</span>
-        <strong class="source-path-text">{{ detailSourcePath || '当前未记录来源路径。' }}</strong>
-        <small>如果这里不是你预期的文件，请先回到步骤 1 检查数据源路径后再刷新预览。</small>
+        <span>来源路径</span>
+        <strong class="source-path-text">{{ detailSourcePath || '当前没有可展示的来源路径。' }}</strong>
+        <small>这里展示当前变量对应的数据源路径，便于快速确认你正在查看哪一份文件。</small>
       </div>
       <el-alert v-if="detailError" :title="detailError" type="warning" :closable="false" show-icon />
-      <div v-else-if="detailLoading" class="empty-pool">正在读取变量详情与预览，请稍候。</div>
+      <div v-else-if="detailLoading" class="empty-pool">正在加载变量详情，请稍候。</div>
       <template v-else>
         <div class="preview-summary">
-          <span>变量标签</span>
+          <span>预览数据</span>
           <strong>{{ detailVariable.tag }}</strong>
-          <small>已读取 {{ detailLoadedRows }} / {{ detailPreview?.total_rows ?? 0 }} 行预览数据。</small>
+          <small>当前已加载 {{ detailLoadedRows }} / {{ detailPreview?.total_rows ?? 0 }} 行预览数据。</small>
         </div>
         <div v-if="detailPreview?.variable_kind === 'composite'" class="json-preview-shell">
           <div class="preview-summary">
-            <span>组合结构</span>
+            <span>字段结构</span>
             <strong>key: {{ detailPreview.key_column }}</strong>
             <small>关联列：{{ detailPreview.columns.join('、') }}</small>
           </div>
           <pre class="json-preview-block detail-json-block">{{ formatJsonPreview(detailPreview.mapping) }}</pre>
         </div>
         <div v-else class="detail-table-shell">
-          <el-table :data="detailPreview?.preview_rows ?? []" class="workbench-table preview-table" max-height="560" empty-text="当前列没有可展示的预览数据。">
-            <el-table-column prop="row_index" label="原始行号" width="120" />
-            <el-table-column label="预览值" min-width="260">
+          <el-table :data="detailPreview?.preview_rows ?? []" class="workbench-table preview-table" max-height="560" empty-text="当前没有可展示的预览数据。">
+            <el-table-column prop="row_index" label="行号" width="120" />
+            <el-table-column label="值" min-width="260">
               <template #default="{ row }"><span class="preview-value">{{ row.value ?? '空值' }}</span></template>
             </el-table-column>
           </el-table>

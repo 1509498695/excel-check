@@ -1,10 +1,45 @@
 # 更新日志
 
-文档更新时间：2026-04-10 16:21
+文档更新时间：2026-04-11 13:06
 
 ## [Unreleased]
 
 ### 变更
+- 修复 `/api/v1/fixed-rules/config` 在固定规则页已保存失效本地路径时直接返回 `500 Internal Server Error` 的问题。
+- 固定规则配置读取现在会把“路径失效 / Sheet 不存在 / 列不存在”作为非阻断问题返回到 `meta.config_issues`，页面可继续打开并展示中文告警。
+- `PUT /api/v1/fixed-rules/config` 与 `POST /api/v1/fixed-rules/execute` 继续保持严格校验；失效路径未修复时返回明确中文 `400`。
+- 固定规则页顶部新增配置问题提示，数据源接入管理中的失效来源会显示 `路径失效` 状态，执行入口在阻断问题存在时会禁用。
+- 修正当前固定规则 runtime 配置里残留的历史乱码分组名称。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q` => `33 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+  - 失效路径专项回归：
+    - `GET /api/v1/fixed-rules/config` => `200 + meta.config_issues`
+    - `PUT /api/v1/fixed-rules/config` => `400`
+    - `POST /api/v1/fixed-rules/execute` => `400`
+- 修复复用组件 `VariablePoolPanel.vue` 中残留的 `????` 乱码文案。
+- 主工作台步骤 2 与固定规则页变量池模块的按钮、表头、弹窗、空态、JSON 预览和详情弹窗文案已恢复为正常中文。
+- 顺手修复一处 `Sheet` 选择占位乱码。
+- 本轮回归结果：
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+- 固定规则页 `/fixed-rules` 现在在规则组导航上方复用了工作台的 `数据源接入管理` 和 `变量池构建` 两个模块，但底层状态改为固定规则页自己的持久化 store，不再复用主工作台缓存。
+- 固定规则配置结构已升级为 `version = 4`，统一保存 `sources / variables / groups / rules`；读取旧版 `version = 3` 的规则级绑定配置时，会自动迁移为 `target_variable_tag` 绑定模型。
+- 固定规则弹窗移除了 `规则文件路径 / 读取结构 / Sheet / 目标列`，改为直接从固定规则页变量池选择 `目标变量`；当前仅允许单变量进入固定规则执行链路。
+- 固定规则页删除数据源时，会级联删除其变量与依赖规则；删除变量时，也会自动清理绑定该变量的规则。
+- 固定规则页与主工作台的数据源、变量池已完全隔离，刷新页面后固定规则页新增的数据源、变量和规则仍会自动回填。
+- 本轮联调结果：
+  - `python -m pytest backend/tests -q` => `30 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+  - `/fixed-rules` 真实联调 => `Execution Completed / total_rows_scanned = 6 / failed_sources = [] / abnormal_results = 4`
+  - 主工作台最小链路 => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
 - 固定规则弹窗新增默认规则名生成逻辑：比较类按 `sheet-目标列-规则选择名称+值` 自动生成，非比较类按 `sheet-目标列-规则选择名称` 自动生成。
 - 默认规则名仅在用户未手动改名时自动同步；用户手动改名或主动清空后，后续字段变化不再自动覆盖，且空规则名无法保存。
 - `unique` 的所有用户可见文案统一收口为 `唯一校验`。

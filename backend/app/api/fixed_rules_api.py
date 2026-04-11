@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from backend.app.api.fixed_rules_schemas import FixedRulesConfig
 from backend.app.fixed_rules.service import (
     execute_saved_fixed_rules,
-    load_fixed_rules_config,
+    load_fixed_rules_config_with_issues,
     run_saved_fixed_rules_svn_update,
     save_fixed_rules_config,
 )
@@ -22,15 +22,24 @@ router = APIRouter(prefix="/fixed-rules", tags=["fixed-rules"])
 def get_fixed_rules_config() -> dict[str, Any]:
     """读取当前固定规则配置。"""
     try:
-        config = load_fixed_rules_config()
-    except ValueError as exc:
+        config, config_issues = load_fixed_rules_config_with_issues()
+    except (FileNotFoundError, ValueError, ImportError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {
+    response: dict[str, Any] = {
         "code": 200,
         "msg": "ok",
-        "data": config.model_dump(mode="json"),
+        "data": config.model_dump(mode="json", exclude_none=True),
     }
+    if config_issues:
+        response["meta"] = {
+            "config_issues": [
+                issue.model_dump(mode="json", exclude_none=True)
+                for issue in config_issues
+            ]
+        }
+
+    return response
 
 
 @router.put("/config")
@@ -44,7 +53,7 @@ def put_fixed_rules_config(payload: FixedRulesConfig) -> dict[str, Any]:
     return {
         "code": 200,
         "msg": "ok",
-        "data": config.model_dump(mode="json"),
+        "data": config.model_dump(mode="json", exclude_none=True),
     }
 
 

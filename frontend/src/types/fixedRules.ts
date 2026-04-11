@@ -1,14 +1,8 @@
-import type { AbnormalResult, ExecutionMeta } from './workbench'
+import type { AbnormalResult, DataSource, ExecutionMeta, VariableTag } from './workbench'
 
 export type FixedRuleOperator = 'eq' | 'ne' | 'gt' | 'lt'
 export type FixedRuleType = 'fixed_value_compare' | 'not_null' | 'unique'
 export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique'
-
-export interface FixedRuleBinding {
-  file_path: string
-  sheet: string
-  column: string
-}
 
 export interface FixedRuleGroup {
   group_id: string
@@ -20,7 +14,7 @@ export interface FixedRuleDefinition {
   rule_id: string
   group_id: string
   rule_name: string
-  binding: FixedRuleBinding
+  target_variable_tag: string
   rule_type: FixedRuleType
   operator?: FixedRuleOperator
   expected_value?: string
@@ -29,14 +23,27 @@ export interface FixedRuleDefinition {
 export interface FixedRulesConfig {
   version: number
   configured: boolean
+  sources: DataSource[]
+  variables: VariableTag[]
   groups: FixedRuleGroup[]
   rules: FixedRuleDefinition[]
+}
+
+export interface FixedRulesConfigIssue {
+  level: 'warning' | 'error'
+  source_id?: string | null
+  variable_tag?: string | null
+  rule_id?: string | null
+  message: string
 }
 
 export interface FixedRulesConfigResponse {
   code: number
   msg: string
   data: FixedRulesConfig
+  meta?: {
+    config_issues?: FixedRulesConfigIssue[]
+  }
 }
 
 export interface FixedRulesExecuteResponse {

@@ -4,13 +4,28 @@ import { ElMessage } from 'element-plus'
 
 import { pickLocalSourcePath } from '../../api/workbench'
 import { useWorkbenchStore } from '../../store/workbench'
+import type { SourceManagementStoreLike } from '../../types/panelStores'
 import type { DataSource, SourceType } from '../../types/workbench'
 import { getSourceTypeLabel, SOURCE_TYPE_OPTIONS } from '../../utils/workbenchMeta'
 
-const store = useWorkbenchStore()
+const props = withDefaults(
+  defineProps<{
+    store?: SourceManagementStoreLike
+    sourceIssues?: Record<string, string>
+  }>(),
+  {
+    sourceIssues: () => ({}),
+  },
+)
+
 const emit = defineEmits<{
   saved: [sourceId: string]
+  changed: []
 }>()
+
+const defaultStore = useWorkbenchStore()
+const store = props.store ?? defaultStore
+const sourceIssueMap = computed(() => props.sourceIssues ?? {})
 
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
@@ -71,11 +86,13 @@ function openEditDialog(source: DataSource): void {
 function useSampleSource(): void {
   store.useSampleSource()
   emit('saved', 'src_demo')
+  emit('changed')
   ElMessage.success('示例数据源已填入。')
 }
 
 function removeSource(sourceId: string): void {
   store.removeSource(sourceId)
+  emit('changed')
   ElMessage.success('数据源已移除。')
 }
 
@@ -142,10 +159,15 @@ async function saveSource(): Promise<void> {
   )
   dialogVisible.value = false
   emit('saved', sourceId)
+  emit('changed')
   ElMessage.success(editingId.value ? '数据源已更新。' : '数据源已添加。')
 }
 
 function getStatusTone(source: DataSource): 'success' | 'warning' | 'info' {
+  if (sourceIssueMap.value[source.id]) {
+    return 'warning'
+  }
+
   if (source.type === 'feishu' && !source.token) {
     return 'warning'
   }
@@ -158,6 +180,9 @@ function getStatusTone(source: DataSource): 'success' | 'warning' | 'info' {
 }
 
 function getStatusLabel(source: DataSource): string {
+  if (sourceIssueMap.value[source.id]) {
+    return '路径失效'
+  }
   if (source.type === 'feishu' && !source.token) {
     return '待授权'
   }
@@ -179,6 +204,10 @@ function getPathLabel(sourceType: SourceType): string {
   }
 
   return '本地路径'
+}
+
+function getSourceIssue(sourceId: string): string {
+  return sourceIssueMap.value[sourceId] ?? ''
 }
 
 async function chooseLocalFile(): Promise<void> {
@@ -249,7 +278,15 @@ async function chooseLocalFile(): Promise<void> {
       </el-table-column>
       <el-table-column label="路径 / 链接" min-width="340">
         <template #default="{ row }">
-          <span class="truncate-line">{{ row.pathOrUrl ?? row.path ?? row.url }}</span>
+          <div>
+            <span class="truncate-line">{{ row.pathOrUrl ?? row.path ?? row.url }}</span>
+            <small
+              v-if="getSourceIssue(row.id)"
+              style="display: block; margin-top: 4px; color: var(--el-color-warning)"
+            >
+              {{ getSourceIssue(row.id) }}
+            </small>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="状态" min-width="120">
