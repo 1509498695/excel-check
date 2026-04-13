@@ -9,8 +9,24 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.app.api.schemas import DataSource, VariableTag
 
 
-FixedRuleType = Literal["fixed_value_compare", "not_null", "unique"]
+FixedRuleType = Literal[
+    "fixed_value_compare",
+    "not_null",
+    "unique",
+    "composite_condition_check",
+]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
+CompositeFilterOperator = Literal["eq", "ne", "gt", "lt", "not_null"]
+CompositeAssertionOperator = Literal[
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "not_null",
+    "unique",
+    "duplicate_required",
+]
+CompositeValueSource = Literal["literal", "field"]
 FixedRulesConfigIssueLevel = Literal["warning", "error"]
 
 
@@ -38,6 +54,38 @@ class FixedRuleGroup(BaseModel):
     builtin: bool = False
 
 
+class CompositeCondition(BaseModel):
+    """描述组合变量条件分支校验中的单条条件。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    condition_id: str
+    field: str
+    operator: CompositeAssertionOperator
+    value_source: CompositeValueSource | None = None
+    expected_value: str | None = None
+    expected_field: str | None = None
+
+
+class CompositeBranch(BaseModel):
+    """描述组合变量规则中的单个条件分支。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    branch_id: str
+    filters: list[CompositeCondition] = Field(default_factory=list)
+    assertions: list[CompositeCondition] = Field(default_factory=list)
+
+
+class CompositeRuleConfig(BaseModel):
+    """描述组合变量条件分支校验的完整配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    global_filters: list[CompositeCondition] = Field(default_factory=list)
+    branches: list[CompositeBranch] = Field(default_factory=list)
+
+
 class FixedRuleDefinition(BaseModel):
     """描述一条固定规则定义。"""
 
@@ -51,6 +99,7 @@ class FixedRuleDefinition(BaseModel):
     rule_type: FixedRuleType = "fixed_value_compare"
     operator: FixedRuleOperator | None = None
     expected_value: str | None = None
+    composite_config: CompositeRuleConfig | None = None
 
 
 class FixedRulesConfigIssue(BaseModel):

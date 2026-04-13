@@ -5,6 +5,22 @@
 ## [Unreleased]
 
 ### 变更
+- 固定规则页新增组合变量规则类型 `composite_condition_check`，支持“全局筛选 + 条件分支 + 分支校验”的组合变量检查配置。
+- 固定规则弹窗现在会根据目标变量类型自动切换：
+  - 单变量 -> 比较 / 非空 / 唯一规则
+  - 组合变量 -> 条件分支校验编辑器
+- 组合变量规则支持 `Key` 作为 JSON 映射键字段参与筛选与字段对字段比较；后端执行期内部使用 `__key__`。
+- 组合变量规则校验当前支持：
+  - 筛选：`eq / ne / gt / lt / not_null`
+  - 分支校验：`eq / ne / gt / lt / not_null / unique / duplicate_required`
+- 本地 Excel 组合变量执行装载已展开为可校验行集，固定规则执行链路可直接消费组合变量。
+- 新增固定规则 API 回归测试，覆盖组合变量规则保存、回填、非法配置拦截和示例场景执行。
+- 本轮回归结果：
+  - `python -m pytest backend/tests -q` => `40 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
 - 修复 `/api/v1/fixed-rules/config` 在固定规则页已保存失效本地路径时直接返回 `500 Internal Server Error` 的问题。
 - 固定规则配置读取现在会把“路径失效 / Sheet 不存在 / 列不存在”作为非阻断问题返回到 `meta.config_issues`，页面可继续打开并展示中文告警。
 - `PUT /api/v1/fixed-rules/config` 与 `POST /api/v1/fixed-rules/execute` 继续保持严格校验；失效路径未修复时返回明确中文 `400`。

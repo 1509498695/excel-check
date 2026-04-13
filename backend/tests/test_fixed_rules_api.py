@@ -29,6 +29,100 @@ def _build_single_tag(source_id: str, sheet: str, column: str) -> str:
     return f"[{source_id}-{sheet}-{column}]"
 
 
+def _build_composite_tag(source_id: str, sheet: str, tag: str) -> str:
+    return f"[{source_id}-{sheet}-{tag}]"
+
+
+def _build_composite_variable(
+    source_id: str = "items-source",
+    *,
+    tag: str = "faction-group-map",
+) -> dict[str, object]:
+    return {
+        "tag": _build_composite_tag(source_id, "items", tag),
+        "source_id": source_id,
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+
+
+def _build_composite_rule(
+    target_variable_tag: str,
+    *,
+    rule_id: str = "rule-composite-branch",
+    group_id: str = "basic-checks",
+    rule_name: str = "组合变量条件分支校验",
+) -> dict[str, object]:
+    return {
+        "rule_id": rule_id,
+        "group_id": group_id,
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [
+                {
+                    "condition_id": "global-key-gt",
+                    "field": "__key__",
+                    "operator": "gt",
+                    "value_source": "literal",
+                    "expected_value": "100000",
+                }
+            ],
+            "branches": [
+                {
+                    "branch_id": "branch-faction-zero",
+                    "filters": [
+                        {
+                            "condition_id": "branch-1-filter",
+                            "field": "INT_Faction",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "0",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-1-assert-eq-key",
+                            "field": "INT_Group",
+                            "operator": "eq",
+                            "value_source": "field",
+                            "expected_field": "__key__",
+                        },
+                        {
+                            "condition_id": "branch-1-assert-unique",
+                            "field": "INT_Group",
+                            "operator": "unique",
+                        },
+                    ],
+                },
+                {
+                    "branch_id": "branch-faction-other",
+                    "filters": [
+                        {
+                            "condition_id": "branch-2-filter",
+                            "field": "INT_Faction",
+                            "operator": "ne",
+                            "value_source": "literal",
+                            "expected_value": "0",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-2-assert-duplicate",
+                            "field": "INT_Group",
+                            "operator": "duplicate_required",
+                        }
+                    ],
+                },
+            ],
+        },
+    }
+
+
 def _build_v4_payload(
     workbook_path: Path,
     *,
@@ -436,7 +530,237 @@ async def test_put_fixed_rules_config_rejects_composite_variable_binding(
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
-    assert "组合变量" in response.json()["detail"]
+    assert "rule-composite" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_composite_rule_and_round_trips(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_round_trip.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "INT_Faction": [0, 1, 1],
+            "INT_Group": [100001, 200, 200],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    response_payload = get_response.json()["data"]
+    assert response_payload["rules"][0]["rule_type"] == "composite_condition_check"
+    assert response_payload["rules"][0]["target_variable_tag"] == composite_variable["tag"]
+    assert response_payload["rules"][0]["composite_config"]["branches"][0]["assertions"][0]["expected_field"] == "__key__"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_variable(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "single_cannot_use_composite.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_composite_rule(target_tag, rule_name="单变量不能绑定组合规则")],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_composite_rule_without_branches(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_no_branches.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["branches"] = []
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_composite_branch_without_assertions(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_no_assertions.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["branches"][0]["assertions"] = []
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_unique_in_composite_filters(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_invalid_filter_operator.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["global_filters"][0]["operator"] = "unique"
+    composite_rule["composite_config"]["global_filters"][0].pop("expected_value", None)
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_composite_compare_assertion_without_rhs(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_missing_rhs.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["branches"][0]["assertions"][0]["value_source"] = "field"
+    composite_rule["composite_config"]["branches"][0]["assertions"][0].pop("expected_field", None)
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_composite_condition_check(
+    tmp_path: Path,
+    isolated_fixed_rules_config: Path,
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_execute.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003, 100004],
+            "INT_Faction": [0, 1, 1, 0],
+            "INT_Group": [100001, 200, 200, 999999],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    composite_rule = _build_composite_rule(composite_variable["tag"], rule_name="派系与分组映射校验")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    assert execute_response.status_code == 200
+    response_payload = execute_response.json()
+    abnormal_results = response_payload["data"]["abnormal_results"]
+    assert response_payload["msg"] == "Execution Completed"
+    assert response_payload["meta"]["total_rows_scanned"] == 4
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "派系与分组映射校验"
+    assert abnormal_results[0]["row_index"] == 5
+    assert abnormal_results[0]["location"] == "items -> INT_Group"
 
 
 @pytest.mark.anyio

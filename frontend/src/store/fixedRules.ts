@@ -13,6 +13,9 @@ import {
   fetchSourceMetadata,
 } from '../api/workbench'
 import type {
+  CompositeBranch,
+  CompositeCondition,
+  CompositeRuleConfig,
   FixedRuleDefinition,
   FixedRuleGroup,
   FixedRulesConfig,
@@ -85,8 +88,122 @@ function normalizeExpectedValue(value: string | undefined): string | undefined {
   return normalized ? normalized : undefined
 }
 
+function isCompareOperator(value: string | undefined): value is FixedRuleDefinition['operator'] {
+  return value === 'eq' || value === 'ne' || value === 'gt' || value === 'lt'
+}
+
 function isSingleVariable(variable: VariableTag | undefined | null): variable is VariableTag {
   return variable != null && (variable.variable_kind ?? 'single') === 'single'
+}
+
+function isCompositeVariable(variable: VariableTag | undefined | null): variable is VariableTag {
+  return variable != null && (variable.variable_kind ?? 'single') === 'composite'
+}
+
+function createConditionId(): string {
+  return createEntityId('condition')
+}
+
+function createBranchId(): string {
+  return createEntityId('branch')
+}
+
+function normalizeCompositeCondition(condition: CompositeCondition): CompositeCondition {
+  const operator = condition.operator
+  const normalizedField = condition.field.trim()
+  const normalizedConditionId = condition.condition_id.trim() || createConditionId()
+
+  if (isCompareOperator(operator)) {
+    const valueSource = condition.value_source === 'field' ? 'field' : 'literal'
+    return {
+      condition_id: normalizedConditionId,
+      field: normalizedField,
+      operator,
+      value_source: valueSource,
+      expected_value:
+        valueSource === 'literal' ? normalizeExpectedValue(condition.expected_value) : undefined,
+      expected_field: valueSource === 'field' ? condition.expected_field?.trim() : undefined,
+    }
+  }
+
+  return {
+    condition_id: normalizedConditionId,
+    field: normalizedField,
+    operator,
+  }
+}
+
+function normalizeCompositeBranch(branch: CompositeBranch): CompositeBranch {
+  return {
+    branch_id: branch.branch_id.trim() || createBranchId(),
+    filters: branch.filters.map(normalizeCompositeCondition),
+    assertions: branch.assertions.map(normalizeCompositeCondition),
+  }
+}
+
+function normalizeCompositeConfig(
+  config: CompositeRuleConfig | undefined,
+): CompositeRuleConfig | undefined {
+  if (!config) {
+    return undefined
+  }
+
+  return {
+    global_filters: config.global_filters.map(normalizeCompositeCondition),
+    branches: config.branches.map(normalizeCompositeBranch),
+  }
+}
+
+function isValidCompositeCondition(
+  condition: CompositeCondition,
+  section: 'filter' | 'assertion',
+): boolean {
+  const normalizedField = condition.field.trim()
+  const normalizedConditionId = condition.condition_id.trim()
+  if (!normalizedConditionId || !normalizedField) {
+    return false
+  }
+
+  const operator = condition.operator
+  if (section === 'filter' && (operator === 'unique' || operator === 'duplicate_required')) {
+    return false
+  }
+
+  if (operator === 'not_null' || operator === 'unique' || operator === 'duplicate_required') {
+    return true
+  }
+
+  if (!isCompareOperator(operator)) {
+    return false
+  }
+
+  if (condition.value_source === 'field') {
+    return Boolean(condition.expected_field?.trim())
+  }
+
+  return Boolean(normalizeExpectedValue(condition.expected_value))
+}
+
+function isValidCompositeConfig(config: CompositeRuleConfig | undefined): boolean {
+  if (!config) {
+    return false
+  }
+
+  if (!config.global_filters.every((condition) => isValidCompositeCondition(condition, 'filter'))) {
+    return false
+  }
+
+  if (!config.branches.length) {
+    return false
+  }
+
+  return config.branches.every(
+    (branch) =>
+      Boolean(branch.branch_id.trim()) &&
+      branch.filters.every((condition) => isValidCompositeCondition(condition, 'filter')) &&
+      branch.assertions.length > 0 &&
+      branch.assertions.every((condition) => isValidCompositeCondition(condition, 'assertion')),
+  )
 }
 
 function collectVariableTagsBySourceIds(
@@ -225,28 +342,44 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
 
           const targetTag = rule.target_variable_tag.trim()
           const variable = variableMap.get(targetTag)
-          if (!targetTag || !isSingleVariable(variable)) {
+          if (!targetTag || !variable) {
             return true
           }
 
-          if (rule.rule_type !== 'fixed_value_compare') {
+          if (isSingleVariable(variable)) {
+            if (rule.rule_type === 'composite_condition_check') {
+              return true
+            }
+
+            if (rule.rule_type !== 'fixed_value_compare') {
+              return false
+            }
+
+            if (!rule.operator) {
+              return true
+            }
+
+            const expectedValue = normalizeExpectedValue(rule.expected_value)
+            if (!expectedValue) {
+              return true
+            }
+
+            if ((rule.operator === 'gt' || rule.operator === 'lt') && Number.isNaN(Number(expectedValue))) {
+              return true
+            }
+
             return false
           }
 
-          if (!rule.operator) {
+          if (!isCompositeVariable(variable)) {
             return true
           }
 
-          const expectedValue = normalizeExpectedValue(rule.expected_value)
-          if (!expectedValue) {
+          if (rule.rule_type !== 'composite_condition_check') {
             return true
           }
 
-          if ((rule.operator === 'gt' || rule.operator === 'lt') && Number.isNaN(Number(expectedValue))) {
-            return true
-          }
-
-          return false
+          return !isValidCompositeConfig(rule.composite_config)
         })
         .map((rule) => rule.rule_id)
     },
@@ -674,6 +807,11 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     },
 
     upsertRule(rule: Omit<FixedRuleDefinition, 'rule_id'> & { rule_id?: string }): void {
+      const normalizedCompositeConfig =
+        rule.rule_type === 'composite_condition_check'
+          ? normalizeCompositeConfig(rule.composite_config)
+          : undefined
+
       const nextRule: FixedRuleDefinition = {
         rule_id: rule.rule_id ?? createEntityId('fixed-rule'),
         group_id: rule.group_id,
@@ -685,6 +823,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           rule.rule_type === 'fixed_value_compare'
             ? normalizeExpectedValue(rule.expected_value)
             : undefined,
+        composite_config: normalizedCompositeConfig,
       }
 
       const index = this.config.rules.findIndex((item) => item.rule_id === nextRule.rule_id)

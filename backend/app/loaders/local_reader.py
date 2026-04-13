@@ -470,16 +470,19 @@ def _build_composite_variable_frame(
     columns: list[str],
     key_column: str,
 ) -> pd.DataFrame:
-    """把组合变量转换成一列 JSON 映射值，供 TaskTree 全链路持有。"""
-    mapping, _loaded_rows = _build_composite_mapping(
-        dataframe,
-        columns=columns,
-        key_column=key_column,
-    )
-    json_values = list(mapping.values())
-    frame = pd.DataFrame({"json_value": json_values})
+    """把组合变量展开为可执行的行集，并注入内部 `__key__` 字段。"""
+    frame = dataframe[columns].copy()
+    frame["__key__"] = frame[key_column].apply(_normalize_preview_value)
+    frame = frame.loc[~frame["__key__"].apply(_is_empty_preview_value)].copy()
+    frame["__key__"] = frame["__key__"].astype(str)
+    frame = frame.drop(columns=[key_column])
     frame["_row_index"] = frame.index + 2
-    return frame
+    ordered_columns = [
+        "__key__",
+        *[column for column in columns if column != key_column],
+        "_row_index",
+    ]
+    return frame[ordered_columns].reset_index(drop=True)
 
 
 def _build_composite_mapping(

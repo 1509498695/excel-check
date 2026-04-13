@@ -1,8 +1,39 @@
 import type { AbnormalResult, DataSource, ExecutionMeta, VariableTag } from './workbench'
 
 export type FixedRuleOperator = 'eq' | 'ne' | 'gt' | 'lt'
-export type FixedRuleType = 'fixed_value_compare' | 'not_null' | 'unique'
+export type CompositeFilterOperator = FixedRuleOperator | 'not_null'
+export type CompositeAssertionOperator =
+  | FixedRuleOperator
+  | 'not_null'
+  | 'unique'
+  | 'duplicate_required'
+export type CompositeValueSource = 'literal' | 'field'
+export type FixedRuleType =
+  | 'fixed_value_compare'
+  | 'not_null'
+  | 'unique'
+  | 'composite_condition_check'
 export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique'
+
+export interface CompositeCondition {
+  condition_id: string
+  field: string
+  operator: CompositeAssertionOperator
+  value_source?: CompositeValueSource
+  expected_value?: string
+  expected_field?: string
+}
+
+export interface CompositeBranch {
+  branch_id: string
+  filters: CompositeCondition[]
+  assertions: CompositeCondition[]
+}
+
+export interface CompositeRuleConfig {
+  global_filters: CompositeCondition[]
+  branches: CompositeBranch[]
+}
 
 export interface FixedRuleGroup {
   group_id: string
@@ -18,6 +49,7 @@ export interface FixedRuleDefinition {
   rule_type: FixedRuleType
   operator?: FixedRuleOperator
   expected_value?: string
+  composite_config?: CompositeRuleConfig
 }
 
 export interface FixedRulesConfig {

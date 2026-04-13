@@ -9,6 +9,11 @@ from typing import Any
 
 from backend.app.api.execute_api import execute_engine
 from backend.app.api.fixed_rules_schemas import (
+    CompositeAssertionOperator,
+    CompositeBranch,
+    CompositeCondition,
+    CompositeFilterOperator,
+    CompositeRuleConfig,
     FixedRuleDefinition,
     FixedRuleGroup,
     FixedRulesConfig,
@@ -23,8 +28,26 @@ from backend.config import settings
 
 
 FIXED_RULES_CONFIG_VERSION = 4
-SUPPORTED_FIXED_RULE_TYPES = {"fixed_value_compare", "not_null", "unique"}
+COMPOSITE_KEY_FIELD = "__key__"
+SUPPORTED_FIXED_RULE_TYPES = {
+    "fixed_value_compare",
+    "not_null",
+    "unique",
+    "composite_condition_check",
+}
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
+SUPPORTED_COMPOSITE_FILTER_OPERATORS = {"eq", "ne", "gt", "lt", "not_null"}
+SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "not_null",
+    "unique",
+    "duplicate_required",
+}
+COMPARE_STYLE_OPERATORS = {"eq", "ne", "gt", "lt"}
+SET_STYLE_OPERATORS = {"unique", "duplicate_required"}
 SUPPORTED_LOCAL_SOURCE_SUFFIXES = {
     "local_excel": {".xls", ".xlsx"},
     "local_csv": {".csv"},
@@ -334,6 +357,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
+                    composite_config=rule.composite_config,
                 )
             )
             continue
@@ -348,6 +372,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
+                    composite_config=rule.composite_config,
                 )
             )
             continue
@@ -408,6 +433,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 rule_type=rule.rule_type,
                 operator=rule.operator,
                 expected_value=rule.expected_value,
+                composite_config=rule.composite_config,
             )
         )
 
@@ -705,7 +731,7 @@ def _normalize_rules(
     group_ids: set[str],
     variable_map: dict[str, VariableTag],
 ) -> list[FixedRuleDefinition]:
-    """???????????????"""
+    """???????????????????????"""
     normalized_rules: list[FixedRuleDefinition] = []
     seen_rule_ids: set[str] = set()
 
@@ -732,16 +758,24 @@ def _normalize_rules(
             raise ValueError(
                 f"???? '{rule_id}' ????????? '{target_variable_tag}'?"
             )
-        if (variable_map[target_variable_tag].variable_kind or "single") != "single":
-            raise ValueError(
-                f"固定规则 '{rule_id}' 只能绑定单个变量，当前变量 '{target_variable_tag}' "
-                "是组合变量。"
-            )
         if rule_type not in SUPPORTED_FIXED_RULE_TYPES:
-            raise ValueError(f"???? '{rule_id}' ??????????? '{rule_type}'?")
+            raise ValueError(f"???? '{rule_id}' ??????? rule_type '{rule_type}'?")
 
+        target_variable = variable_map[target_variable_tag]
+        variable_kind = target_variable.variable_kind or "single"
         normalized_operator: str | None = None
         normalized_expected_value: str | None = None
+        normalized_composite_config: CompositeRuleConfig | None = None
+
+        if variable_kind == "single" and rule_type == "composite_condition_check":
+            raise ValueError(
+                f"???? '{rule_id}' ???????? '{target_variable_tag}'????????????????"
+            )
+        if variable_kind == "composite" and rule_type != "composite_condition_check":
+            raise ValueError(
+                f"???? '{rule_id}' ???????? '{target_variable_tag}'???????????????"
+            )
+
         if rule_type == "fixed_value_compare":
             if operator not in SUPPORTED_FIXED_RULE_OPERATORS:
                 raise ValueError(
@@ -758,6 +792,12 @@ def _normalize_rules(
                     ) from exc
             normalized_operator = operator
             normalized_expected_value = expected_value
+        elif rule_type == "composite_condition_check":
+            normalized_composite_config = _normalize_composite_rule_config(
+                rule_id=rule_id,
+                variable=target_variable,
+                composite_config=rule.composite_config,
+            )
 
         normalized_rules.append(
             FixedRuleDefinition(
@@ -768,11 +808,184 @@ def _normalize_rules(
                 rule_type=rule_type,
                 operator=normalized_operator,
                 expected_value=normalized_expected_value,
+                composite_config=normalized_composite_config,
             )
         )
         seen_rule_ids.add(rule_id)
 
     return normalized_rules
+
+
+def _normalize_composite_rule_config(
+    *,
+    rule_id: str,
+    variable: VariableTag,
+    composite_config: CompositeRuleConfig | None,
+) -> CompositeRuleConfig:
+    """????????????????"""
+    if composite_config is None:
+        raise ValueError(f"???? '{rule_id}' ?? composite_config?")
+
+    available_fields = _collect_composite_available_fields(variable)
+    global_filters = _normalize_composite_conditions(
+        rule_id=rule_id,
+        conditions=composite_config.global_filters,
+        section_label="??????",
+        available_fields=available_fields,
+        allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+    )
+
+    normalized_branches: list[CompositeBranch] = []
+    seen_branch_ids: set[str] = set()
+    if not composite_config.branches:
+        raise ValueError(f"???? '{rule_id}' ???????????")
+
+    for branch_index, branch in enumerate(composite_config.branches, start=1):
+        branch_id = branch.branch_id.strip()
+        if not branch_id:
+            raise ValueError(f"???? '{rule_id}' ????? branch_id?")
+        if branch_id in seen_branch_ids:
+            raise ValueError(f"???? '{rule_id}' ??? ID ???'{branch_id}'?")
+        seen_branch_ids.add(branch_id)
+
+        filters = _normalize_composite_conditions(
+            rule_id=rule_id,
+            conditions=branch.filters,
+            section_label=f"?? {branch_index} ?????",
+            available_fields=available_fields,
+            allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+        )
+        assertions = _normalize_composite_conditions(
+            rule_id=rule_id,
+            conditions=branch.assertions,
+            section_label=f"?? {branch_index} ?????",
+            available_fields=available_fields,
+            allowed_operators=SUPPORTED_COMPOSITE_ASSERTION_OPERATORS,
+        )
+        if not assertions:
+            raise ValueError(f"???? '{rule_id}' ??? {branch_index} ???????????")
+
+        normalized_branches.append(
+            CompositeBranch(
+                branch_id=branch_id,
+                filters=filters,
+                assertions=assertions,
+            )
+        )
+
+    return CompositeRuleConfig(
+        global_filters=global_filters,
+        branches=normalized_branches,
+    )
+
+
+def _normalize_composite_conditions(
+    *,
+    rule_id: str,
+    conditions: list[CompositeCondition],
+    section_label: str,
+    available_fields: set[str],
+    allowed_operators: set[str],
+) -> list[CompositeCondition]:
+    """????????????????"""
+    normalized_conditions: list[CompositeCondition] = []
+    seen_condition_ids: set[str] = set()
+
+    for condition in conditions:
+        condition_id = condition.condition_id.strip()
+        field = condition.field.strip()
+        operator = str(condition.operator).strip()
+        value_source = condition.value_source
+        expected_value = condition.expected_value.strip() if condition.expected_value else ""
+        expected_field = condition.expected_field.strip() if condition.expected_field else ""
+
+        if not condition_id:
+            raise ValueError(f"???? '{rule_id}' ?{section_label}???? condition_id ????")
+        if condition_id in seen_condition_ids:
+            raise ValueError(
+                f"???? '{rule_id}' ?{section_label}???? condition_id?'{condition_id}'?"
+            )
+        if not field:
+            raise ValueError(f"???? '{rule_id}' ?{section_label}??????????")
+        if field not in available_fields:
+            raise ValueError(
+                f"???? '{rule_id}' ?{section_label}????????? '{field}'?"
+            )
+        if operator not in allowed_operators:
+            raise ValueError(
+                f"???? '{rule_id}' ?{section_label}?????????? '{operator}'?"
+            )
+
+        normalized_value_source: str | None = None
+        normalized_expected_value: str | None = None
+        normalized_expected_field: str | None = None
+
+        if operator in COMPARE_STYLE_OPERATORS:
+            normalized_value_source = value_source or "literal"
+            if normalized_value_source == "literal":
+                if not expected_value:
+                    raise ValueError(f"???? '{rule_id}' ?{section_label}??????")
+                if operator in {"gt", "lt"}:
+                    try:
+                        float(expected_value)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"???? '{rule_id}' ?{section_label}? '{operator}' ????????????"
+                        ) from exc
+                normalized_expected_value = expected_value
+            elif normalized_value_source == "field":
+                if not expected_field:
+                    raise ValueError(f"???? '{rule_id}' ?{section_label}?????????")
+                if expected_field not in available_fields:
+                    raise ValueError(
+                        f"???? '{rule_id}' ?{section_label}??????????? '{expected_field}'?"
+                    )
+                normalized_expected_field = expected_field
+            else:
+                raise ValueError(
+                    f"???? '{rule_id}' ?{section_label}??????? value_source '{value_source}'?"
+                )
+        elif operator == "not_null":
+            normalized_value_source = None
+            if value_source or expected_value or expected_field:
+                raise ValueError(
+                    f"???? '{rule_id}' ?{section_label}? 'not_null' ????????????"
+                )
+        elif operator in SET_STYLE_OPERATORS:
+            if value_source or expected_value or expected_field:
+                raise ValueError(
+                    f"???? '{rule_id}' ?{section_label}? '{operator}' ????????????"
+                )
+        else:
+            raise ValueError(
+                f"???? '{rule_id}' ?{section_label}?????????? '{operator}'?"
+            )
+
+        normalized_conditions.append(
+            CompositeCondition(
+                condition_id=condition_id,
+                field=field,
+                operator=operator,
+                value_source=normalized_value_source,
+                expected_value=normalized_expected_value,
+                expected_field=normalized_expected_field,
+            )
+        )
+        seen_condition_ids.add(condition_id)
+
+    return normalized_conditions
+
+
+def _collect_composite_available_fields(variable: VariableTag) -> set[str]:
+    """??????????????????"""
+    available_fields = {COMPOSITE_KEY_FIELD}
+    key_column = (variable.key_column or "").strip()
+    available_fields.update(
+        column.strip()
+        for column in (variable.columns or [])
+        if column and column.strip() and column.strip() != key_column
+    )
+    return available_fields
 
 
 def _normalize_local_source_path(
@@ -966,7 +1179,16 @@ def _build_fixed_rule_params(
     rule: FixedRuleDefinition,
     target_variable: VariableTag,
 ) -> dict[str, object]:
-    """?????????????????????????"""
+    """???????????????? params?"""
+    if rule.rule_type == "composite_condition_check":
+        return {
+            "target_tag": target_variable.tag,
+            "rule_name": rule.rule_name,
+            "composite_config": rule.composite_config.model_dump(mode="json", exclude_none=True)
+            if rule.composite_config
+            else None,
+        }
+
     location = f"{target_variable.sheet} -> {target_variable.column}"
 
     if rule.rule_type == "fixed_value_compare":

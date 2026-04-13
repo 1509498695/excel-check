@@ -16,6 +16,11 @@ import SectionBlock from '../components/workbench/SectionBlock.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import { useFixedRulesStore } from '../store/fixedRules'
 import type {
+  CompositeAssertionOperator,
+  CompositeBranch,
+  CompositeCondition,
+  CompositeFilterOperator,
+  CompositeRuleConfig,
   FixedRuleDefinition,
   FixedRuleOperator,
   FixedRuleSelection,
@@ -23,6 +28,9 @@ import type {
 import type { DataSource, VariableTag } from '../types/workbench'
 
 type SectionStatus = 'pending' | 'active' | 'done'
+type ConditionMode = 'filter' | 'assertion'
+
+const KEY_FIELD = '__key__'
 
 const store = useFixedRulesStore()
 
@@ -50,6 +58,11 @@ const ruleForm = reactive<{
   expected_value: '0',
 })
 
+const compositeRuleForm = reactive<CompositeRuleConfig>({
+  global_filters: [],
+  branches: [],
+})
+
 const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> = [
   { label: '等于 (=)', value: 'eq' },
   { label: '不等于 (!=)', value: 'ne' },
@@ -59,7 +72,31 @@ const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> 
   { label: '唯一校验', value: 'unique' },
 ]
 
+const compositeFilterOptions: Array<{ label: string; value: CompositeFilterOperator }> = [
+  { label: '等于 (=)', value: 'eq' },
+  { label: '不等于 (!=)', value: 'ne' },
+  { label: '大于 (>)', value: 'gt' },
+  { label: '小于 (<)', value: 'lt' },
+  { label: '非空校验', value: 'not_null' },
+]
+
+const compositeAssertionOptions: Array<{ label: string; value: CompositeAssertionOperator }> = [
+  { label: '等于 (=)', value: 'eq' },
+  { label: '不等于 (!=)', value: 'ne' },
+  { label: '大于 (>)', value: 'gt' },
+  { label: '小于 (<)', value: 'lt' },
+  { label: '非空校验', value: 'not_null' },
+  { label: '唯一校验', value: 'unique' },
+  { label: '必须重复', value: 'duplicate_required' },
+]
+
 const compareRuleSelections = new Set<FixedRuleOperator>(['eq', 'ne', 'gt', 'lt'])
+const compositeCompareOperators = new Set<CompositeFilterOperator | CompositeAssertionOperator>([
+  'eq',
+  'ne',
+  'gt',
+  'lt',
+])
 const ruleSelectionNameMap: Record<FixedRuleSelection, string> = {
   eq: '等于',
   ne: '不等于',
@@ -83,7 +120,7 @@ const variableMap = computed(
 const sourceMap = computed(
   () => new Map(store.sources.map((source) => [source.id, source] as const)),
 )
-const singleVariableOptions = computed(() => store.singleVariables)
+const variableOptions = computed(() => store.variables)
 const sourceIssueMap = computed(() =>
   store.configIssues.reduce<Record<string, string>>((accumulator, issue) => {
     if (issue.source_id && !accumulator[issue.source_id]) {
@@ -104,8 +141,33 @@ const selectedRuleSource = computed<DataSource | null>(() =>
     ? sourceMap.value.get(selectedRuleVariable.value.source_id) ?? null
     : null,
 )
+const isCompositeRuleTarget = computed(
+  () => (selectedRuleVariable.value?.variable_kind ?? 'single') === 'composite',
+)
+const compositeFieldOptions = computed(() => {
+  const variable = selectedRuleVariable.value
+  if (!variable || (variable.variable_kind ?? 'single') !== 'composite') {
+    return [] as Array<{ label: string; value: string }>
+  }
 
-const shouldShowExpectedValue = computed(() => isCompareRuleSelection(ruleForm.selected_rule))
+  const keyColumn = variable.key_column?.trim() ?? ''
+  return [
+    {
+      label: keyColumn ? `${keyColumn} (Key)` : 'Key(映射键)',
+      value: KEY_FIELD,
+    },
+    ...(variable.columns ?? [])
+      .map((column) => column.trim())
+      .filter((column) => column && column !== keyColumn)
+      .map((column) => ({ label: column, value: column })),
+  ]
+})
+
+const canCreateRule = computed(() => variableOptions.value.length > 0)
+
+const shouldShowExpectedValue = computed(
+  () => !isCompositeRuleTarget.value && isCompareRuleSelection(ruleForm.selected_rule),
+)
 const expectedValuePlaceholder = computed(() =>
   ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
     ? '请输入要比较的精确值'
@@ -130,9 +192,9 @@ const variableStepHint = computed(() => {
     return '需要先完成固定规则页的数据源接入。'
   }
   if (!store.variableCount) {
-    return '先抽取至少一个单变量，固定规则弹窗才会出现可选的目标变量。'
+    return '先抽取至少一个变量。单变量可做比较/非空/唯一校验，组合变量可做条件分支校验。'
   }
-  return `当前固定规则页已保存 ${store.variableCount} 个变量，可直接复用于固定规则弹窗。`
+  return `当前固定规则页已保存 ${store.variableCount} 个变量，单变量与组合变量都可以直接复用于固定规则弹窗。`
 })
 
 const overviewItems = computed(() => [
@@ -232,11 +294,211 @@ function isCompareRuleSelection(value: FixedRuleSelection): value is FixedRuleOp
   return compareRuleSelections.has(value as FixedRuleOperator)
 }
 
+function isCompositeCompareOperator(
+  value: CompositeFilterOperator | CompositeAssertionOperator,
+): value is FixedRuleOperator {
+  return compositeCompareOperators.has(value)
+}
+
+function createId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createCondition(): CompositeCondition {
+  return {
+    condition_id: createId('condition'),
+    field: '',
+    operator: 'eq',
+    value_source: 'literal',
+    expected_value: '',
+    expected_field: '',
+  }
+}
+
+function createBranch(): CompositeBranch {
+  return {
+    branch_id: createId('branch'),
+    filters: [],
+    assertions: [createCondition()],
+  }
+}
+
+function normalizeCompositeConfig(config?: CompositeRuleConfig): CompositeRuleConfig {
+  return {
+    global_filters: (config?.global_filters ?? []).map((condition) => ({
+      ...condition,
+      condition_id: condition.condition_id || createId('condition'),
+    })),
+    branches: (config?.branches?.length ? config.branches : [createBranch()]).map((branch) => ({
+      branch_id: branch.branch_id || createId('branch'),
+      filters: (branch.filters ?? []).map((condition) => ({
+        ...condition,
+        condition_id: condition.condition_id || createId('condition'),
+      })),
+      assertions: (branch.assertions?.length ? branch.assertions : [createCondition()]).map((condition) => ({
+        ...condition,
+        condition_id: condition.condition_id || createId('condition'),
+      })),
+    })),
+  }
+}
+
+function applyCompositeConfig(config?: CompositeRuleConfig): void {
+  const next = normalizeCompositeConfig(config)
+  compositeRuleForm.global_filters = next.global_filters
+  compositeRuleForm.branches = next.branches
+}
+
+function resetCompositeConfig(): void {
+  applyCompositeConfig(undefined)
+}
+
+function addGlobalFilter(): void {
+  compositeRuleForm.global_filters.push(createCondition())
+}
+
+function removeGlobalFilter(conditionId: string): void {
+  compositeRuleForm.global_filters = compositeRuleForm.global_filters.filter(
+    (condition) => condition.condition_id !== conditionId,
+  )
+}
+
+function addBranch(): void {
+  compositeRuleForm.branches.push(createBranch())
+}
+
+function removeBranch(branchId: string): void {
+  compositeRuleForm.branches = compositeRuleForm.branches.filter((branch) => branch.branch_id !== branchId)
+}
+
+function addBranchFilter(branch: CompositeBranch): void {
+  branch.filters.push(createCondition())
+}
+
+function removeBranchFilter(branch: CompositeBranch, conditionId: string): void {
+  branch.filters = branch.filters.filter((condition) => condition.condition_id !== conditionId)
+}
+
+function addBranchAssertion(branch: CompositeBranch): void {
+  branch.assertions.push(createCondition())
+}
+
+function removeBranchAssertion(branch: CompositeBranch, conditionId: string): void {
+  branch.assertions = branch.assertions.filter((condition) => condition.condition_id !== conditionId)
+}
+
+function setConditionOperator(
+  condition: CompositeCondition,
+  operator: CompositeFilterOperator | CompositeAssertionOperator,
+): void {
+  condition.operator = operator
+  if (!isCompositeCompareOperator(operator)) {
+    condition.value_source = undefined
+    condition.expected_value = undefined
+    condition.expected_field = undefined
+    return
+  }
+
+  if (condition.value_source !== 'field' && condition.value_source !== 'literal') {
+    condition.value_source = 'literal'
+  }
+  if (condition.value_source === 'field') {
+    condition.expected_value = undefined
+  } else {
+    condition.expected_field = undefined
+  }
+}
+
+function setConditionValueSource(condition: CompositeCondition, valueSource: 'literal' | 'field'): void {
+  condition.value_source = valueSource
+  if (valueSource === 'field') {
+    condition.expected_value = undefined
+  } else {
+    condition.expected_field = undefined
+  }
+}
+
+function shouldShowConditionValueSource(condition: CompositeCondition): boolean {
+  return isCompositeCompareOperator(condition.operator)
+}
+
+function shouldShowConditionExpectedValue(condition: CompositeCondition): boolean {
+  return isCompositeCompareOperator(condition.operator) && (condition.value_source ?? 'literal') === 'literal'
+}
+
+function shouldShowConditionExpectedField(condition: CompositeCondition): boolean {
+  return isCompositeCompareOperator(condition.operator) && condition.value_source === 'field'
+}
+
+function getConditionOptions(mode: ConditionMode) {
+  return mode === 'filter' ? compositeFilterOptions : compositeAssertionOptions
+}
+
+function handleFilterOperatorChange(condition: CompositeCondition, value: string): void {
+  setConditionOperator(condition, value as CompositeFilterOperator)
+}
+
+function handleAssertionOperatorChange(condition: CompositeCondition, value: string): void {
+  setConditionOperator(condition, value as CompositeAssertionOperator)
+}
+
+function handleConditionValueSourceChange(condition: CompositeCondition, value: string): void {
+  setConditionValueSource(condition, value as 'literal' | 'field')
+}
+
+function isKnownCompositeField(field: string): boolean {
+  return compositeFieldOptions.value.some((option) => option.value === field)
+}
+
+function validateCompositeCondition(
+  condition: CompositeCondition,
+  mode: ConditionMode,
+  label: string,
+): string | null {
+  if (!condition.field.trim()) {
+    return `${label}缺少字段。`
+  }
+  if (!isKnownCompositeField(condition.field.trim())) {
+    return `${label}引用了当前组合变量中不存在的字段。`
+  }
+  if (mode === 'filter' && (condition.operator === 'unique' || condition.operator === 'duplicate_required')) {
+    return `${label}的筛选条件不支持唯一或必须重复。`
+  }
+  if (!isCompositeCompareOperator(condition.operator)) {
+    return null
+  }
+
+  if ((condition.value_source ?? 'literal') === 'field') {
+    if (!condition.expected_field?.trim()) {
+      return `${label}缺少右侧字段。`
+    }
+    if (!isKnownCompositeField(condition.expected_field.trim())) {
+      return `${label}引用了无效的右侧字段。`
+    }
+    return null
+  }
+
+  if (!condition.expected_value?.trim()) {
+    return `${label}缺少比较值。`
+  }
+  if ((condition.operator === 'gt' || condition.operator === 'lt') && Number.isNaN(Number(condition.expected_value))) {
+    return `${label}的大于/小于比较值必须是合法数字。`
+  }
+  return null
+}
+
 function getSourcePath(source: DataSource | null | undefined): string {
   if (!source) {
     return ''
   }
   return source.pathOrUrl ?? source.path ?? source.url ?? ''
+}
+
+function getCompositeFieldLabel(field: string, variable: VariableTag | null): string {
+  if (field !== KEY_FIELD) {
+    return field
+  }
+  return `${variable?.key_column || 'Key'} (Key)`
 }
 
 function resolveRuleVariable(rule: FixedRuleDefinition): VariableTag | null {
@@ -264,7 +526,7 @@ function getRuleSelectionValue(rule: FixedRuleDefinition): FixedRuleSelection {
   if (rule.rule_type === 'fixed_value_compare') {
     return rule.operator ?? 'gt'
   }
-  return rule.rule_type
+  return rule.rule_type as FixedRuleSelection
 }
 
 function getVariableColumnSummary(variable: VariableTag | null | undefined): string {
@@ -272,7 +534,11 @@ function getVariableColumnSummary(variable: VariableTag | null | undefined): str
     return '未绑定变量'
   }
   if ((variable.variable_kind ?? 'single') === 'composite') {
-    return (variable.columns ?? []).join(' / ') || '组合变量'
+    return `Key=${variable.key_column || 'Key'}；成员列：${
+      (variable.columns ?? [])
+        .filter((column) => column !== variable.key_column)
+        .join(' / ') || '未配置'
+    }`
   }
   return variable.column?.trim() || '未配置列'
 }
@@ -291,6 +557,9 @@ function buildDefaultRuleName(
   }
 
   const normalizedSheet = variable.sheet.trim()
+  if ((variable.variable_kind ?? 'single') === 'composite') {
+    return `${normalizedSheet}-${variable.tag}-条件分支校验`
+  }
   const normalizedColumn = variable.column?.trim() ?? ''
   if (!normalizedSheet || !normalizedColumn) {
     return ''
@@ -340,9 +609,59 @@ function syncRuleNameWithForm(): void {
   }
 }
 
+function summarizeCondition(
+  condition: CompositeCondition,
+  variable: VariableTag | null,
+): string {
+  const fieldLabel = getCompositeFieldLabel(condition.field, variable)
+  if (condition.operator === 'not_null') {
+    return `${fieldLabel} 非空`
+  }
+  if (condition.operator === 'unique') {
+    return `${fieldLabel} 唯一`
+  }
+  if (condition.operator === 'duplicate_required') {
+    return `${fieldLabel} 必须重复`
+  }
+
+  const operator = {
+    eq: '=',
+    ne: '!=',
+    gt: '>',
+    lt: '<',
+  }[condition.operator as FixedRuleOperator]
+  const expected = condition.value_source === 'field'
+    ? getCompositeFieldLabel(condition.expected_field ?? '', variable)
+    : condition.expected_value ?? ''
+  return `${fieldLabel} ${operator} ${expected}`
+}
+
 function buildRuleCondition(rule: FixedRuleDefinition): string {
   const variable = resolveRuleVariable(rule)
-  const columnName = variable?.column?.trim() || rule.target_variable_tag
+  const columnName =
+    (variable?.variable_kind ?? 'single') === 'composite'
+      ? variable?.tag ?? rule.target_variable_tag
+      : variable?.column?.trim() || rule.target_variable_tag
+  if (rule.rule_type === 'composite_condition_check') {
+    const segments: string[] = []
+    if (rule.composite_config?.global_filters.length) {
+      segments.push(
+        `全局：${rule.composite_config.global_filters
+          .map((condition) => summarizeCondition(condition, variable))
+          .join(' 且 ')}`,
+      )
+    }
+    rule.composite_config?.branches.forEach((branch, index) => {
+      segments.push(
+        `分支 ${index + 1}：${
+          branch.filters.length
+            ? branch.filters.map((condition) => summarizeCondition(condition, variable)).join(' 且 ')
+            : '命中全部'
+        } => ${branch.assertions.map((condition) => summarizeCondition(condition, variable)).join('，')}`,
+      )
+    })
+    return segments.join('；')
+  }
   if (rule.rule_type === 'not_null') {
     return `${columnName} 非空校验`
   }
@@ -353,6 +672,9 @@ function buildRuleCondition(rule: FixedRuleDefinition): string {
 }
 
 function buildRuleSelectionSummary(rule: FixedRuleDefinition): string {
+  if (rule.rule_type === 'composite_condition_check') {
+    return '组合变量条件分支校验'
+  }
   return getRuleSelectionLabel(getRuleSelectionValue(rule))
 }
 
@@ -450,9 +772,10 @@ function openCreateRuleDialog(): void {
   ruleForm.rule_id = ''
   ruleForm.group_id = store.selectedGroup.group_id
   ruleForm.rule_name = ''
-  ruleForm.target_variable_tag = singleVariableOptions.value[0]?.tag ?? ''
+  ruleForm.target_variable_tag = variableOptions.value[0]?.tag ?? ''
   ruleForm.selected_rule = 'gt'
   ruleForm.expected_value = '0'
+  resetCompositeConfig()
   isRuleNameManuallyEdited.value = false
   lastAutoGeneratedRuleName.value = ''
   isInitializingRuleDialog.value = false
@@ -467,8 +790,15 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
   ruleForm.group_id = rule.group_id
   ruleForm.rule_name = rule.rule_name
   ruleForm.target_variable_tag = rule.target_variable_tag
-  ruleForm.selected_rule = getRuleSelectionValue(rule)
-  ruleForm.expected_value = rule.expected_value ?? ''
+  if (rule.rule_type === 'composite_condition_check') {
+    ruleForm.selected_rule = 'gt'
+    ruleForm.expected_value = ''
+    applyCompositeConfig(rule.composite_config)
+  } else {
+    ruleForm.selected_rule = getRuleSelectionValue(rule)
+    ruleForm.expected_value = rule.expected_value ?? ''
+    resetCompositeConfig()
+  }
   const defaultRuleName = buildDefaultRuleName(
     resolveRuleVariable(rule),
     ruleForm.selected_rule,
@@ -496,9 +826,60 @@ function validateRuleForm(): boolean {
   }
 
   const variable = selectedRuleVariable.value
-  if (!variable || (variable.variable_kind ?? 'single') !== 'single') {
-    ElMessage.warning('当前规则只能绑定固定规则页变量池中的单变量。')
+  if (!variable) {
+    ElMessage.warning('当前目标变量不存在，请重新选择。')
     return false
+  }
+
+  if ((variable.variable_kind ?? 'single') === 'composite') {
+    if (!compositeRuleForm.branches.length) {
+      ElMessage.warning('组合变量规则至少需要一个条件分支。')
+      return false
+    }
+
+    for (let index = 0; index < compositeRuleForm.global_filters.length; index += 1) {
+      const error = validateCompositeCondition(
+        compositeRuleForm.global_filters[index],
+        'filter',
+        `全局筛选条件 ${index + 1}`,
+      )
+      if (error) {
+        ElMessage.warning(error)
+        return false
+      }
+    }
+
+    for (let branchIndex = 0; branchIndex < compositeRuleForm.branches.length; branchIndex += 1) {
+      const branch = compositeRuleForm.branches[branchIndex]
+      if (!branch.assertions.length) {
+        ElMessage.warning(`分支 ${branchIndex + 1} 至少需要一条校验条件。`)
+        return false
+      }
+      for (let filterIndex = 0; filterIndex < branch.filters.length; filterIndex += 1) {
+        const error = validateCompositeCondition(
+          branch.filters[filterIndex],
+          'filter',
+          `分支 ${branchIndex + 1} 的筛选条件 ${filterIndex + 1}`,
+        )
+        if (error) {
+          ElMessage.warning(error)
+          return false
+        }
+      }
+      for (let assertionIndex = 0; assertionIndex < branch.assertions.length; assertionIndex += 1) {
+        const error = validateCompositeCondition(
+          branch.assertions[assertionIndex],
+          'assertion',
+          `分支 ${branchIndex + 1} 的校验条件 ${assertionIndex + 1}`,
+        )
+        if (error) {
+          ElMessage.warning(error)
+          return false
+        }
+      }
+    }
+
+    return true
   }
 
   if (!shouldShowExpectedValue.value) {
@@ -524,25 +905,36 @@ async function handleSaveRule(): Promise<void> {
     return
   }
 
-  const selectedRule = ruleForm.selected_rule
-  if (isCompareRuleSelection(selectedRule)) {
+  if (isCompositeRuleTarget.value) {
     store.upsertRule({
       rule_id: ruleForm.rule_id || undefined,
       group_id: ruleForm.group_id,
       rule_name: ruleForm.rule_name,
       target_variable_tag: ruleForm.target_variable_tag,
-      rule_type: 'fixed_value_compare',
-      operator: selectedRule,
-      expected_value: ruleForm.expected_value,
+      rule_type: 'composite_condition_check',
+      composite_config: normalizeCompositeConfig(compositeRuleForm),
     })
   } else {
-    store.upsertRule({
-      rule_id: ruleForm.rule_id || undefined,
-      group_id: ruleForm.group_id,
-      rule_name: ruleForm.rule_name,
-      target_variable_tag: ruleForm.target_variable_tag,
-      rule_type: selectedRule,
-    })
+    const selectedRule = ruleForm.selected_rule
+    if (isCompareRuleSelection(selectedRule)) {
+      store.upsertRule({
+        rule_id: ruleForm.rule_id || undefined,
+        group_id: ruleForm.group_id,
+        rule_name: ruleForm.rule_name,
+        target_variable_tag: ruleForm.target_variable_tag,
+        rule_type: 'fixed_value_compare',
+        operator: selectedRule,
+        expected_value: ruleForm.expected_value,
+      })
+    } else {
+      store.upsertRule({
+        rule_id: ruleForm.rule_id || undefined,
+        group_id: ruleForm.group_id,
+        rule_name: ruleForm.rule_name,
+        target_variable_tag: ruleForm.target_variable_tag,
+        rule_type: selectedRule,
+      })
+    }
   }
 
   const success = await persistConfig(
@@ -676,7 +1068,7 @@ async function handleSvnUpdate(): Promise<void> {
       show-icon
       :closable="false"
       title="当前存在待修复规则"
-      description="有规则缺少目标变量、规则名称为空，或比较值格式不合法。修复这些规则后才允许执行固定规则。"
+      description="有规则缺少目标变量、规则名称为空，比较值格式不合法，或组合变量分支配置不完整。修复这些规则后才允许执行固定规则。"
     />
 
     <div class="rule-binding-layout" v-loading="isBootstrapping || store.isLoading">
@@ -697,7 +1089,7 @@ async function handleSvnUpdate(): Promise<void> {
       <SectionBlock
         step="2"
         title="变量池构建"
-        description="固定规则页复用工作台的变量池构建能力，并把单变量、组合变量都沉淀到固定规则配置中。新增规则时只消费其中的单变量。"
+        description="固定规则页复用工作台的变量池构建能力，并把单变量、组合变量都沉淀到固定规则配置中。新增规则时，单变量走简单规则，组合变量走条件分支校验。"
         :status="variableStepStatus"
         :hint="variableStepHint"
       >
@@ -768,7 +1160,7 @@ async function handleSvnUpdate(): Promise<void> {
               </el-tag>
             </div>
             <p>
-              固定规则现在直接绑定固定规则页变量池中的单变量，不再单独维护规则文件路径、Sheet 和目标列。先在上方变量池构建单变量，再回来编排固定规则。
+              固定规则现在直接绑定固定规则页变量池中的变量，不再单独维护规则文件路径、Sheet 和目标列。单变量用于比较/非空/唯一规则，组合变量用于条件分支校验。
             </p>
           </div>
 
@@ -792,7 +1184,7 @@ async function handleSvnUpdate(): Promise<void> {
             <el-button
               type="primary"
               :icon="Plus"
-              :disabled="!singleVariableOptions.length"
+              :disabled="!canCreateRule"
               @click="openCreateRuleDialog"
             >
               新增规则
@@ -801,17 +1193,17 @@ async function handleSvnUpdate(): Promise<void> {
         </div>
 
         <div
-          v-if="!singleVariableOptions.length"
+          v-if="!canCreateRule"
           class="compact-empty-state rule-empty-state"
         >
-          当前还没有可用于固定规则的单变量。请先在上方“变量池构建”模块中保存至少一个单变量。
+          当前还没有可用于固定规则的变量。请先在上方“变量池构建”模块中保存单变量或组合变量。
         </div>
 
         <div
           v-else-if="!store.currentGroupRules.length"
           class="compact-empty-state rule-empty-state"
         >
-          当前规则组还没有规则。你可以直接从固定规则变量池里选择单变量，快速创建比较、非空或唯一校验规则。
+          当前规则组还没有规则。你可以直接从固定规则变量池里选择单变量创建比较/非空/唯一规则，或选择组合变量创建条件分支校验。
         </div>
 
         <div v-else class="rule-table-shell">
@@ -844,6 +1236,9 @@ async function handleSvnUpdate(): Promise<void> {
                 <div class="rule-operator-cell">
                   <span>{{ buildRuleSelectionSummary(row) }}</span>
                   <strong v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</strong>
+                  <strong v-else-if="row.rule_type === 'composite_condition_check'">
+                    {{ row.composite_config?.branches.length ?? 0 }} 个分支
+                  </strong>
                   <strong v-else>无需比较值</strong>
                 </div>
               </template>
@@ -996,10 +1391,10 @@ async function handleSvnUpdate(): Promise<void> {
             v-model="ruleForm.target_variable_tag"
             class="full-width"
             filterable
-            placeholder="从固定规则页变量池选择单变量"
+            placeholder="从固定规则页变量池选择目标变量"
           >
             <el-option
-              v-for="variable in singleVariableOptions"
+              v-for="variable in variableOptions"
               :key="variable.tag"
               :label="buildVariableOptionLabel(variable)"
               :value="variable.tag"
@@ -1009,14 +1404,18 @@ async function handleSvnUpdate(): Promise<void> {
 
         <div class="rule-dialog-hint">
           <span v-if="selectedRuleVariable">
-            来源数据源：{{ selectedRuleVariable.source_id }}；Sheet：{{ selectedRuleVariable.sheet }}；列名：{{ selectedRuleVariable.column }}；路径：{{ getSourcePath(selectedRuleSource) || '当前数据源未记录路径' }}
+            来源数据源：{{ selectedRuleVariable.source_id }}；Sheet：{{ selectedRuleVariable.sheet }}；{{
+              (selectedRuleVariable.variable_kind ?? 'single') === 'composite'
+                ? `变量结构：${getVariableColumnSummary(selectedRuleVariable)}`
+                : `列名：${selectedRuleVariable.column}`
+            }}；路径：{{ getSourcePath(selectedRuleSource) || '当前数据源未记录路径' }}
           </span>
           <span v-else>
-            请先从固定规则页变量池中选择一个单变量。固定规则弹窗不再单独维护规则文件路径、Sheet 和目标列。
+            请先从固定规则页变量池中选择目标变量。固定规则弹窗不再单独维护规则文件路径、Sheet 和目标列。
           </span>
         </div>
 
-        <div class="rule-grid">
+        <div v-if="!isCompositeRuleTarget" class="rule-grid">
           <el-form-item label="规则选择">
             <el-select v-model="ruleForm.selected_rule" class="full-width">
               <el-option
@@ -1031,6 +1430,264 @@ async function handleSvnUpdate(): Promise<void> {
           <el-form-item v-if="shouldShowExpectedValue" label="比较值">
             <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
           </el-form-item>
+        </div>
+
+        <div v-else class="composite-rule-builder">
+          <section class="composite-rule-section">
+            <div class="composite-rule-section-head">
+              <div>
+                <strong>全局筛选条件</strong>
+                <p>先筛出需要参与后续分支判断的记录，例如 `Key > 100000`。</p>
+              </div>
+              <el-button plain :icon="Plus" @click="addGlobalFilter">添加全局条件</el-button>
+            </div>
+
+            <div v-if="!compositeRuleForm.global_filters.length" class="composite-rule-empty">
+              当前没有全局筛选条件，默认所有记录都会进入后续分支判断。
+            </div>
+
+            <div
+              v-for="(condition, index) in compositeRuleForm.global_filters"
+              :key="condition.condition_id"
+              class="composite-condition-card"
+            >
+              <div class="composite-condition-head">
+                <strong>全局条件 {{ index + 1 }}</strong>
+                <el-button link type="danger" @click="removeGlobalFilter(condition.condition_id)">
+                  删除
+                </el-button>
+              </div>
+              <div class="composite-condition-grid">
+                <el-form-item label="字段">
+                  <el-select v-model="condition.field" class="full-width">
+                    <el-option
+                      v-for="field in compositeFieldOptions"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item label="筛选条件">
+                  <el-select
+                    :model-value="condition.operator"
+                    class="full-width"
+                    @change="handleFilterOperatorChange(condition, $event)"
+                  >
+                    <el-option
+                      v-for="option in getConditionOptions('filter')"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
+                  <el-select
+                    :model-value="condition.value_source ?? 'literal'"
+                    class="full-width"
+                    @change="handleConditionValueSourceChange(condition, $event)"
+                  >
+                    <el-option label="固定值" value="literal" />
+                    <el-option label="字段" value="field" />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
+                  <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                </el-form-item>
+
+                <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
+                  <el-select v-model="condition.expected_field" class="full-width">
+                    <el-option
+                      v-for="field in compositeFieldOptions"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </div>
+            </div>
+          </section>
+
+          <section class="composite-rule-section">
+            <div class="composite-rule-section-head">
+              <div>
+                <strong>条件分支列表</strong>
+                <p>每个分支由命中条件和校验条件组成。筛选命中后，再对该子集执行唯一、重复或字段比较校验。</p>
+              </div>
+              <el-button type="primary" plain :icon="Plus" @click="addBranch">添加分支</el-button>
+            </div>
+
+            <div
+              v-for="(branch, branchIndex) in compositeRuleForm.branches"
+              :key="branch.branch_id"
+              class="composite-branch-card"
+            >
+              <div class="composite-condition-head">
+                <div>
+                  <strong>分支 {{ branchIndex + 1 }}</strong>
+                  <p>先命中分支筛选条件，再执行分支校验条件。</p>
+                </div>
+                <el-button link type="danger" @click="removeBranch(branch.branch_id)">删除分支</el-button>
+              </div>
+
+              <div class="composite-branch-section">
+                <div class="composite-rule-subhead">
+                  <strong>分支筛选条件</strong>
+                  <el-button plain @click="addBranchFilter(branch)">添加筛选条件</el-button>
+                </div>
+                <div v-if="!branch.filters.length" class="composite-rule-empty">
+                  当前分支没有筛选条件，表示全局筛选命中的记录都会进入这个分支。
+                </div>
+                <div
+                  v-for="(condition, filterIndex) in branch.filters"
+                  :key="condition.condition_id"
+                  class="composite-condition-card is-nested"
+                >
+                  <div class="composite-condition-head">
+                    <strong>筛选条件 {{ filterIndex + 1 }}</strong>
+                    <el-button link type="danger" @click="removeBranchFilter(branch, condition.condition_id)">
+                      删除
+                    </el-button>
+                  </div>
+                  <div class="composite-condition-grid">
+                    <el-form-item label="字段">
+                      <el-select v-model="condition.field" class="full-width">
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item label="筛选条件">
+                      <el-select
+                        :model-value="condition.operator"
+                        class="full-width"
+                        @change="handleFilterOperatorChange(condition, $event)"
+                      >
+                        <el-option
+                          v-for="option in getConditionOptions('filter')"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
+                      <el-select
+                        :model-value="condition.value_source ?? 'literal'"
+                        class="full-width"
+                        @change="handleConditionValueSourceChange(condition, $event)"
+                      >
+                        <el-option label="固定值" value="literal" />
+                        <el-option label="字段" value="field" />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
+                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
+                      <el-select v-model="condition.expected_field" class="full-width">
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+                  </div>
+                </div>
+              </div>
+
+              <div class="composite-branch-section">
+                <div class="composite-rule-subhead">
+                  <strong>分支校验条件</strong>
+                  <el-button type="primary" plain @click="addBranchAssertion(branch)">添加校验条件</el-button>
+                </div>
+                <div
+                  v-for="(condition, assertionIndex) in branch.assertions"
+                  :key="condition.condition_id"
+                  class="composite-condition-card is-nested"
+                >
+                  <div class="composite-condition-head">
+                    <strong>校验条件 {{ assertionIndex + 1 }}</strong>
+                    <el-button
+                      link
+                      type="danger"
+                      :disabled="branch.assertions.length === 1"
+                      @click="removeBranchAssertion(branch, condition.condition_id)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                  <div class="composite-condition-grid">
+                    <el-form-item label="字段">
+                      <el-select v-model="condition.field" class="full-width">
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item label="校验条件">
+                      <el-select
+                        :model-value="condition.operator"
+                        class="full-width"
+                        @change="handleAssertionOperatorChange(condition, $event)"
+                      >
+                        <el-option
+                          v-for="option in getConditionOptions('assertion')"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
+                      <el-select
+                        :model-value="condition.value_source ?? 'literal'"
+                        class="full-width"
+                        @change="handleConditionValueSourceChange(condition, $event)"
+                      >
+                        <el-option label="固定值" value="literal" />
+                        <el-option label="字段" value="field" />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
+                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                    </el-form-item>
+
+                    <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
+                      <el-select v-model="condition.expected_field" class="full-width">
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </el-form>
 

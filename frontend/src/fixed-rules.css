@@ -293,6 +293,88 @@
   font-size: 12px;
 }
 
+.composite-rule-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.composite-rule-section,
+.composite-branch-card,
+.composite-condition-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+
+.composite-rule-section {
+  padding: 16px;
+}
+
+.composite-rule-section-head,
+.composite-condition-head,
+.composite-rule-subhead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composite-rule-section-head strong,
+.composite-condition-head strong,
+.composite-rule-subhead strong {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.composite-rule-section-head p,
+.composite-condition-head p,
+.composite-rule-empty,
+.composite-rule-subhead p {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.composite-rule-empty {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.composite-condition-card {
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.composite-condition-card.is-nested {
+  margin-top: 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.composite-condition-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  margin-top: 12px;
+}
+
+.composite-branch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.composite-branch-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 @media (max-width: 1180px) {
   .rule-binding-header,
   .group-band-head,
@@ -312,7 +394,8 @@
   }
 
   .rule-dialog-grid,
-  .rule-grid {
+  .rule-grid,
+  .composite-condition-grid {
     grid-template-columns: 1fr;
   }
 }
