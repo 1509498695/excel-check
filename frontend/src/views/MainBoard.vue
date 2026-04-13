@@ -3,11 +3,12 @@ import { computed, nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   CircleCheckFilled,
-  Connection,
-  DataAnalysis,
-  Files,
-  Lightning,
-  MagicStick,
+  CollectionTag,
+  DataBoard,
+  FolderOpened,
+  Operation,
+  SetUp,
+  TrendCharts,
   VideoPlay,
 } from '@element-plus/icons-vue'
 
@@ -31,22 +32,26 @@ const overviewItems = computed(() => [
   {
     label: '数据源',
     value: store.sources.length,
-    icon: Connection,
+    icon: FolderOpened,
+    tone: 'brand',
   },
   {
-    label: '变量标签',
+    label: '变量',
     value: store.variables.length,
-    icon: Files,
+    icon: CollectionTag,
+    tone: 'info',
   },
   {
     label: '规则数',
     value: store.rules.length,
-    icon: MagicStick,
+    icon: SetUp,
+    tone: 'accent',
   },
   {
     label: '异常结果',
     value: store.abnormalResults.length,
-    icon: DataAnalysis,
+    icon: TrendCharts,
+    tone: 'danger',
   },
 ])
 
@@ -63,22 +68,22 @@ const integrationStatus = computed(() => {
     return {
       label: '待处理',
       type: 'danger' as const,
-      helper: '执行结果出现错误，请查看结果看板。',
+      helper: '校验未完成，请先查看结果面板中的报错信息。',
     }
   }
 
   if (store.capabilities.length) {
     return {
-      label: '联调正常',
+      label: '已连接',
       type: 'success' as const,
-      helper: '前后端代理已连接，可直接执行本地校验。',
+      helper: '后端能力已就绪，可直接执行本地校验。',
     }
   }
 
   return {
-    label: '检测中',
+    label: '连接中',
     type: 'info' as const,
-    helper: '正在读取后端能力声明。',
+    helper: '正在读取后端能力信息。',
   }
 })
 
@@ -96,34 +101,34 @@ const stepStatuses = computed<{
 
 const stepHints = computed(() => ({
   source: store.sources.length
-    ? `已录入 ${store.sources.length} 个数据源，可继续配置变量池。`
-    : '先录入至少一个数据源，浏览器会把本地文件桥接成后端可读路径。',
+    ? `已接入 ${store.sources.length} 个数据源，可以继续沉淀变量。`
+    : '先接入至少一个数据源，作为变量与规则配置的基础输入。',
   variable: !store.sources.length
-    ? '需要先完成步骤 1，才能继续添加变量。'
+    ? '请先完成数据源接入，再继续配置变量。'
     : store.variables.length
-      ? `当前已配置 ${store.variables.length} 个变量标签，可继续查看变量详情或进入步骤 3 编排规则。`
-      : '建议优先通过来源数据、Sheet 和列名的逐级选择补充关键变量。',
+      ? `已沉淀 ${store.variables.length} 个变量，可继续核对字段或进入规则配置。`
+      : '建议优先补齐关键字段变量，后续配置规则会更顺手。',
   rule: !store.variables.length
-    ? '请先完成变量池配置。'
+    ? '请先完成变量配置。'
     : store.rules.length
-      ? `当前已创建 ${store.rules.length} 条规则，可继续补参数或直接执行校验。`
-      : '优先从 not_null、unique、cross_table_mapping 三条模板规则开始，最快形成完整闭环。',
+      ? `已配置 ${store.rules.length} 条规则，可继续补充条件或直接执行校验。`
+      : '先从非空、唯一和映射规则开始，快速跑通首轮校验。',
   result: !store.rules.length
-    ? '请先完成前面 3 个步骤，再在这里查看结果。'
+    ? '请先完成前三步，再在这里查看结果。'
     : store.executionMeta
-      ? `最近一次执行扫描 ${store.executionMeta.total_rows_scanned} 行数据，结果面板已同步刷新。`
+      ? `最近一次扫描 ${store.executionMeta.total_rows_scanned} 行数据，结果已同步刷新。`
       : store.pageError
-        ? '执行失败后，错误提示和失败数据源会集中展示在这里。'
-        : '规则准备完成后，点击“立即执行校验”即可在这里查看扫描统计和异常明细。',
+        ? '执行失败后，错误与失败来源会集中展示在这里。'
+        : '规则准备完成后，可在这里查看扫描统计与异常明细。',
 }))
 
 const workflowGuide = computed(() => {
   if (!store.sources.length) {
     return {
       tone: 'info',
-      badge: '推荐下一步',
-      title: '先完成数据源接入',
-      description: '新增一个本地 Excel / CSV 数据源后，系统会把它自动设为后续变量配置的默认来源。',
+      badge: '下一步',
+      title: '先接入数据源',
+      description: '新增一个本地 Excel 或 CSV 来源，后续变量和规则都会复用它。',
       step: 1 as StepIndex,
       actionLabel: '查看步骤 1',
       action: 'scroll' as const,
@@ -134,11 +139,11 @@ const workflowGuide = computed(() => {
     const preferredSource = store.preferredSourceId ?? store.sources[0]?.id ?? '当前数据源'
     return {
       tone: 'brand',
-      badge: '流程推进',
+      badge: '下一步',
       title: `数据源 ${preferredSource} 已就绪`,
-      description: '下一步建议补充 sheet、column 和变量标签。变量保存后会自动高亮并跳转到规则编排区。',
+      description: '补充 Sheet、字段和变量标签，保存后即可继续配置规则。',
       step: 2 as StepIndex,
-      actionLabel: '去添加变量',
+      actionLabel: '配置变量',
       action: 'scroll' as const,
     }
   }
@@ -146,11 +151,11 @@ const workflowGuide = computed(() => {
   if (!store.rules.length) {
     return {
       tone: 'warning',
-      badge: '流程推进',
-      title: '变量池已经准备就绪',
-      description: '优先添加静态规则模板，先跑通 not_null、unique 和 cross_table_mapping 的最小闭环。',
+      badge: '下一步',
+      title: '变量已准备完成',
+      description: '补充静态规则后，即可开始首轮校验。',
       step: 3 as StepIndex,
-      actionLabel: '去编排规则',
+      actionLabel: '配置规则',
       action: 'scroll' as const,
     }
   }
@@ -159,8 +164,8 @@ const workflowGuide = computed(() => {
     return {
       tone: 'info',
       badge: '执行中',
-      title: '校验任务正在运行',
-      description: '系统正在读取数据源、执行规则并刷新结果看板，请稍候。',
+      title: '正在运行校验任务',
+      description: '系统正在读取数据并刷新结果，请稍候。',
       step: 4 as StepIndex,
       actionLabel: '查看结果',
       action: 'scroll' as const,
@@ -170,9 +175,9 @@ const workflowGuide = computed(() => {
   if (store.pageError) {
     return {
       tone: 'danger',
-      badge: '待处理',
-      title: '执行过程中出现错误',
-      description: '错误详情已经同步到结果看板，建议先查看步骤 4 的提示，再决定是否调整数据源或规则。',
+      badge: '需处理',
+      title: '本次执行未完成',
+      description: '请先查看结果看板中的错误提示，再决定是否调整数据源或规则。',
       step: 4 as StepIndex,
       actionLabel: '查看结果',
       action: 'scroll' as const,
@@ -183,8 +188,8 @@ const workflowGuide = computed(() => {
     return {
       tone: 'success',
       badge: '已完成',
-      title: '本地完整校验流程已跑通',
-      description: `最近一次执行扫描 ${store.executionMeta.total_rows_scanned} 行数据，返回 ${store.abnormalResults.length} 条异常记录。`,
+      title: '校验已完成',
+      description: `最近一次扫描 ${store.executionMeta.total_rows_scanned} 行数据，返回 ${store.abnormalResults.length} 条异常记录。`,
       step: 4 as StepIndex,
       actionLabel: '查看结果',
       action: 'scroll' as const,
@@ -194,10 +199,10 @@ const workflowGuide = computed(() => {
   return {
     tone: 'brand',
     badge: '可执行',
-    title: '规则已具备执行条件',
-    description: '现在可以直接发起一次完整校验，结果会自动刷新到步骤 4 的结果看板。',
+    title: '可以开始校验',
+    description: '当前规则已满足执行条件，可直接发起一次完整校验。',
     step: 4 as StepIndex,
-    actionLabel: '立即执行校验',
+    actionLabel: '开始校验',
     action: 'execute' as const,
   }
 })
@@ -227,16 +232,16 @@ async function runExecution(): Promise<void> {
   try {
     await store.executeValidation()
     await scrollToStep(4)
-    ElMessage.success('校验已执行完成，结果看板已刷新。')
+    ElMessage.success('校验完成，结果已刷新。')
   } catch {
     await scrollToStep(4)
-    // 页面级错误已由 store 托管，这里只保留执行入口，不重复覆盖提示。
+    // 页面级错误已由 store 托管，这里只保留执行入口。
   }
 }
 
 function applyDemoScenario(): void {
   store.applyDemoScenario()
-  ElMessage.success('联调用示例已填充，现在可以直接执行校验。')
+  ElMessage.success('联调样例已加载，可直接执行校验。')
 }
 
 async function handleGuideAction(): Promise<void> {
@@ -262,19 +267,16 @@ async function handleVariableSaved(_tag: string): Promise<void> {
     <header class="workbench-topbar">
       <div class="topbar-brand">
         <div class="brand-icon">
-          <Connection />
+          <DataBoard />
         </div>
         <div class="brand-copy">
           <div class="brand-title-row">
-            <strong>配置表动态规则校验工作台</strong>
+            <strong>配置表校验工作台</strong>
             <el-tag :type="integrationStatus.type" effect="light" round>
               {{ integrationStatus.label }}
             </el-tag>
           </div>
-          <p>
-            围绕数据源、变量池、规则编排和结果看板完成一次完整本地校验流程，保持企业工作台排版的清晰度，也方便持续扩展飞书、SVN
-            和更多规则类型。
-          </p>
+          <p>围绕数据源、变量、规则和结果看板完成一轮本地校验，适合快速联调与日常巡检。</p>
         </div>
       </div>
 
@@ -296,8 +298,13 @@ async function handleVariableSaved(_tag: string): Promise<void> {
 
     <section class="overview-strip">
       <div class="overview-grid">
-        <article v-for="item in overviewItems" :key="item.label" class="overview-item">
-          <div class="overview-icon-box">
+        <article
+          v-for="item in overviewItems"
+          :key="item.label"
+          class="overview-item"
+          :class="`is-${item.tone}`"
+        >
+          <div class="overview-icon-box" :class="`is-${item.tone}`">
             <component :is="item.icon" class="overview-icon" />
           </div>
           <div>
@@ -308,9 +315,9 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       </div>
 
       <div class="overview-actions">
-        <el-button :icon="Lightning" plain @click="applyDemoScenario">填充联调用示例</el-button>
+        <el-button :icon="Operation" plain @click="applyDemoScenario">加载样例</el-button>
         <el-button v-if="store.pageError" :icon="CircleCheckFilled" plain @click="store.clearPageError()">
-          清空错误提示
+          清除错误
         </el-button>
         <el-button
           :icon="VideoPlay"
@@ -318,7 +325,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
           :loading="store.isExecuting"
           @click="runExecution"
         >
-          立即执行校验
+          开始校验
         </el-button>
       </div>
     </section>
@@ -340,7 +347,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       <SectionBlock
         step="1"
         title="数据源接入管理"
-        description="统一维护本地 Excel、CSV、飞书和 SVN 入口，为变量抽取和规则执行提供稳定来源。"
+        description="录入并维护 Excel、CSV、飞书与 SVN 来源，为变量抽取和规则执行提供稳定输入。"
         :status="stepStatuses.source"
         :hint="stepHints.source"
       >
@@ -352,7 +359,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       <SectionBlock
         step="2"
         title="变量池构建"
-        description="通过 source、sheet 和列名提取业务字段，把后端可读取的列整理为规则可复用的变量标签。"
+        description="从 source、sheet 与字段中沉淀可复用变量，作为规则编排的统一输入。"
         :status="stepStatuses.variable"
         :hint="stepHints.variable"
       >
@@ -364,7 +371,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       <SectionBlock
         step="3"
         title="规则编排"
-        description="静态规则负责高频校验，动态规则保留后续扩展入口，让工作台既稳定又具备生长空间。"
+        description="配置静态规则并发起校验，先收口高频场景，再逐步补充规则。"
         :status="stepStatuses.rule"
         :hint="stepHints.rule"
       >
@@ -378,7 +385,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
             :loading="store.isExecuting"
             @click="runExecution"
           >
-            立即执行校验
+            开始校验
           </el-button>
         </div>
       </SectionBlock>
@@ -388,7 +395,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       <SectionBlock
         step="4"
         title="校验结果看板"
-        description="集中展示扫描统计、失败数据源和异常明细，为联调定位、结果导出和后续修复提供依据。"
+        description="集中查看扫描统计、失败来源与异常明细，便于定位问题并快速复查。"
         :status="stepStatuses.result"
         :hint="stepHints.result"
       >

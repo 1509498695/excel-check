@@ -16,7 +16,7 @@ withDefaults(
 )
 
 const sectionStatusLabels: Record<SectionStatus, string> = {
-  pending: '待完善',
+  pending: '待开始',
   active: '进行中',
   done: '已完成',
 }

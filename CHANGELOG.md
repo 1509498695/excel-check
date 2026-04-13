@@ -1,10 +1,19 @@
 # 更新日志
 
-文档更新时间：2026-04-11 13:06
+文档更新时间：2026-04-13 10:59
 
 ## [Unreleased]
 
 ### 变更
+- 优化主工作台首页 `/` 与共享头部的视觉表现，在不改 DOM、布局骨架、类名和交互逻辑的前提下，统一收口背景、边框、圆角、阴影、间距与 hover 反馈。
+- 精简并修复首页可见文案，覆盖品牌副标题、顶栏状态、概览指标、流程引导条、步骤卡标题/描述/提示与 CTA。
+- 首页文案改为更聚焦“当前状态 / 下一步动作 / 执行结果”的操作导向表达，减少冗余说明。
+- 本轮回归结果：
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+  - `POST /api/v1/engine/execute` => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
 - 固定规则页新增组合变量规则类型 `composite_condition_check`，支持“全局筛选 + 条件分支 + 分支校验”的组合变量检查配置。
 - 固定规则弹窗现在会根据目标变量类型自动切换：
   - 单变量 -> 比较 / 非空 / 唯一规则
@@ -233,3 +242,14 @@
 - 将“添加组合变量”对话框中的 `取消 / 保存变量` 按钮组移动到 JSON 预览区之前。
 - 对话框现在采用“表单区 -> 操作区 -> 预览区”的顺序，便于先完成配置再查看下方 JSON 预览。
 - “添加单个变量”对话框保持不变，本次仅调整组合变量对话框。
+## [0.4.7] - 2026-04-13
+
+### Changed
+- 收口主工作台首页 `/` 的视觉样式，统一共享头部、首页品牌区、概览指标区、流程引导条和步骤卡的圆角、边框、阴影与交互反馈。
+- 首页图标调整为更明确的业务语义，并统一图标容器的尺寸、底板和色彩映射。
+- 首页可见文案改为更短、更偏操作导向的表达，清理遗留乱码与冗余说明。
+
+### Verified
+- `python -m pytest backend/tests -q` => `40 passed`
+- `cd frontend && npm run build` => passed
+- `POST /api/v1/engine/execute` => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`

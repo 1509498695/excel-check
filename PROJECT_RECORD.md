@@ -2,6 +2,29 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-13 10:59
+
+### 本次目标
+- 在不改首页结构和交互逻辑的前提下，优化工作台首页 `/` 的视觉质感与文案表达。
+- 修复共享头部、步骤卡和首页引导区的中文乱码与提示冗余问题。
+
+### 本次完成
+- 已在 `frontend/src/views/MainBoard.vue` 中收口首页核心文案，统一为更短、更专业的操作导向表达。
+- 已在 `frontend/src/components/workbench/SectionBlock.vue` 中统一步骤状态文案，首页步骤卡与后续复用区域保持一致。
+- 已在 `frontend/src/App.vue` 中同步优化共享头部品牌副标题与导航表达。
+- 已在 `frontend/src/style.css` 中完成首页与共享壳层的视觉精修：
+  - 收敛背景层次、强调色、边框、阴影和圆角
+  - 强化顶部品牌栏、概览区、流程引导条和步骤卡的留白与层级
+  - 补充导航、按钮和卡片的柔和 hover 反馈
+- 本次未改动 DOM 层级、Grid / Flex 布局骨架、类名、ID、Pinia store 字段和事件绑定。
+
+### 回归结果
+- `cd frontend && npm run build` -> 通过
+- `GET http://127.0.0.1:8000/health` -> `200`
+- `GET http://127.0.0.1:5173` -> `200`
+- `GET http://127.0.0.1:5173/fixed-rules` -> `200`
+- `POST http://127.0.0.1:8000/api/v1/engine/execute` -> `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
 ## 进度记录 2026-04-13 10:29
 
 ### 本次目标
@@ -1447,3 +1470,36 @@
 
 ### 下一步建议
 - 如果还要继续收口步骤 2，可再单独清理组件中隐藏的旧页签兼容结构。
+## 进度记录 2026-04-13 17:10
+
+### 本次目标
+- 收口主工作台首页 `/` 的视觉层级、图标语义与首页可见文案。
+- 严格保持现有 DOM 层级、Grid / Flex 布局逻辑、类名、ID 与 JS 逻辑不变，只做 CSS 和文本优化。
+
+### 本次完成
+- 重写首页可见文案，清理共享头部、首页品牌区、概览指标区、流程引导条与步骤卡中的遗留乱码和冗长提示。
+- 统一首页图标语义与图标容器视觉：
+  - 数据源：`FolderOpened`
+  - 变量：`CollectionTag`
+  - 规则：`SetUp`
+  - 异常结果：`TrendCharts`
+  - 首页品牌：`DataBoard`
+- 首页整体视觉改为更鲜明但克制的高级亮色风格，统一了：
+  - 圆角
+  - 边框
+  - 阴影
+  - 按钮质感
+  - hover / pressed 反馈
+- 保持 `/fixed-rules` 独立业务界面不重绘，只同步共享头部与通用状态视觉。
+
+### 本轮回归
+- `python -m pytest backend/tests -q` => `40 passed`
+- `cd frontend && npm run build` => 通过
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173` => `200`
+- `GET http://127.0.0.1:5173/fixed-rules` => `200`
+- `POST /api/v1/engine/execute` => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+
+### 当前结论
+- 首页已经从“功能可用”提升到“信息层级更清晰、图标更统一、视觉更完整”的状态。
+- 本轮没有触碰任何对外接口、`TaskTree` 结构、Pinia 状态模型和事件绑定，属于纯前端表现层收口。

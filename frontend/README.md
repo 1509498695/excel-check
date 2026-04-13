@@ -1,6 +1,19 @@
 # Excel Check Frontend
 
-文档更新时间：2026-04-11 13:06
+文档更新时间：2026-04-13 10:59
+
+## 2026-04-13 工作台首页视觉与文案收口说明
+- 主工作台首页 `/` 与共享头部完成一轮视觉精修，不改现有 DOM 层级、Grid / Flex 骨架、类名和事件绑定。
+- 本轮主要调整：
+  - 收口全局背景、边框、阴影、圆角和间距层级
+  - 优化 `workbench-topbar`、`overview-strip`、`workflow-guide`、`section-block` 的视觉呼吸感
+  - 精简首页 CTA、状态提示和步骤说明文案
+  - 修复首页与共享头部中的可见中文乱码
+- 回归结果：
+  - `cd frontend && npm run build`：通过
+  - `http://127.0.0.1:5173`：`200`
+  - `http://127.0.0.1:5173/fixed-rules`：`200`
+  - `POST /api/v1/engine/execute`：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
 
 ## 2026-04-13 固定规则页组合变量条件分支校验说明
 - `/fixed-rules` 现在支持把固定规则页变量池中的组合变量直接绑定到规则弹窗。
@@ -477,3 +490,22 @@ npm run dev -- --host 127.0.0.1 --port 5173
 - 详情弹窗会根据变量类型切换展示：
   - 单个变量：列预览
   - 组合变量：格式化 JSON 预览
+## 2026-04-13 首页 UI 收口
+
+- 主工作台首页 `/` 已完成一轮只涉及表现层的 UI 收口，未改 DOM 结构、布局骨架、类名、ID、事件与业务逻辑。
+- 本轮主要调整：
+  - 共享头部与首页品牌区视觉统一
+  - 概览指标卡图标与状态色统一
+  - 流程引导条与步骤卡层级更清晰
+  - 首页可见文案改为更短、更偏操作导向的表达
+- 图标语义现已统一为：
+  - 数据源：`FolderOpened`
+  - 变量：`CollectionTag`
+  - 规则：`SetUp`
+  - 异常结果：`TrendCharts`
+
+### 验证
+
+- `npm run build`：通过
+- 首页地址：[http://127.0.0.1:5173](http://127.0.0.1:5173)
+- 固定规则页地址：[http://127.0.0.1:5173/fixed-rules](http://127.0.0.1:5173/fixed-rules)

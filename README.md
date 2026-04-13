@@ -1,6 +1,33 @@
 # Excel Check
 
-文档更新时间：2026-04-11 13:06
+文档更新时间：2026-04-13 10:59
+
+## 2026-04-13 工作台首页视觉与文案收口说明
+### 本次调整内容
+- 工作台首页 `/` 与共享头部完成一轮视觉收口，保持原有 DOM、Grid / Flex 骨架、类名和事件逻辑不变，仅调整 CSS 表现与首页可见文案。
+- 视觉方向收口为更克制的白底中性风格：
+  - 降低背景与强调色饱和度
+  - 统一圆角、边框和阴影层级
+  - 强化顶部品牌栏、概览指标、流程引导条和步骤卡的留白与层次
+  - 补充更柔和的按钮、导航与卡片 hover 反馈
+- 首页与共享壳层文案同步精简，重点修复并统一了：
+  - 顶部品牌副标题
+  - 顶栏状态文案
+  - 概览指标名称
+  - 引导条 badge / 标题 / 描述 / CTA
+  - 四个步骤卡的标题、描述、状态与提示
+- 本轮不扩展到 `/fixed-rules` 的独立业务界面，但共享头部与共用步骤卡文案会同步到复用区域。
+
+### 本次回归结果
+- `cd frontend && npm run build`：通过
+- `GET http://127.0.0.1:8000/health`：`200`
+- `GET http://127.0.0.1:5173`：`200`
+- `GET http://127.0.0.1:5173/fixed-rules`：`200`
+- 运行中的 `POST /api/v1/engine/execute` 已完成最小联调回归：
+  - `msg = "Execution Completed"`
+  - `total_rows_scanned = 8`
+  - `failed_sources = []`
+  - `abnormal_results = 5`
 
 ## 2026-04-13 固定规则页组合变量条件分支校验说明
 ### 本次调整内容
@@ -730,3 +757,30 @@ npm run build
   - `total_rows_scanned = 5410`
   - `abnormal_results = 11`
 - 这里的 `11` 条异常来自真实业务数据，不代表程序失败。
+## 2026-04-13 首页视觉与图标收口
+
+- 工作台首页 `/` 已完成一轮高质感视觉优化，范围包括共享头部、顶部品牌区、概览指标区、流程引导条和四个步骤卡。
+- 本轮严格保持现有 DOM 层级、Grid / Flex 布局骨架、类名、ID、事件绑定和执行逻辑不变，只调整 CSS 与首页可见文案。
+- 首页图标已统一为更清晰的语义表达：
+  - 数据源：`FolderOpened`
+  - 变量：`CollectionTag`
+  - 规则：`SetUp`
+  - 异常结果：`TrendCharts`
+- 首页文案已收口为更短、更偏操作导向的表达，重点突出：
+  - 当前状态
+  - 下一步动作
+  - 执行结果
+- 视觉风格采用“高级亮色”路线，在保留橙蓝品牌识别的前提下，统一了圆角、细边框、轻阴影和 hover 反馈。
+
+### 本轮验证结果
+
+- `python -m pytest backend/tests -q`：`40 passed`
+- `cd frontend && npm run build`：通过
+- `GET http://127.0.0.1:8000/health`：`200`
+- `GET http://127.0.0.1:5173`：`200`
+- `GET http://127.0.0.1:5173/fixed-rules`：`200`
+- `POST /api/v1/engine/execute`：
+  - `msg = "Execution Completed"`
+  - `total_rows_scanned = 8`
+  - `failed_sources = []`
+  - `abnormal_results = 5`
