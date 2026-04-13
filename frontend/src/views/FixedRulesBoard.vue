@@ -136,11 +136,6 @@ const configIssueDescription = computed(() =>
 const selectedRuleVariable = computed<VariableTag | null>(
   () => variableMap.value.get(ruleForm.target_variable_tag) ?? null,
 )
-const selectedRuleSource = computed<DataSource | null>(() =>
-  selectedRuleVariable.value
-    ? sourceMap.value.get(selectedRuleVariable.value.source_id) ?? null
-    : null,
-)
 const isCompositeRuleTarget = computed(
   () => (selectedRuleVariable.value?.variable_kind ?? 'single') === 'composite',
 )
@@ -184,17 +179,17 @@ const variableStepStatus = computed<SectionStatus>(() => {
 
 const sourceStepHint = computed(() =>
   store.sourceCount
-    ? `固定规则页已保存 ${store.sourceCount} 个数据源，这些数据只在当前页签使用，不与主工作台共享。`
-    : '先接入至少一个固定规则数据源，再继续配置变量池和固定规则。',
+    ? `已保存 ${store.sourceCount} 个数据源。`
+    : '先接入数据源。',
 )
 const variableStepHint = computed(() => {
   if (!store.sourceCount) {
-    return '需要先完成固定规则页的数据源接入。'
+    return '请先接入数据源。'
   }
   if (!store.variableCount) {
-    return '先抽取至少一个变量。单变量可做比较/非空/唯一校验，组合变量可做条件分支校验。'
+    return '先添加变量。'
   }
-  return `当前固定规则页已保存 ${store.variableCount} 个变量，单变量与组合变量都可以直接复用于固定规则弹窗。`
+  return `已保存 ${store.variableCount} 个变量。`
 })
 
 const overviewItems = computed(() => [
@@ -225,14 +220,14 @@ const svnResultStats = computed(() => {
 const executionSummary = computed(() => {
   if (!store.executionMeta) {
     return {
-      title: '固定规则结果看板',
-      description: '执行固定规则后，这里会展示本轮扫描统计、SVN 更新摘要和异常明细。',
+      title: '执行结果',
+      description: '查看扫描与异常。',
     }
   }
 
   return {
     title: `最近一次执行扫描 ${store.executionMeta.total_rows_scanned} 行`,
-    description: `失败数据源 ${store.executionMeta.failed_sources.length} 个，返回 ${store.abnormalResults.length} 条异常结果。`,
+    description: `${store.executionMeta.failed_sources.length} 个失败来源，${store.abnormalResults.length} 条异常。`,
   }
 })
 
@@ -992,10 +987,8 @@ async function handleSvnUpdate(): Promise<void> {
     <header class="rule-binding-header">
       <div class="rule-binding-header-main">
         <span class="guide-badge">固定规则检查</span>
-        <h1>固定规则页独立维护数据源、变量池与规则编排</h1>
-        <p>
-          当前页签已经切换为独立持久化模式。固定规则页自己的数据源、变量和规则会统一保存到固定规则配置中，刷新页面后仍然保留，且不会与主工作台互相串数据。
-        </p>
+        <h1>固定规则检查</h1>
+        <p>本页数据独立保存。</p>
       </div>
 
       <div class="rule-binding-actions">
@@ -1034,10 +1027,10 @@ async function handleSvnUpdate(): Promise<void> {
       </div>
       <div class="overview-actions">
         <el-tag v-if="store.config.configured" type="success" effect="light" round>
-          已读取固定规则持久化配置
+          已持久化
         </el-tag>
         <el-tag v-else type="info" effect="light" round>
-          当前还没有已保存的固定规则配置
+          未保存
         </el-tag>
       </div>
     </section>
@@ -1057,7 +1050,7 @@ async function handleSvnUpdate(): Promise<void> {
       type="warning"
       show-icon
       :closable="false"
-      title="固定规则配置已加载，但存在需要修复的数据源或变量"
+      title="存在待修复配置"
       :description="configIssueDescription"
     />
 
@@ -1067,20 +1060,21 @@ async function handleSvnUpdate(): Promise<void> {
       type="warning"
       show-icon
       :closable="false"
-      title="当前存在待修复规则"
-      description="有规则缺少目标变量、规则名称为空，比较值格式不合法，或组合变量分支配置不完整。修复这些规则后才允许执行固定规则。"
+      title="存在待修复规则"
+      description="补齐目标变量、规则名、比较值或分支配置后才能执行。"
     />
 
     <div class="rule-binding-layout" v-loading="isBootstrapping || store.isLoading">
       <SectionBlock
         step="1"
         title="数据源接入管理"
-        description="复用工作台的数据源接入界面，但只服务于固定规则页自身配置。这里新增或编辑的数据源会直接持久化。"
+        description="录入并维护本页专用数据源。"
         :status="sourceStepStatus"
         :hint="sourceStepHint"
       >
         <DataSourcePanel
           :store="store"
+          variant="fixed-rules"
           :source-issues="sourceIssueMap"
           @changed="handlePanelChanged"
         />
@@ -1089,7 +1083,7 @@ async function handleSvnUpdate(): Promise<void> {
       <SectionBlock
         step="2"
         title="变量池构建"
-        description="固定规则页复用工作台的变量池构建能力，并把单变量、组合变量都沉淀到固定规则配置中。新增规则时，单变量走简单规则，组合变量走条件分支校验。"
+        description="沉淀单变量和组合变量。"
         :status="variableStepStatus"
         :hint="variableStepHint"
       >
@@ -1100,9 +1094,7 @@ async function handleSvnUpdate(): Promise<void> {
         <div class="group-band-head">
           <div>
             <strong>规则组导航</strong>
-            <p>
-              这里管理固定规则页自己的规则分组。规则组只影响当前页签的浏览与维护，不会同步到主工作台。
-            </p>
+            <p>管理规则分组。</p>
           </div>
 
           <div class="group-band-actions">
@@ -1159,9 +1151,7 @@ async function handleSvnUpdate(): Promise<void> {
                 当前组 {{ currentGroupVariableCount }} 个目标变量
               </el-tag>
             </div>
-            <p>
-              固定规则现在直接绑定固定规则页变量池中的变量，不再单独维护规则文件路径、Sheet 和目标列。单变量用于比较/非空/唯一规则，组合变量用于条件分支校验。
-            </p>
+            <p>单变量做基础校验，组合变量做分支校验。</p>
           </div>
 
           <div class="toolbar-actions">
@@ -1196,14 +1186,14 @@ async function handleSvnUpdate(): Promise<void> {
           v-if="!canCreateRule"
           class="compact-empty-state rule-empty-state"
         >
-          当前还没有可用于固定规则的变量。请先在上方“变量池构建”模块中保存单变量或组合变量。
+          先在上方变量池中保存变量。
         </div>
 
         <div
           v-else-if="!store.currentGroupRules.length"
           class="compact-empty-state rule-empty-state"
         >
-          当前规则组还没有规则。你可以直接从固定规则变量池里选择单变量创建比较/非空/唯一规则，或选择组合变量创建条件分支校验。
+          当前规则组还没有规则。
         </div>
 
         <div v-else class="rule-table-shell">
@@ -1347,7 +1337,7 @@ async function handleSvnUpdate(): Promise<void> {
         </div>
 
         <div v-if="!store.abnormalResults.length" class="compact-empty-state rule-empty-state">
-          当前还没有异常结果。如果规则与数据都满足要求，执行后这里会保持为空。
+          暂无异常。
         </div>
 
         <el-table v-else class="workbench-table" :data="store.abnormalResults">
@@ -1381,7 +1371,7 @@ async function handleSvnUpdate(): Promise<void> {
           <el-form-item label="规则名称">
             <el-input
               v-model="ruleForm.rule_name"
-              placeholder="例如：items-INT_ID-大于+0 / items-INT_ID-非空校验 / items-INT_ID-唯一校验"
+              placeholder="例如：items-INT_ID-大于+0"
             />
           </el-form-item>
         </div>
@@ -1391,7 +1381,7 @@ async function handleSvnUpdate(): Promise<void> {
             v-model="ruleForm.target_variable_tag"
             class="full-width"
             filterable
-            placeholder="从固定规则页变量池选择目标变量"
+            placeholder="选择目标变量"
           >
             <el-option
               v-for="variable in variableOptions"
@@ -1404,14 +1394,14 @@ async function handleSvnUpdate(): Promise<void> {
 
         <div class="rule-dialog-hint">
           <span v-if="selectedRuleVariable">
-            来源数据源：{{ selectedRuleVariable.source_id }}；Sheet：{{ selectedRuleVariable.sheet }}；{{
+            {{ selectedRuleVariable.source_id }} · {{ selectedRuleVariable.sheet }} · {{
               (selectedRuleVariable.variable_kind ?? 'single') === 'composite'
-                ? `变量结构：${getVariableColumnSummary(selectedRuleVariable)}`
-                : `列名：${selectedRuleVariable.column}`
-            }}；路径：{{ getSourcePath(selectedRuleSource) || '当前数据源未记录路径' }}
+                ? getVariableColumnSummary(selectedRuleVariable)
+                : selectedRuleVariable.column
+            }}
           </span>
           <span v-else>
-            请先从固定规则页变量池中选择目标变量。固定规则弹窗不再单独维护规则文件路径、Sheet 和目标列。
+            先选目标变量。
           </span>
         </div>
 
@@ -1437,13 +1427,13 @@ async function handleSvnUpdate(): Promise<void> {
             <div class="composite-rule-section-head">
               <div>
                 <strong>全局筛选条件</strong>
-                <p>先筛出需要参与后续分支判断的记录，例如 `Key > 100000`。</p>
+                <p>先筛记录。</p>
               </div>
               <el-button plain :icon="Plus" @click="addGlobalFilter">添加全局条件</el-button>
             </div>
 
             <div v-if="!compositeRuleForm.global_filters.length" class="composite-rule-empty">
-              当前没有全局筛选条件，默认所有记录都会进入后续分支判断。
+              暂无全局条件。
             </div>
 
             <div
@@ -1517,7 +1507,7 @@ async function handleSvnUpdate(): Promise<void> {
             <div class="composite-rule-section-head">
               <div>
                 <strong>条件分支列表</strong>
-                <p>每个分支由命中条件和校验条件组成。筛选命中后，再对该子集执行唯一、重复或字段比较校验。</p>
+                <p>命中后再校验。</p>
               </div>
               <el-button type="primary" plain :icon="Plus" @click="addBranch">添加分支</el-button>
             </div>
@@ -1530,7 +1520,7 @@ async function handleSvnUpdate(): Promise<void> {
               <div class="composite-condition-head">
                 <div>
                   <strong>分支 {{ branchIndex + 1 }}</strong>
-                  <p>先命中分支筛选条件，再执行分支校验条件。</p>
+                  <p>命中后校验。</p>
                 </div>
                 <el-button link type="danger" @click="removeBranch(branch.branch_id)">删除分支</el-button>
               </div>
@@ -1541,7 +1531,7 @@ async function handleSvnUpdate(): Promise<void> {
                   <el-button plain @click="addBranchFilter(branch)">添加筛选条件</el-button>
                 </div>
                 <div v-if="!branch.filters.length" class="composite-rule-empty">
-                  当前分支没有筛选条件，表示全局筛选命中的记录都会进入这个分支。
+                  暂无分支条件。
                 </div>
                 <div
                   v-for="(condition, filterIndex) in branch.filters"
@@ -1614,6 +1604,9 @@ async function handleSvnUpdate(): Promise<void> {
                 <div class="composite-rule-subhead">
                   <strong>分支校验条件</strong>
                   <el-button type="primary" plain @click="addBranchAssertion(branch)">添加校验条件</el-button>
+                </div>
+                <div class="composite-rule-empty">
+                  支持比较 / 唯一 / 必须重复。
                 </div>
                 <div
                   v-for="(condition, assertionIndex) in branch.assertions"

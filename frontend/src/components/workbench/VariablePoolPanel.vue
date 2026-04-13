@@ -81,21 +81,21 @@ const compositeDialogTitle = computed(() =>
 )
 const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 const panelCopy = computed(() => ({
-  heading: isFixedRulesVariant.value ? '配置固定规则变量池' : '配置变量与后端字段映射',
+  heading: isFixedRulesVariant.value ? '变量池' : '配置变量与后端字段映射',
   description: isFixedRulesVariant.value
-    ? '这里维护固定规则页自己的变量池。保存后会沉淀到固定规则配置，不与主工作台共享。'
+    ? '维护本页变量。'
     : '点击上方按钮会在步骤 2 内打开独立子页签。保存后自动关闭当前页签，并回到变量列表。',
-  emptySourceTitle: isFixedRulesVariant.value ? '请先完成固定规则数据源接入' : '请先完成步骤 1 的数据源接入',
+  emptySourceTitle: isFixedRulesVariant.value ? '请先接入数据源' : '请先完成步骤 1 的数据源接入',
   emptySourceDescription: isFixedRulesVariant.value
-    ? '先保存至少一个固定规则数据源，再在这里添加单个变量或组合变量。'
+    ? '先保存数据源，再添加变量。'
     : '先保存至少一个数据源，再在这里添加单个变量或组合变量。',
-  readyTitle: isFixedRulesVariant.value ? '数据源已就绪，可以开始构建固定规则变量池' : '数据源已就绪，可以开始构建变量池',
+  readyTitle: isFixedRulesVariant.value ? '可开始配置变量' : '数据源已就绪，可以开始构建变量池',
   readyDescription: isFixedRulesVariant.value
-    ? '点击上方按钮会打开固定规则页专用的变量编辑对话框。保存后会自动回写到当前固定规则配置。'
+    ? '支持单变量和组合变量。'
     : '点击上方按钮会打开独立的变量编辑对话框。保存后会自动关闭当前对话框，并把变量写回下方列表和变量池。',
-  poolTitle: isFixedRulesVariant.value ? '固定规则变量池已可复用' : '变量池已可复用',
+  poolTitle: isFixedRulesVariant.value ? '变量池已就绪' : '变量池已可复用',
   poolDescription: isFixedRulesVariant.value
-    ? `当前已配置 ${store.variables.length} 个固定规则变量。点击变量标签或“查看详情”可继续核对映射与预览。`
+    ? `已配置 ${store.variables.length} 个变量。`
     : `当前已配置 ${store.variables.length} 个变量。点击变量标签或“查看详情”可继续核对映射与预览。`,
   sourceTypeError: isFixedRulesVariant.value
     ? '当前固定规则页的字段映射提取先支持本地 Excel。'
@@ -103,15 +103,15 @@ const panelCopy = computed(() => ({
   compositeTypeError: isFixedRulesVariant.value
     ? '当前固定规则页的组合变量提取先支持本地 Excel。'
     : '当前步骤 2 的组合变量提取先支持本地 Excel。',
-  poolHeading: isFixedRulesVariant.value ? '当前固定规则变量池' : '当前变量池',
+  poolHeading: isFixedRulesVariant.value ? '当前变量池' : '当前变量池',
   poolDescriptionSecondary: isFixedRulesVariant.value
-    ? '保存变量后，下方会形成固定规则页专用的标签池；点击标签可弹出变量详情窗口。'
+    ? '点击标签查看详情。'
     : '保存变量后，下方会形成可直接用于规则编排的标签池；点击标签可查看详情。',
   emptyPool: isFixedRulesVariant.value
-    ? '变量保存后，下方会形成固定规则页专用的标签池；点击任意标签可弹出变量详情窗口。'
+    ? '保存后显示在这里。'
     : '变量保存后，下方会形成可直接用于规则编排的标签池；点击任意标签可弹出变量详情窗口。',
   singleDialogDescription: isFixedRulesVariant.value
-    ? '按来源数据、Sheet 和列名提取一个可复用字段，用于后续固定规则编排。'
+    ? '选择来源、Sheet 和列。'
     : '按来源数据、Sheet 和列名提取一个可复用字段，用于后续静态规则编排。',
 }))
 const singleSource = computed<DataSource | null>(
@@ -879,7 +879,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
     <div class="dialog-form variable-editor-panel">
       <div class="detail-copy">
         <strong>组合变量配置</strong>
-        <span>选择同一来源、同一 Sheet 下的多列字段，并指定主键列后生成 JSON 映射变量。</span>
+        <span>选择列并指定 Key。</span>
       </div>
 
       <el-alert
@@ -985,7 +985,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
       <div class="composite-preview-panel">
         <div class="detail-copy">
           <strong>JSON 预览</strong>
-          <span>下方会按当前 Key 列生成映射预览，用于确认组合变量的最终 JSON 结构。</span>
+          <span>预览当前 JSON 结构。</span>
         </div>
         <el-alert
           v-if="compositePreviewError"
@@ -995,10 +995,10 @@ function getVariableFieldSummary(variable: VariableTag): string {
           show-icon
         />
         <div v-else-if="compositePreviewLoading" class="empty-pool">
-          正在生成组合变量预览，请稍候。
+          正在生成预览。
         </div>
         <div v-else-if="!compositePreview" class="empty-pool">
-          请选择来源、Sheet、关联列和 Key 列，系统会在这里生成对应的 JSON 预览。
+          选择来源、Sheet、关联列和 Key 列后显示。
         </div>
         <div v-else class="json-preview-shell">
           <div class="preview-summary">
@@ -1008,7 +1008,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
               {{ Object.keys(compositePreview!.mapping).length }} 个 key
             </strong>
             <small>
-              当前以 key 列 {{ compositePreview!.key_column }} 作为映射主键生成 JSON 结构。
+              Key：{{ compositePreview!.key_column }}
             </small>
           </div>
           <pre class="json-preview-block">{{ formatJsonPreview(compositePreview!.mapping) }}</pre>
@@ -1029,7 +1029,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
     <template #header>
       <div class="detail-dialog-header">
         <strong>{{ detailVariable?.tag ?? '未命名变量' }}</strong>
-        <p>这里展示当前变量的来源信息、字段结构和预览数据，方便继续核对映射是否正确。</p>
+        <p>查看来源、结构和预览。</p>
       </div>
     </template>
 
@@ -1037,7 +1037,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
       <div class="detail-topbar">
         <div class="detail-copy">
           <strong>变量详情</strong>
-          <span>单变量会展示列预览，组合变量会展示 JSON 映射预览。</span>
+          <span>单变量显示列预览，组合变量显示 JSON。</span>
         </div>
         <el-button plain @click="chooseTag(detailVariable.tag)">高亮变量</el-button>
       </div>
@@ -1050,7 +1050,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
       <div class="preview-summary preview-source-summary">
         <span>来源路径</span>
         <strong class="source-path-text">{{ detailSourcePath || '当前没有可展示的来源路径。' }}</strong>
-        <small>这里展示当前变量对应的数据源路径，便于快速确认你正在查看哪一份文件。</small>
+        <small>用于确认当前来源。</small>
       </div>
       <el-alert v-if="detailError" :title="detailError" type="warning" :closable="false" show-icon />
       <div v-else-if="detailLoading" class="empty-pool">正在加载变量详情，请稍候。</div>
@@ -1058,7 +1058,7 @@ function getVariableFieldSummary(variable: VariableTag): string {
         <div class="preview-summary">
           <span>预览数据</span>
           <strong>{{ detailVariable.tag }}</strong>
-          <small>当前已加载 {{ detailLoadedRows }} / {{ detailPreview?.total_rows ?? 0 }} 行预览数据。</small>
+          <small>已加载 {{ detailLoadedRows }} / {{ detailPreview?.total_rows ?? 0 }} 行。</small>
         </div>
         <div v-if="detailPreview?.variable_kind === 'composite'" class="json-preview-shell">
           <div class="preview-summary">

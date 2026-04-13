@@ -12,9 +12,11 @@ const props = withDefaults(
   defineProps<{
     store?: SourceManagementStoreLike
     sourceIssues?: Record<string, string>
+    variant?: 'workbench' | 'fixed-rules'
   }>(),
   {
     sourceIssues: () => ({}),
+    variant: 'workbench',
   },
 )
 
@@ -26,6 +28,7 @@ const emit = defineEmits<{
 const defaultStore = useWorkbenchStore()
 const store = props.store ?? defaultStore
 const sourceIssueMap = computed(() => props.sourceIssues ?? {})
+const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
@@ -46,6 +49,20 @@ const draftErrors = reactive({
 const supports = computed(() => store.capabilities)
 const localSource = computed(() => draft.type === 'local_excel' || draft.type === 'local_csv')
 const needsToken = computed(() => draft.type === 'feishu')
+const panelCopy = computed(() => ({
+  heading: isFixedRulesVariant.value ? '数据源管理' : '统一管理本地文件、飞书和 SVN 入口',
+  description: isFixedRulesVariant.value
+    ? '本页数据源独立保存。'
+    : '本地 Excel / CSV 会通过系统文件选择框记录真实本地路径，不再复制文件到项目运行目录。',
+  sampleAction: isFixedRulesVariant.value ? '加载样例' : '加载示例数据源',
+  emptyText: isFixedRulesVariant.value ? '暂无数据源。' : '还没有录入数据源。',
+  localHelperReady: isFixedRulesVariant.value
+    ? '先选文件，再保存。'
+    : '请先完成系统文件选择，再点击“保存数据源”。选中文件后会把真实本地绝对路径写入当前输入框。',
+  localHelperEmpty: isFixedRulesVariant.value
+    ? '先填标识，再选文件。'
+    : '请先填写数据源标识，再点击“选择文件”。系统文件框会在本机打开，并把真实本地绝对路径写入当前输入框。',
+}))
 const canPickLocalFile = computed(
   () => localSource.value && !isPicking.value && draft.id.trim().length > 0,
 )
@@ -256,16 +273,16 @@ async function chooseLocalFile(): Promise<void> {
 
     <div class="panel-toolbar">
       <div class="toolbar-copy">
-        <strong>统一管理本地文件、飞书和 SVN 入口</strong>
-        <span>本地 Excel / CSV 会通过系统文件选择框记录真实本地路径，不再复制文件到项目运行目录。</span>
+        <strong>{{ panelCopy.heading }}</strong>
+        <span>{{ panelCopy.description }}</span>
       </div>
       <div class="toolbar-actions">
-        <el-button plain @click="useSampleSource">加载示例数据源</el-button>
+        <el-button plain @click="useSampleSource">{{ panelCopy.sampleAction }}</el-button>
         <el-button type="primary" @click="openCreateDialog">新增数据源</el-button>
       </div>
     </div>
 
-    <el-table :data="store.sources" class="workbench-table" empty-text="还没有录入数据源。">
+    <el-table :data="store.sources" class="workbench-table" :empty-text="panelCopy.emptyText">
       <el-table-column label="标识" min-width="160">
         <template #default="{ row }">
           <div class="mono-chip">{{ row.id }}</div>
@@ -360,8 +377,8 @@ async function chooseLocalFile(): Promise<void> {
             <span v-if="localSource" class="field-helper">
               {{
                 draft.id.trim()
-                  ? '请先完成系统文件选择，再点击“保存数据源”。选中文件后会把真实本地绝对路径写入当前输入框。'
-                  : '请先填写数据源标识，再点击“选择文件”。系统文件框会在本机打开，并把真实本地绝对路径写入当前输入框。'
+                  ? panelCopy.localHelperReady
+                  : panelCopy.localHelperEmpty
               }}
             </span>
           </el-form-item>
