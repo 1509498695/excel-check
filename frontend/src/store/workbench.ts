@@ -7,11 +7,11 @@ import {
   fetchSourceCapabilities,
   fetchSourceMetadata,
 } from '../api/workbench'
+import type { FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
 import type {
   AbnormalResult,
   DataSource,
   ExecutionMeta,
-  RuleMode,
   SourceMetadata,
   SourceType,
   TaskTree,
@@ -19,13 +19,31 @@ import type {
   VariablePreviewData,
   VariableTag,
 } from '../types/workbench'
-import { buildTaskTreePayload, createRuleId } from '../utils/taskTree'
+import {
+  collectVariableTagsBySourceIds,
+  createEntityId,
+  ensureDefaultGroup,
+  isCompositeVariable,
+  isSingleVariable,
+  isValidCompositeConfig,
+  normalizeCompositeConfig,
+  normalizeExpectedValue,
+  pruneRulesByRemovedTags,
+  RULE_ORCHESTRATION_PAGE_SIZE,
+  UNGROUPED_GROUP,
+} from '../utils/ruleOrchestrationModel'
+import { buildTaskTreePayload } from '../utils/taskTree'
+import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
 interface WorkbenchState {
   sources: DataSource[]
   variables: VariableTag[]
-  rules: ValidationRule[]
+  ruleGroups: FixedRuleGroup[]
+  orchestrationRules: FixedRuleDefinition[]
+  selectedGroupId: string
+  groupKeyword: string
+  orchestrationCurrentPage: number
   capabilities: SourceType[]
   isExecuting: boolean
   pageError: string
@@ -37,114 +55,53 @@ interface WorkbenchState {
   variablePreviewMap: Record<string, VariablePreviewData>
 }
 
-function pruneRules(rules: ValidationRule[], removedTags: Set<string>): ValidationRule[] {
-  return rules.flatMap((rule) => {
-    if (rule.rule_type === 'not_null' || rule.rule_type === 'unique') {
-      const targetTags = Array.isArray(rule.params.target_tags)
-        ? rule.params.target_tags.filter(
-            (item): item is string => typeof item === 'string' && !removedTags.has(item),
-          )
-        : []
-
-      if (targetTags.length === 0) {
-        return []
-      }
-
-      return [{ ...rule, params: { target_tags: targetTags } }]
-    }
-
-    if (rule.rule_type === 'cross_table_mapping') {
-      const dictTag = typeof rule.params.dict_tag === 'string' ? rule.params.dict_tag : ''
-      const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag : ''
-
-      if (removedTags.has(dictTag) || removedTags.has(targetTag)) {
-        return []
-      }
-    }
-
-    return [rule]
-  })
-}
-
-function createStaticRule(ruleType: string): ValidationRule {
-  if (ruleType === 'cross_table_mapping') {
-    return {
-      rule_id: createRuleId('rule'),
-      rule_type: ruleType,
-      params: {
-        dict_tag: '',
-        target_tag: '',
-      },
-      mode: 'static',
-    }
-  }
-
-  return {
-    rule_id: createRuleId('rule'),
-    rule_type: ruleType,
-    params: {
-      target_tags: [],
-    },
-    mode: 'static',
-  }
-}
-
-function createDynamicRule(): ValidationRule {
-  return {
-    rule_id: createRuleId('rule'),
-    rule_type: '',
-    params: {},
-    mode: 'dynamic',
-    draftState: {
-      paramsText: '{\n  \n}',
-    },
-  }
-}
-
-function createSampleStaticRules(): ValidationRule[] {
+function createWorkbenchDemoRules(): FixedRuleDefinition[] {
+  const gid = UNGROUPED_GROUP.group_id
   return [
     {
-      rule_id: createRuleId('rule'),
+      rule_id: createEntityId('wb-rule'),
+      group_id: gid,
+      rule_name: 'items-ID-非空校验',
+      target_variable_tag: '[items-id]',
       rule_type: 'not_null',
-      params: {
-        target_tags: ['[items-id]'],
-      },
-      mode: 'static',
     },
     {
-      rule_id: createRuleId('rule'),
+      rule_id: createEntityId('wb-rule'),
+      group_id: gid,
+      rule_name: 'items-ID-唯一校验',
+      target_variable_tag: '[items-id]',
       rule_type: 'unique',
-      params: {
-        target_tags: ['[items-id]'],
-      },
-      mode: 'static',
     },
     {
-      rule_id: createRuleId('rule'),
-      rule_type: 'cross_table_mapping',
-      params: {
-        dict_tag: '[items-id]',
-        target_tag: '[drops-ref]',
-      },
-      mode: 'static',
+      rule_id: createEntityId('wb-rule'),
+      group_id: gid,
+      rule_name: 'items-ID-大于+0',
+      target_variable_tag: '[items-id]',
+      rule_type: 'fixed_value_compare',
+      operator: 'gt',
+      expected_value: '0',
+    },
+    {
+      rule_id: createEntityId('wb-rule'),
+      group_id: gid,
+      rule_name: 'drops-RefID-大于+0',
+      target_variable_tag: '[drops-ref]',
+      rule_type: 'fixed_value_compare',
+      operator: 'gt',
+      expected_value: '0',
     },
   ]
-}
-
-function collectVariableTagsBySourceIds(
-  variables: VariableTag[],
-  sourceIds: Set<string>,
-): string[] {
-  return variables
-    .filter((variable) => sourceIds.has(variable.source_id))
-    .map((variable) => variable.tag)
 }
 
 export const useWorkbenchStore = defineStore('workbench', {
   state: (): WorkbenchState => ({
     sources: [],
     variables: [],
-    rules: [],
+    ruleGroups: [{ ...UNGROUPED_GROUP }],
+    orchestrationRules: [],
+    selectedGroupId: UNGROUPED_GROUP.group_id,
+    groupKeyword: '',
+    orchestrationCurrentPage: 1,
     capabilities: [],
     isExecuting: false,
     pageError: '',
@@ -157,20 +114,148 @@ export const useWorkbenchStore = defineStore('workbench', {
   }),
 
   getters: {
-    taskTree(state): TaskTree {
+    /** 供引擎执行的 ValidationRule 列表（由编排规则映射）。 */
+    engineValidationRules(): ValidationRule[] {
+      return orchestrationRulesToValidationRules(this.variables, this.orchestrationRules)
+    },
+
+    taskTree(): TaskTree {
       return {
-        sources: state.sources,
-        variables: state.variables,
-        rules: state.rules.filter((rule) => rule.mode !== 'dynamic'),
+        sources: this.sources,
+        variables: this.variables,
+        rules: this.engineValidationRules,
       }
     },
 
-    staticRules(state): ValidationRule[] {
-      return state.rules.filter((rule) => rule.mode !== 'dynamic')
+    allRuleGroups(): FixedRuleGroup[] {
+      return ensureDefaultGroup(this.ruleGroups)
     },
 
-    dynamicRules(state): ValidationRule[] {
-      return state.rules.filter((rule) => rule.mode === 'dynamic')
+    filteredRuleGroups(): FixedRuleGroup[] {
+      const keyword = this.groupKeyword.trim().toLowerCase()
+      if (!keyword) {
+        return this.allRuleGroups
+      }
+      return this.allRuleGroups.filter((group) => group.group_name.toLowerCase().includes(keyword))
+    },
+
+    selectedRuleGroup(): FixedRuleGroup {
+      return (
+        this.allRuleGroups.find((group) => group.group_id === this.selectedGroupId) ??
+        this.allRuleGroups[0]
+      )
+    },
+
+    groupOrchestrationCounts(): Record<string, number> {
+      return this.orchestrationRules.reduce<Record<string, number>>((accumulator, rule) => {
+        accumulator[rule.group_id] = (accumulator[rule.group_id] ?? 0) + 1
+        return accumulator
+      }, {})
+    },
+
+    currentOrchestrationGroupRules(): FixedRuleDefinition[] {
+      const groupId = this.selectedRuleGroup.group_id
+      return this.orchestrationRules.filter((rule) => rule.group_id === groupId)
+    },
+
+    pagedCurrentOrchestrationGroupRules(): FixedRuleDefinition[] {
+      const start = (this.orchestrationCurrentPage - 1) * RULE_ORCHESTRATION_PAGE_SIZE
+      return this.currentOrchestrationGroupRules.slice(
+        start,
+        start + RULE_ORCHESTRATION_PAGE_SIZE,
+      )
+    },
+
+    currentOrchestrationGroupRuleTotal(): number {
+      return this.currentOrchestrationGroupRules.length
+    },
+
+    currentOrchestrationGroupPageCount(): number {
+      return Math.max(
+        1,
+        Math.ceil(this.currentOrchestrationGroupRuleTotal / RULE_ORCHESTRATION_PAGE_SIZE),
+      )
+    },
+
+    orchestrationRuleCount(): number {
+      return this.orchestrationRules.length
+    },
+
+    invalidOrchestrationRuleIds(): string[] {
+      const validGroupIds = new Set(this.allRuleGroups.map((group) => group.group_id))
+      const variableMap = new Map(this.variables.map((variable) => [variable.tag, variable] as const))
+
+      return this.orchestrationRules
+        .filter((rule) => {
+          if (!validGroupIds.has(rule.group_id)) {
+            return true
+          }
+          if (!rule.rule_name.trim()) {
+            return true
+          }
+
+          const targetTag = rule.target_variable_tag.trim()
+          const variable = variableMap.get(targetTag)
+          if (!targetTag || !variable) {
+            return true
+          }
+
+          if (isSingleVariable(variable)) {
+            if (rule.rule_type === 'composite_condition_check') {
+              return true
+            }
+
+            if (rule.rule_type !== 'fixed_value_compare') {
+              return false
+            }
+
+            if (!rule.operator) {
+              return true
+            }
+
+            const expectedValue = normalizeExpectedValue(rule.expected_value)
+            if (!expectedValue) {
+              return true
+            }
+
+            if (
+              (rule.operator === 'gt' || rule.operator === 'lt') &&
+              Number.isNaN(Number(expectedValue))
+            ) {
+              return true
+            }
+
+            return false
+          }
+
+          if (!isCompositeVariable(variable)) {
+            return true
+          }
+
+          if (rule.rule_type !== 'composite_condition_check') {
+            return true
+          }
+
+          return !isValidCompositeConfig(rule.composite_config)
+        })
+        .map((rule) => rule.rule_id)
+    },
+
+    invalidOrchestrationGroupIds(): string[] {
+      const invalidRuleIds = new Set(this.invalidOrchestrationRuleIds)
+      const invalidGroupIds = new Set<string>()
+      this.orchestrationRules.forEach((rule) => {
+        if (invalidRuleIds.has(rule.rule_id)) {
+          invalidGroupIds.add(rule.group_id)
+        }
+      })
+      return [...invalidGroupIds]
+    },
+
+    canExecuteOrchestration(): boolean {
+      return (
+        this.orchestrationRules.length > 0 && this.invalidOrchestrationRuleIds.length === 0
+      )
     },
 
     singleVariables(state): VariableTag[] {
@@ -331,8 +416,16 @@ export const useWorkbenchStore = defineStore('workbench', {
 
       this.sources = this.sources.filter((source) => source.id !== sourceId)
       this.variables = this.variables.filter((variable) => variable.source_id !== sourceId)
-      this.rules = pruneRules(this.rules, removedTags)
+      this.orchestrationRules = pruneRulesByRemovedTags(this.orchestrationRules, removedTags)
       this.invalidateSourceArtifacts([sourceId])
+
+      const pageCount = Math.max(
+        1,
+        Math.ceil(this.currentOrchestrationGroupRuleTotal / RULE_ORCHESTRATION_PAGE_SIZE),
+      )
+      if (this.orchestrationCurrentPage > pageCount) {
+        this.orchestrationCurrentPage = pageCount
+      }
 
       removedTags.forEach((tag) => {
         delete this.variablePreviewMap[tag]
@@ -366,7 +459,7 @@ export const useWorkbenchStore = defineStore('workbench', {
           delete this.variablePreviewMap[variableCopy.tag]
 
           if (originalTag !== variable.tag) {
-            this.replaceTagInRules(originalTag, variable.tag)
+            this.replaceTagInOrchestrationRules(originalTag, variable.tag)
             if (this.activeTag === originalTag) {
               this.activeTag = variable.tag
             }
@@ -391,11 +484,19 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     removeVariable(tag: string): void {
       this.variables = this.variables.filter((variable) => variable.tag !== tag)
-      this.rules = pruneRules(this.rules, new Set([tag]))
+      this.orchestrationRules = pruneRulesByRemovedTags(this.orchestrationRules, new Set([tag]))
       delete this.variablePreviewMap[tag]
 
       if (this.activeTag === tag) {
         this.activeTag = null
+      }
+
+      const pageCount = Math.max(
+        1,
+        Math.ceil(this.currentOrchestrationGroupRuleTotal / RULE_ORCHESTRATION_PAGE_SIZE),
+      )
+      if (this.orchestrationCurrentPage > pageCount) {
+        this.orchestrationCurrentPage = pageCount
       }
     },
 
@@ -441,100 +542,121 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.useSampleSource()
       this.useSampleVariables()
 
-      const dynamicRules = this.rules.filter((rule) => rule.mode === 'dynamic')
-      this.rules = [...createSampleStaticRules(), ...dynamicRules]
+      this.ruleGroups = [{ ...UNGROUPED_GROUP }]
+      this.selectedGroupId = UNGROUPED_GROUP.group_id
+      this.groupKeyword = ''
+      this.orchestrationCurrentPage = 1
+      this.orchestrationRules = createWorkbenchDemoRules()
     },
 
-    addStaticRule(ruleType: string): void {
-      this.rules.push(createStaticRule(ruleType))
+    setSelectedOrchestrationGroup(groupId: string): void {
+      this.selectedGroupId = groupId
+      this.orchestrationCurrentPage = 1
     },
 
-    addDynamicRule(): void {
-      this.rules.push(createDynamicRule())
+    setOrchestrationCurrentPage(page: number): void {
+      this.orchestrationCurrentPage = page
     },
 
-    removeRule(ruleId?: string): void {
-      this.rules = this.rules.filter((rule) => rule.rule_id !== ruleId)
+    createOrchestrationGroup(groupName: string): void {
+      this.ruleGroups = ensureDefaultGroup([
+        ...this.ruleGroups,
+        {
+          group_id: createEntityId('group'),
+          group_name: groupName.trim(),
+          builtin: false,
+        },
+      ])
     },
 
-    updateRuleMode(ruleId: string, mode: RuleMode): void {
-      const target = this.rules.find((rule) => rule.rule_id === ruleId)
-      if (!target) {
+    renameOrchestrationGroup(groupId: string, groupName: string): void {
+      this.ruleGroups = ensureDefaultGroup(
+        this.ruleGroups.map((group) =>
+          group.group_id === groupId && !group.builtin
+            ? { ...group, group_name: groupName.trim() }
+            : group,
+        ),
+      )
+    },
+
+    removeOrchestrationGroup(groupId: string): void {
+      if (groupId === UNGROUPED_GROUP.group_id) {
         return
       }
-
-      target.mode = mode
+      this.ruleGroups = ensureDefaultGroup(
+        this.ruleGroups.filter((group) => group.group_id !== groupId),
+      )
+      this.orchestrationRules = this.orchestrationRules.map((rule) =>
+        rule.group_id === groupId ? { ...rule, group_id: UNGROUPED_GROUP.group_id } : rule,
+      )
+      this.selectedGroupId = this.ruleGroups[0]?.group_id ?? UNGROUPED_GROUP.group_id
+      this.orchestrationCurrentPage = 1
     },
 
-    updateRuleType(ruleId: string, ruleType: string): void {
-      const target = this.rules.find((rule) => rule.rule_id === ruleId)
-      if (!target) {
-        return
+    upsertOrchestrationRule(
+      rule: Omit<FixedRuleDefinition, 'rule_id'> & { rule_id?: string },
+    ): void {
+      const normalizedCompositeConfig =
+        rule.rule_type === 'composite_condition_check'
+          ? normalizeCompositeConfig(rule.composite_config)
+          : undefined
+
+      const nextRule: FixedRuleDefinition = {
+        rule_id: rule.rule_id ?? createEntityId('wb-rule'),
+        group_id: rule.group_id,
+        rule_name: rule.rule_name.trim(),
+        target_variable_tag: rule.target_variable_tag.trim(),
+        rule_type: rule.rule_type,
+        operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
+        expected_value:
+          rule.rule_type === 'fixed_value_compare'
+            ? normalizeExpectedValue(rule.expected_value)
+            : undefined,
+        composite_config: normalizedCompositeConfig,
       }
 
-      target.rule_type = ruleType
+      const index = this.orchestrationRules.findIndex((item) => item.rule_id === nextRule.rule_id)
+      if (index >= 0) {
+        this.orchestrationRules.splice(index, 1, nextRule)
+      } else {
+        this.orchestrationRules.push(nextRule)
+      }
     },
 
-    updateRuleParams(ruleId: string, params: Record<string, unknown>): void {
-      const target = this.rules.find((rule) => rule.rule_id === ruleId)
-      if (!target) {
-        return
-      }
-
-      target.params = { ...params }
-    },
-
-    updateRuleDraftText(ruleId: string, paramsText: string): void {
-      const target = this.rules.find((rule) => rule.rule_id === ruleId)
-      if (!target) {
-        return
-      }
-
-      target.draftState = {
-        ...target.draftState,
-        paramsText,
+    removeOrchestrationRule(ruleId: string): void {
+      this.orchestrationRules = this.orchestrationRules.filter((rule) => rule.rule_id !== ruleId)
+      const pageCount = Math.max(
+        1,
+        Math.ceil(this.currentOrchestrationGroupRuleTotal / RULE_ORCHESTRATION_PAGE_SIZE),
+      )
+      if (this.orchestrationCurrentPage > pageCount) {
+        this.orchestrationCurrentPage = pageCount
       }
     },
 
-    replaceTagInRules(previousTag: string, nextTag: string): void {
-      this.rules = this.rules.map((rule) => {
-        if (rule.rule_type === 'not_null' || rule.rule_type === 'unique') {
-          const targetTags = Array.isArray(rule.params.target_tags)
-            ? rule.params.target_tags.map((item) => (item === previousTag ? nextTag : item))
-            : []
-
-          return {
-            ...rule,
-            params: {
-              target_tags: targetTags,
-            },
-          }
-        }
-
-        if (rule.rule_type === 'cross_table_mapping') {
-          const dictTag = rule.params.dict_tag === previousTag ? nextTag : rule.params.dict_tag
-          const targetTag =
-            rule.params.target_tag === previousTag ? nextTag : rule.params.target_tag
-
-          return {
-            ...rule,
-            params: {
-              dict_tag: dictTag,
-              target_tag: targetTag,
-            },
-          }
-        }
-
-        return rule
-      })
+    replaceTagInOrchestrationRules(previousTag: string, nextTag: string): void {
+      this.orchestrationRules = this.orchestrationRules.map((rule) =>
+        rule.target_variable_tag === previousTag
+          ? { ...rule, target_variable_tag: nextTag }
+          : rule,
+      )
     },
 
     buildTaskTreePayload(): TaskTree {
-      return buildTaskTreePayload(this.sources, this.variables, this.staticRules)
+      return buildTaskTreePayload(this.sources, this.variables, this.engineValidationRules)
     },
 
     async executeValidation(): Promise<void> {
       this.pageError = ''
+      if (!this.orchestrationRules.length) {
+        this.pageError = '请先在步骤 3 添加至少一条规则。'
+        return
+      }
+      if (this.invalidOrchestrationRuleIds.length) {
+        this.pageError = '存在未配置完整的规则，请按步骤 3 顶部提示修复后再执行。'
+        return
+      }
+
       this.isExecuting = true
 
       try {

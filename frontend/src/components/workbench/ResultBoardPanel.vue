@@ -30,7 +30,7 @@ const resultSummary = computed(() => {
     return '配置完成后点击“立即执行校验”，结果会在这里展示。'
   }
 
-  return `本轮共执行 ${store.rules.length} 条规则，已扫描 ${resultStats.value.scanned} 行数据。`
+  return `本轮共执行 ${store.orchestrationRuleCount} 条规则，已扫描 ${resultStats.value.scanned} 行数据。`
 })
 
 const resultState = computed(() => {
@@ -50,7 +50,7 @@ const resultState = computed(() => {
     }
   }
 
-  if (!store.rules.length) {
+  if (!store.orchestrationRuleCount) {
     return {
       type: 'info' as const,
       title: '还没有可执行的规则',

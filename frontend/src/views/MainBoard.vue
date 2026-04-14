@@ -14,7 +14,7 @@ import {
 
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
-import RuleComposerPanel from '../components/workbench/RuleComposerPanel.vue'
+import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import SectionBlock from '../components/workbench/SectionBlock.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import { useWorkbenchStore } from '../store/workbench'
@@ -43,7 +43,7 @@ const overviewItems = computed(() => [
   },
   {
     label: '规则数',
-    value: store.rules.length,
+    value: store.orchestrationRuleCount,
     icon: SetUp,
     tone: 'accent',
   },
@@ -95,8 +95,12 @@ const stepStatuses = computed<{
 }>(() => ({
   source: store.sources.length ? 'done' : 'active',
   variable: !store.sources.length ? 'pending' : store.variables.length ? 'done' : 'active',
-  rule: !store.variables.length ? 'pending' : store.rules.length ? 'done' : 'active',
-  result: !store.rules.length ? 'pending' : store.executionMeta || store.pageError ? 'done' : 'active',
+  rule: !store.variables.length ? 'pending' : store.orchestrationRuleCount ? 'done' : 'active',
+  result: !store.orchestrationRuleCount
+    ? 'pending'
+    : store.executionMeta || store.pageError
+      ? 'done'
+      : 'active',
 }))
 
 const stepHints = computed(() => ({
@@ -110,10 +114,10 @@ const stepHints = computed(() => ({
       : '建议优先补齐关键字段变量，后续配置规则会更顺手。',
   rule: !store.variables.length
     ? '请先完成变量配置。'
-    : store.rules.length
-      ? `已配置 ${store.rules.length} 条规则，可继续补充条件或直接执行校验。`
-      : '先从非空、唯一和映射规则开始，快速跑通首轮校验。',
-  result: !store.rules.length
+    : store.orchestrationRuleCount
+      ? `已配置 ${store.orchestrationRuleCount} 条规则，可继续补充条件或直接执行校验。`
+      : '使用规则组与「新增规则」配置比较、非空、唯一或组合变量分支校验。',
+  result: !store.orchestrationRuleCount
     ? '请先完成前三步，再在这里查看结果。'
     : store.executionMeta
       ? `最近一次扫描 ${store.executionMeta.total_rows_scanned} 行数据，结果已同步刷新。`
@@ -148,12 +152,12 @@ const workflowGuide = computed(() => {
     }
   }
 
-  if (!store.rules.length) {
+  if (!store.orchestrationRuleCount) {
     return {
       tone: 'warning',
       badge: '下一步',
       title: '变量已准备完成',
-      description: '补充静态规则后，即可开始首轮校验。',
+      description: '在规则组中新增规则后，即可开始首轮校验。',
       step: 3 as StepIndex,
       actionLabel: '配置规则',
       action: 'scroll' as const,
@@ -371,11 +375,11 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       <SectionBlock
         step="3"
         title="规则编排"
-        description="配置静态规则并发起校验，先收口高频场景，再逐步补充规则。"
+        description="按规则组管理校验规则，与「固定规则检查」页数据相互独立。"
         :status="stepStatuses.rule"
         :hint="stepHints.rule"
       >
-        <RuleComposerPanel />
+        <WorkbenchRuleOrchestrationPanel />
 
         <div class="section-footbar">
           <el-button

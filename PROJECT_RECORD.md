@@ -2,6 +2,37 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-14 16:30
+
+### 本次目标
+- 将主工作台步骤 3 从「三卡片静态模板」升级为与固定规则页同构的规则组编排能力，并与 `/fixed-rules` 数据隔离。
+
+### 本次完成
+- 新增 `frontend/src/utils/ruleOrchestrationModel.ts` 与 `workbenchOrchestrationRules.ts`，`fixedRules` store 改为复用前者中的归一化与校验工具函数。
+- `workbench` store 引入 `ruleGroups`、`orchestrationRules`、分页与 CRUD 动作；`buildTaskTreePayload` 改为消费映射后的引擎规则；`executeValidation` 增加无规则 / 待修复规则拦截。
+- 扩展 `frontend/src/utils/taskTree.ts`：`not_null`/`unique` 保留可选 `rule_name`/`location`；新增 `fixed_value_compare` 与 `composite_condition_check` 归一化。
+- 新增 `WorkbenchRuleOrchestrationPanel.vue`（自固定规则页交互裁剪而来），`MainBoard` 步骤 3 接入；删除 `RuleComposerPanel.vue`。
+- 「加载样例」编排改为四条固定规则形态；`workbenchMeta` 中 `STATIC_RULE_TEMPLATES` 调整为与新引擎类型展示一致。
+- 同步更新 `README.md`、`CHANGELOG.md`、`frontend/README.md`、`需求文档.md`、`MODULES.md`。
+
+### 回归结果
+- `python -m pytest backend/tests -q`：`40 passed`
+- `cd frontend && npm run build`：通过
+- 使用 `httpx` + `ASGITransport` 对 `minimal_rules.xlsx` 与样例等价 `TaskTree` 实测：`abnormal_results = 4`（`2 not_null + 2 unique`）
+
+## 进度记录 2026-04-13 12:00
+
+### 本次目标
+- 将「Excel Check 项目模块作用一览」落实为仓库内可维护文档，便于新人与协作快速对照架构。
+
+### 本次完成
+- 新增根目录 `MODULES.md`，内容与已确认计划一致：产品双入口、前端 `src` 分层、后端 `app` 分层、文档索引及逻辑分层 mermaid 简图；文内链接统一为相对路径。
+- 更新根目录 `README.md` 的「相关文档」小节，增加指向 `MODULES.md` 的链接。
+- 同步更新 `CHANGELOG.md` 本条记录。
+
+### 回归结果
+- 本次为文档变更，未改运行时代码；未额外执行构建或 pytest。
+
 ## 进度记录 2026-04-13 10:59
 
 ### 本次目标

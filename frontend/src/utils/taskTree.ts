@@ -128,10 +128,89 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
       throw new Error(`规则 "${rule.rule_type}" 引用了不存在的变量 "${unknownTag}"。`)
     }
 
+    const params: Record<string, unknown> = { target_tags: targetTags }
+    const ruleName = rule.params.rule_name
+    if (typeof ruleName === 'string' && ruleName.trim()) {
+      params.rule_name = ruleName.trim()
+    }
+    const location = rule.params.location
+    if (typeof location === 'string' && location.trim()) {
+      params.location = location.trim()
+    }
+
     return {
       rule_id: rule.rule_id,
       rule_type: rule.rule_type,
-      params: { target_tags: targetTags },
+      params,
+    }
+  }
+
+  if (rule.rule_type === 'fixed_value_compare') {
+    const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const operator = typeof rule.params.operator === 'string' ? rule.params.operator.trim() : ''
+    const expectedValue =
+      typeof rule.params.expected_value === 'string' ? rule.params.expected_value.trim() : ''
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+    const location = typeof rule.params.location === 'string' ? rule.params.location.trim() : ''
+
+    if (!targetTag) {
+      throw new Error('规则 "fixed_value_compare" 缺少 target_tag。')
+    }
+    if (!availableTags.has(targetTag)) {
+      throw new Error(`规则 "fixed_value_compare" 引用了不存在的变量 "${targetTag}"。`)
+    }
+    if (!['eq', 'ne', 'gt', 'lt'].includes(operator)) {
+      throw new Error(`规则 "fixed_value_compare" 的 operator 无效。`)
+    }
+    if (!expectedValue) {
+      throw new Error('规则 "fixed_value_compare" 缺少 expected_value。')
+    }
+    if ((operator === 'gt' || operator === 'lt') && Number.isNaN(Number(expectedValue))) {
+      throw new Error('规则 "fixed_value_compare" 的大于/小于阈值必须是合法数字。')
+    }
+    if (!ruleName) {
+      throw new Error('规则 "fixed_value_compare" 缺少 rule_name。')
+    }
+
+    return {
+      rule_id: rule.rule_id,
+      rule_type: rule.rule_type,
+      params: {
+        target_tag: targetTag,
+        operator,
+        expected_value: expectedValue,
+        rule_name: ruleName,
+        location: location || undefined,
+      },
+    }
+  }
+
+  if (rule.rule_type === 'composite_condition_check') {
+    const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+    const compositeConfig = rule.params.composite_config
+
+    if (!targetTag) {
+      throw new Error('规则 "composite_condition_check" 缺少 target_tag。')
+    }
+    if (!availableTags.has(targetTag)) {
+      throw new Error(`规则 "composite_condition_check" 引用了不存在的变量 "${targetTag}"。`)
+    }
+    if (!ruleName) {
+      throw new Error('规则 "composite_condition_check" 缺少 rule_name。')
+    }
+    if (compositeConfig == null || typeof compositeConfig !== 'object') {
+      throw new Error('规则 "composite_condition_check" 缺少 composite_config。')
+    }
+
+    return {
+      rule_id: rule.rule_id,
+      rule_type: rule.rule_type,
+      params: {
+        target_tag: targetTag,
+        rule_name: ruleName,
+        composite_config: compositeConfig as Record<string, unknown>,
+      },
     }
   }
 

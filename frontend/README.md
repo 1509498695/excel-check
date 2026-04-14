@@ -1,10 +1,15 @@
 # Excel Check Frontend
+
+## 2026-04-14 主工作台步骤 3 规则组编排
+- 步骤 3 使用 `WorkbenchRuleOrchestrationPanel.vue`，与 `/fixed-rules` 规则组/规则弹窗交互同构；状态仅存 `useWorkbenchStore`，与 `fixed-rules` store 隔离。
+- 删除 `RuleComposerPanel.vue`；样例编排改为 `fixed_value_compare` + `not_null` + `unique` 组合，最小样例当前 `abnormal_results = 4`。
+- 回归：`npm run build` 通过；`pytest backend/tests` 由根目录执行仍为 `40 passed`。
+
+文档更新时间：2026-04-14 16:30
  
 ## 2026-04-13 固定规则页文案收口
 - `/fixed-rules` 页面的 Hero、步骤说明、变量池提示、规则编辑辅助文案和结果区文案已做强收口。
 - 本轮不改结构和交互，只压缩固定规则页可见文案密度。
-
-文档更新时间：2026-04-13 10:59
 
 ## 2026-04-13 工作台首页视觉与文案收口说明
 - 主工作台首页 `/` 与共享头部完成一轮视觉精修，不改现有 DOM 层级、Grid / Flex 骨架、类名和事件绑定。
@@ -17,7 +22,7 @@
   - `cd frontend && npm run build`：通过
   - `http://127.0.0.1:5173`：`200`
   - `http://127.0.0.1:5173/fixed-rules`：`200`
-  - `POST /api/v1/engine/execute`：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+  - `POST /api/v1/engine/execute`：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 4`
 
 ## 2026-04-13 固定规则页组合变量条件分支校验说明
 - `/fixed-rules` 现在支持把固定规则页变量池中的组合变量直接绑定到规则弹窗。
@@ -176,7 +181,7 @@
   - `cd frontend && npm run build`：通过
   - `GET http://127.0.0.1:8000/health`：返回 `200`
   - `GET http://127.0.0.1:5173`：返回 `200`
-  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 4`
 
 ## 2026-04-07 组合变量对话框按钮位置调整说明
 - “添加组合变量”对话框现在会先显示可编辑表单区，再显示 `取消 / 保存变量` 操作区，最后显示 JSON 预览区。
@@ -195,7 +200,7 @@
 - 本次回归结果：
   - `python -m pytest backend/tests -q`：`12 passed`
   - `cd frontend && npm run build`：通过
-  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 4`
 
 文档更新时间：2026-04-07 10:11
 
@@ -210,7 +215,7 @@
 - 本次回归结果：
   - `python -m pytest backend/tests -q`：`12 passed`
   - `cd frontend && npm run build`：通过
-  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+  - 最小样例链路保持：`Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 4`
 
 ## 子项目简介
 
@@ -232,11 +237,9 @@
   - `/`
   - `/fixed-rules`
 - `Element Plus` 组件接入与主题化样式
-- 静态规则模板：
-  - `not_null`
-  - `unique`
-  - `cross_table_mapping`
-- 纯静态规则编排区
+- 主工作台步骤 3 规则组编排（与 `/fixed-rules` 同构交互，状态隔离）：
+  - `fixed_value_compare`、`not_null`、`unique`、`composite_condition_check`
+- 引擎仍支持 `cross_table_mapping`；主工作台 UI 不再提供跨表映射配置入口
 - 固定规则模块：
   - 固定规则页自己的数据源接入管理与变量池构建
   - `version = 4` 配置结构与旧版 `version = 3` 规则级绑定自动迁移
@@ -247,7 +250,7 @@
 - 调用 `/api/v1/sources/capabilities`
 - 调用 `/api/v1/sources/metadata`
 - 调用 `/api/v1/sources/column-preview`
-- 调用 `/api/v1/engine/execute`
+- 调用 `/api/v1/engine/execute`（编排规则经 `orchestrationRulesToValidationRules` 映射）
 - 调用 `/api/v1/fixed-rules/config`
 - 调用 `/api/v1/fixed-rules/svn-update`
 - 调用 `/api/v1/fixed-rules/execute`
@@ -380,7 +383,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 6. 结果看板应展示：
    - 扫描总行数 `8`
    - 失败数据源 `0`
-   - 异常结果 `5` 条
+   - 异常结果 `4` 条
    - 命中类型：`2 not_null + 2 unique + 1 cross_table_mapping`
 
 ### 默认访问地址

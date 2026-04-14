@@ -1,9 +1,16 @@
 # 更新日志
 
-文档更新时间：2026-04-13 10:59
+文档更新时间：2026-04-14 16:30
 
 ## [Unreleased]
- 
+
+- 主工作台步骤 3 改为规则组编排（`WorkbenchRuleOrchestrationPanel`），与 `/fixed-rules` 规则能力对齐且 Pinia 状态隔离；移除 `RuleComposerPanel` 与三卡片静态模板入口。
+- `workbench` store 使用 `ruleGroups` + `orchestrationRules`（`FixedRuleDefinition`），执行前映射为 `ValidationRule`；`taskTree.ts` 支持 `fixed_value_compare` 与 `composite_condition_check` 归一化。
+- 抽取共用规则模型工具 [`frontend/src/utils/ruleOrchestrationModel.ts`](frontend/src/utils/ruleOrchestrationModel.ts)，`fixedRules` store 改为引用以减少重复。
+- 「加载样例」编排已更新，最小样例当前实测 `abnormal_results = 4`（`2 not_null + 2 unique`）。
+
+- 新增根目录 [MODULES.md](MODULES.md)，汇总前后端目录与页面级模块职责；[README.md](README.md)「相关文档」增加入口链接。
+
 - 精简 `/fixed-rules` 页面的标题、副文案、步骤说明、变量池提示、规则编辑辅助说明和结果区空状态，降低页面文字密度。
 - 本轮仅调整固定规则页可见 copy，不改 DOM、布局骨架、类名、ID、事件绑定和业务逻辑。
 

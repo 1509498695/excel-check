@@ -12,23 +12,36 @@ export const EXPECTED_TYPE_OPTIONS: Array<{ label: string; value: ExpectedType }
   { label: 'JSON', value: 'json' },
 ]
 
+/** 供结果区等处的规则类型中文展示；主工作台步骤 3 已改为规则组编排，不再使用模板列表。 */
 export const STATIC_RULE_TEMPLATES = [
   {
     ruleType: 'not_null',
-    title: '批量非空校验',
+    title: '非空校验',
     description: '检查目标字段是否存在空值、空字符串或仅包含空白符的内容。',
     level: 'error',
   },
   {
     ruleType: 'unique',
-    title: '批量唯一性校验',
+    title: '唯一校验',
     description: '检查目标字段是否存在重复值，空值默认不参与重复判断。',
     level: 'warning',
   },
   {
+    ruleType: 'fixed_value_compare',
+    title: '常量比较',
+    description: '将列值与给定常量按等于、不等于、大于或小于比较。',
+    level: 'error',
+  },
+  {
+    ruleType: 'composite_condition_check',
+    title: '组合变量条件分支',
+    description: '对组合变量按全局筛选与分支条件做校验。',
+    level: 'error',
+  },
+  {
     ruleType: 'cross_table_mapping',
     title: '跨表映射校验',
-    description: '检查目标列的值是否全部出现在字典列中，适合做外键存在性校验。',
+    description: '历史规则类型，工作台 UI 已不再配置；引擎仍支持。',
     level: 'error',
   },
 ] as const
@@ -44,7 +57,12 @@ export function getRuleTitle(ruleType: string): string {
 }
 
 export function getRuleLevelTone(ruleType: string): 'danger' | 'warning' | 'primary' {
-  if (ruleType === 'not_null' || ruleType === 'cross_table_mapping') {
+  if (
+    ruleType === 'not_null' ||
+    ruleType === 'cross_table_mapping' ||
+    ruleType === 'fixed_value_compare' ||
+    ruleType === 'composite_condition_check'
+  ) {
     return 'danger'
   }
 
