@@ -52,5 +52,7 @@ export interface ProjectMember {
   username: string
   role: string
   is_super_admin: boolean
+  primary_project_id: number | null
+  primary_project_name: string | null
   joined_at: string | null
 }

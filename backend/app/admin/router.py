@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.admin.schemas import (
+    MoveMemberProjectRequest,
     ProjectCreateRequest,
     ProjectUpdateRequest,
     ResetUserPasswordRequest,
@@ -56,16 +57,37 @@ def _ensure_project_deletable(project: Project) -> None:
         raise HTTPException(status_code=400, detail="默认项目不可删除")
 
 
+def _require_project_management_access(
+    ctx: CurrentUserContext,
+    project_id: int,
+) -> None:
+    """要求用户对指定项目具备管理权限。"""
+    if ctx.is_super_admin:
+        return
+    if ctx.role_in_project(project_id) != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+
 @router.get("/projects")
 async def list_projects(
     ctx: CurrentUserContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """列出所有项目（仅管理员可用）。"""
-    ctx.require_super_admin()
-    result = await db.execute(
-        select(Project).options(selectinload(Project.members)).order_by(Project.id)
-    )
+    if ctx.is_super_admin:
+        stmt = select(Project).options(selectinload(Project.members)).order_by(Project.id)
+    else:
+        stmt = (
+            select(Project)
+            .join(UserProjectRole, UserProjectRole.project_id == Project.id)
+            .where(
+                UserProjectRole.user_id == ctx.user_id,
+                UserProjectRole.role == "admin",
+            )
+            .options(selectinload(Project.members))
+            .order_by(Project.id)
+        )
+    result = await db.execute(stmt)
     projects = result.scalars().all()
     return {
         "code": 200,
@@ -122,7 +144,7 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """更新项目信息。"""
-    ctx.require_super_admin()
+    _require_project_management_access(ctx, project_id)
 
     project = await _get_project_or_404(db, project_id)
 
@@ -191,6 +213,13 @@ async def delete_project(
                 role="user",
             )
         )
+    migrated_user_ids = [membership.user_id for membership in memberships]
+    if migrated_user_ids:
+        await db.execute(
+            update(User)
+            .where(User.id.in_(migrated_user_ids))
+            .values(primary_project_id=default_project.id)
+        )
 
     # SQLite 测试环境默认不会可靠触发所有外键级联，这里显式清理项目级记录，
     # 保证删除行为与业务预期一致。
@@ -216,15 +245,16 @@ async def list_project_members(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """查看项目成员列表。超级管理员或项目管理员可用。"""
-    if not ctx.is_super_admin:
-        role = ctx.role_in_project(project_id)
-        if role != "admin":
-            raise HTTPException(status_code=403, detail="需要管理员权限")
+    _require_project_management_access(ctx, project_id)
 
     result = await db.execute(
         select(UserProjectRole)
         .where(UserProjectRole.project_id == project_id)
-        .options(selectinload(UserProjectRole.user))
+        .options(
+            selectinload(UserProjectRole.user)
+            .selectinload(User.roles)
+            .selectinload(UserProjectRole.project)
+        )
         .order_by(UserProjectRole.joined_at)
     )
     members = result.scalars().all()
@@ -238,6 +268,15 @@ async def list_project_members(
                 "username": m.user.username,
                 "role": m.role,
                 "is_super_admin": m.user.is_super_admin,
+                "primary_project_id": m.user.primary_project_id,
+                "primary_project_name": next(
+                    (
+                        role.project.name
+                        for role in m.user.roles
+                        if role.project_id == m.user.primary_project_id
+                    ),
+                    None,
+                ),
                 "joined_at": m.joined_at.isoformat() if m.joined_at else None,
             }
             for m in members
@@ -254,26 +293,90 @@ async def set_member_role(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """设置成员角色（设为管理员 / 普通用户）。"""
-    if not ctx.is_super_admin:
-        role = ctx.role_in_project(project_id)
-        if role != "admin":
-            raise HTTPException(status_code=403, detail="需要管理员权限")
+    _require_project_management_access(ctx, project_id)
 
     result = await db.execute(
-        select(UserProjectRole).where(
+        select(UserProjectRole)
+        .where(
             UserProjectRole.project_id == project_id,
             UserProjectRole.user_id == user_id,
         )
+        .options(selectinload(UserProjectRole.user))
     )
     membership = result.scalar_one_or_none()
     if not membership:
         raise HTTPException(status_code=404, detail="该用户不属于此项目")
+    if membership.user.is_super_admin:
+        raise HTTPException(status_code=400, detail="超级管理员角色不可调整")
 
     membership.role = payload.role
     db.add(membership)
+    if membership.user.primary_project_id is None:
+        membership.user.primary_project_id = project_id
+        db.add(membership.user)
     await db.commit()
 
     return {"code": 200, "msg": f"已将用户角色设为 {payload.role}"}
+
+
+@router.put("/projects/{project_id}/members/{user_id}/project")
+async def move_member_project(
+    project_id: int,
+    user_id: int,
+    payload: MoveMemberProjectRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """调整普通用户的归属项目。"""
+    _require_project_management_access(ctx, project_id)
+    _require_project_management_access(ctx, payload.target_project_id)
+    await _get_project_or_404(db, payload.target_project_id)
+
+    result = await db.execute(
+        select(UserProjectRole)
+        .where(
+            UserProjectRole.project_id == project_id,
+            UserProjectRole.user_id == user_id,
+        )
+        .options(selectinload(UserProjectRole.user))
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=404, detail="该用户不属于此项目")
+
+    user = membership.user
+    if user.is_super_admin:
+        raise HTTPException(status_code=400, detail="超级管理员的归属项目不可调整")
+
+    memberships_result = await db.execute(
+        select(UserProjectRole)
+        .where(UserProjectRole.user_id == user_id)
+        .order_by(UserProjectRole.id)
+    )
+    memberships = memberships_result.scalars().all()
+    if any(item.role == "admin" for item in memberships):
+        raise HTTPException(status_code=400, detail="项目管理员的归属项目不可调整")
+
+    if payload.target_project_id == membership.project_id:
+        user.primary_project_id = payload.target_project_id
+        db.add(user)
+        await db.commit()
+        return {"code": 200, "msg": "归属项目未发生变化"}
+
+    for item in memberships:
+        await db.delete(item)
+
+    db.add(
+        UserProjectRole(
+            user_id=user_id,
+            project_id=payload.target_project_id,
+            role="user",
+        )
+    )
+    user.primary_project_id = payload.target_project_id
+    db.add(user)
+    await db.commit()
+    return {"code": 200, "msg": "归属项目已更新"}
 
 
 @router.delete("/projects/{project_id}/members/{user_id}")
@@ -284,10 +387,7 @@ async def remove_member(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """将成员从项目中移除。"""
-    if not ctx.is_super_admin:
-        role = ctx.role_in_project(project_id)
-        if role != "admin":
-            raise HTTPException(status_code=403, detail="需要管理员权限")
+    _require_project_management_access(ctx, project_id)
 
     if user_id == ctx.user_id:
         raise HTTPException(status_code=400, detail="不能删除自己")
@@ -332,6 +432,8 @@ async def remove_member(
             )
         )
 
+    membership.user.primary_project_id = default_project.id
+    db.add(membership.user)
     await db.delete(membership)
     await db.commit()
     return {"code": 200, "msg": "成员已移入默认项目"}

@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from backend.app.auth.service import verify_password
+from backend.app.auth.service import hash_password, verify_password
 from backend.app.database import (
     async_session_factory,
     init_db,
@@ -38,6 +38,7 @@ async def test_init_db_seeds_default_super_admin(test_db) -> None:
     assert len(projects) == 1
     assert projects[0].name == "默认项目"
     assert admin_user.is_super_admin is True
+    assert admin_user.primary_project_id == projects[0].id
     assert verify_password(settings.default_super_admin_password, admin_user.hashed_password)
     assert len(admin_roles) == 1
     assert admin_roles[0].project_id == projects[0].id
@@ -120,6 +121,7 @@ async def test_register_user_never_becomes_super_admin(test_db) -> None:
     payload = response.json()
     assert payload["data"]["user"]["username"] == "normal_user"
     assert payload["data"]["user"]["is_super_admin"] is False
+    assert payload["data"]["user"]["current_project_id"] == default_project.id
     assert payload["data"]["user"]["current_role"] == "user"
 
     async with async_session_factory() as session:
@@ -131,6 +133,7 @@ async def test_register_user_never_becomes_super_admin(test_db) -> None:
         role = role_result.scalar_one()
 
     assert user.is_super_admin is False
+    assert user.primary_project_id == default_project.id
     assert role.role == "user"
 
 
@@ -172,3 +175,44 @@ async def test_login_admin_after_init_db_on_empty_database(test_db) -> None:
     payload = response.json()
     assert payload["data"]["user"]["username"] == settings.default_super_admin_username
     assert payload["data"]["user"]["is_super_admin"] is True
+    assert payload["data"]["user"]["current_project_id"] is not None
+
+
+@pytest.mark.anyio
+async def test_login_uses_primary_project_instead_of_first_role(test_db) -> None:
+    """登录默认项目应按主归属项目返回，而不是依赖第一条角色记录。"""
+    async with async_session_factory() as session:
+        project_a = Project(name="project-a", description="项目 A")
+        project_b = Project(name="project-b", description="项目 B")
+        session.add_all([project_a, project_b])
+        await session.flush()
+
+        user = User(
+            username="primary-project-user",
+            hashed_password=hash_password("userpass"),
+            is_super_admin=False,
+            primary_project_id=project_b.id,
+        )
+        session.add(user)
+        await session.flush()
+        session.add_all(
+            [
+                UserProjectRole(user_id=user.id, project_id=project_a.id, role="user"),
+                UserProjectRole(user_id=user.id, project_id=project_b.id, role="user"),
+            ]
+        )
+        await session.commit()
+        project_b_id = project_b.id
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "primary-project-user", "password": "userpass"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["user"]["current_project_id"] == project_b_id

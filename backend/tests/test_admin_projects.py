@@ -25,6 +25,7 @@ async def _create_non_admin_headers(project_id: int) -> dict[str, str]:
             username="plain_user",
             hashed_password=hash_password("plainpass"),
             is_super_admin=False,
+            primary_project_id=project_id,
         )
         session.add(user)
         await session.flush()
@@ -33,6 +34,29 @@ async def _create_non_admin_headers(project_id: int) -> dict[str, str]:
                 user_id=user.id,
                 project_id=project_id,
                 role="user",
+            )
+        )
+        await session.commit()
+        token = create_access_token(user.id, project_id=project_id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _create_project_admin_headers(project_id: int) -> dict[str, str]:
+    """创建一个项目管理员并返回其认证头。"""
+    async with async_session_factory() as session:
+        user = User(
+            username="project_admin_user",
+            hashed_password=hash_password("adminpass"),
+            is_super_admin=False,
+            primary_project_id=project_id,
+        )
+        session.add(user)
+        await session.flush()
+        session.add(
+            UserProjectRole(
+                user_id=user.id,
+                project_id=project_id,
+                role="admin",
             )
         )
         await session.commit()
@@ -209,6 +233,89 @@ async def test_non_super_admin_cannot_update_or_delete_project(
 
 
 @pytest.mark.anyio
+async def test_project_admin_can_list_and_update_managed_project_but_cannot_create_or_delete(
+    test_db,
+) -> None:
+    """项目管理员可查看和编辑自己管理的项目，但不能创建或删除项目。"""
+    async with async_session_factory() as session:
+        managed_project = Project(name="managed-project", description="可管理项目")
+        other_project = Project(name="other-project", description="其他项目")
+        session.add_all([managed_project, other_project])
+        await session.commit()
+        managed_project_id = managed_project.id
+        other_project_id = other_project.id
+
+    headers = await _create_project_admin_headers(managed_project_id)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    ) as client:
+        list_response = await client.get("/api/v1/admin/projects")
+        update_response = await client.put(
+            f"/api/v1/admin/projects/{managed_project_id}",
+            json={"description": "已更新描述"},
+        )
+        create_response = await client.post(
+            "/api/v1/admin/projects",
+            json={"name": "new-project", "description": ""},
+        )
+        delete_response = await client.delete(
+            f"/api/v1/admin/projects/{other_project_id}"
+        )
+
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()["data"]] == [managed_project_id]
+    assert update_response.status_code == 200
+    assert update_response.json()["data"]["description"] == "已更新描述"
+    assert create_response.status_code == 403
+    assert delete_response.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_project_admin_can_view_members_in_managed_project(
+    test_db,
+) -> None:
+    """项目管理员可查看自己管理项目的成员列表，并包含归属项目信息。"""
+    async with async_session_factory() as session:
+        project = Project(name="managed-members", description="可管理成员")
+        session.add(project)
+        await session.flush()
+
+        user = User(
+            username="member_for_admin_view",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=project.id,
+        )
+        session.add(user)
+        await session.flush()
+        session.add(
+            UserProjectRole(
+                user_id=user.id,
+                project_id=project.id,
+                role="user",
+            )
+        )
+        await session.commit()
+        project_id = project.id
+
+    headers = await _create_project_admin_headers(project_id)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    ) as client:
+        response = await client.get(f"/api/v1/admin/projects/{project_id}/members")
+
+    assert response.status_code == 200
+    payload = response.json()
+    member = next(item for item in payload["data"] if item["username"] == "member_for_admin_view")
+    assert member["primary_project_id"] == project_id
+    assert member["primary_project_name"] == "managed-members"
+
+
+@pytest.mark.anyio
 async def test_remove_member_from_non_default_project_moves_user_to_default_project(
     auth_client: AsyncClient,
     test_db,
@@ -224,6 +331,7 @@ async def test_remove_member_from_non_default_project_moves_user_to_default_proj
             username="move_member_user",
             hashed_password=hash_password("memberpass"),
             is_super_admin=False,
+            primary_project_id=source_project.id,
         )
         session.add(user)
         await session.flush()
@@ -266,6 +374,178 @@ async def test_remove_member_from_non_default_project_moves_user_to_default_proj
         default_membership = default_membership_result.scalar_one_or_none()
         assert default_membership is not None
         assert default_membership.role == "user"
+
+
+@pytest.mark.anyio
+async def test_super_admin_can_move_regular_member_to_another_project(
+    auth_client: AsyncClient,
+    test_db,
+) -> None:
+    """超级管理员可调整普通用户的归属项目，并收口为单项目归属。"""
+    async with async_session_factory() as session:
+        source_project = Project(name="move-source", description="源项目")
+        target_project = Project(name="move-target", description="目标项目")
+        session.add_all([source_project, target_project])
+        await session.flush()
+
+        user = User(
+            username="member_to_move",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=source_project.id,
+        )
+        session.add(user)
+        await session.flush()
+        session.add(
+            UserProjectRole(
+                user_id=user.id,
+                project_id=source_project.id,
+                role="user",
+            )
+        )
+        await session.commit()
+        source_project_id = source_project.id
+        target_project_id = target_project.id
+        user_id = user.id
+
+    response = await auth_client.put(
+        f"/api/v1/admin/projects/{source_project_id}/members/{user_id}/project",
+        json={"target_project_id": target_project_id},
+    )
+    assert response.status_code == 200
+    assert response.json()["msg"] == "归属项目已更新"
+
+    async with async_session_factory() as session:
+        role_result = await session.execute(
+            select(UserProjectRole).where(UserProjectRole.user_id == user_id)
+        )
+        roles = role_result.scalars().all()
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one()
+
+    assert len(roles) == 1
+    assert roles[0].project_id == target_project_id
+    assert roles[0].role == "user"
+    assert user.primary_project_id == target_project_id
+
+
+@pytest.mark.anyio
+async def test_project_admin_can_move_regular_member_between_managed_projects(
+    test_db,
+) -> None:
+    """项目管理员可在自己可管理的项目之间调整普通用户归属项目。"""
+    async with async_session_factory() as session:
+        source_project = Project(name="managed-source", description="源项目")
+        target_project = Project(name="managed-target", description="目标项目")
+        session.add_all([source_project, target_project])
+        await session.flush()
+
+        user = User(
+            username="member_for_project_admin_move",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=source_project.id,
+        )
+        session.add(user)
+        await session.flush()
+        session.add(
+            UserProjectRole(
+                user_id=user.id,
+                project_id=source_project.id,
+                role="user",
+            )
+        )
+        await session.commit()
+        source_project_id = source_project.id
+        target_project_id = target_project.id
+        user_id = user.id
+
+    headers = await _create_project_admin_headers(source_project_id)
+    async with async_session_factory() as session:
+        admin_user = (
+            await session.execute(select(User).where(User.username == "project_admin_user"))
+        ).scalar_one()
+        session.add(
+            UserProjectRole(
+                user_id=admin_user.id,
+                project_id=target_project_id,
+                role="admin",
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    ) as client:
+        response = await client.put(
+            f"/api/v1/admin/projects/{source_project_id}/members/{user_id}/project",
+            json={"target_project_id": target_project_id},
+        )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_cannot_move_project_admin_or_super_admin_primary_project(
+    auth_client: AsyncClient,
+    test_db,
+) -> None:
+    """不允许调整项目管理员或超级管理员的归属项目。"""
+    async with async_session_factory() as session:
+        source_project = Project(name="guard-source", description="源项目")
+        target_project = Project(name="guard-target", description="目标项目")
+        session.add_all([source_project, target_project])
+        await session.flush()
+
+        project_admin = User(
+            username="guard_project_admin",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=source_project.id,
+        )
+        super_admin = User(
+            username="guard_super_admin",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=True,
+            primary_project_id=source_project.id,
+        )
+        session.add_all([project_admin, super_admin])
+        await session.flush()
+        session.add_all(
+            [
+                UserProjectRole(
+                    user_id=project_admin.id,
+                    project_id=source_project.id,
+                    role="admin",
+                ),
+                UserProjectRole(
+                    user_id=super_admin.id,
+                    project_id=source_project.id,
+                    role="admin",
+                ),
+            ]
+        )
+        await session.commit()
+        source_project_id = source_project.id
+        target_project_id = target_project.id
+        project_admin_id = project_admin.id
+        super_admin_id = super_admin.id
+
+    project_admin_response = await auth_client.put(
+        f"/api/v1/admin/projects/{source_project_id}/members/{project_admin_id}/project",
+        json={"target_project_id": target_project_id},
+    )
+    super_admin_response = await auth_client.put(
+        f"/api/v1/admin/projects/{source_project_id}/members/{super_admin_id}/project",
+        json={"target_project_id": target_project_id},
+    )
+
+    assert project_admin_response.status_code == 400
+    assert project_admin_response.json()["detail"] == "项目管理员的归属项目不可调整"
+    assert super_admin_response.status_code == 400
+    assert super_admin_response.json()["detail"] == "超级管理员的归属项目不可调整"
 
 
 @pytest.mark.anyio

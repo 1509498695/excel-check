@@ -62,6 +62,17 @@ export async function apiSetMemberRole(
   })
 }
 
+export async function apiMoveMemberProject(
+  projectId: number,
+  userId: number,
+  targetProjectId: number,
+): Promise<{ code: number; msg: string }> {
+  return apiFetch(`/api/v1/admin/projects/${projectId}/members/${userId}/project`, {
+    method: 'PUT',
+    body: JSON.stringify({ target_project_id: targetProjectId }),
+  })
+}
+
 export async function apiRemoveMember(
   projectId: number,
   userId: number,

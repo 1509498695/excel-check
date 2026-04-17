@@ -56,7 +56,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
           固定规则检查
         </RouterLink>
         <RouterLink
-          v-if="auth.isSuperAdmin"
+          v-if="auth.isProjectAdmin"
           to="/admin"
           class="app-shell-link"
           active-class="is-active"

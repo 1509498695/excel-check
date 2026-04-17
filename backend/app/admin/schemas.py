@@ -29,6 +29,14 @@ class SetMemberRoleRequest(BaseModel):
     role: str = Field(pattern="^(admin|user)$")
 
 
+class MoveMemberProjectRequest(BaseModel):
+    """调整普通用户归属项目请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_project_id: int
+
+
 class ResetUserPasswordRequest(BaseModel):
     """超级管理员重置指定用户登录密码。"""
 

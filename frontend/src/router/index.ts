@@ -61,7 +61,7 @@ router.beforeEach(async (to) => {
     return { name: 'main-board' }
   }
 
-  if (to.meta.admin && !auth.isSuperAdmin) {
+  if (to.meta.admin && !auth.isProjectAdmin) {
     return { name: 'main-board' }
   }
 })

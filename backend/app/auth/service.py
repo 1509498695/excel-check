@@ -38,6 +38,40 @@ def create_access_token(
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def get_default_project_id(user: User) -> int | None:
+    """返回用户默认项目，优先使用主归属项目。"""
+    if not user.roles:
+        return None
+
+    project_ids = {role.project_id for role in user.roles}
+    if user.primary_project_id is not None and user.primary_project_id in project_ids:
+        return user.primary_project_id
+
+    admin_project_id = next(
+        (role.project_id for role in user.roles if role.role == "admin"),
+        None,
+    )
+    if admin_project_id is not None:
+        return admin_project_id
+    return user.roles[0].project_id
+
+
+def resolve_active_project_id(
+    user: User,
+    requested_project_id: int | None,
+) -> int | None:
+    """解析请求上下文中的有效当前项目。"""
+    if requested_project_id is None:
+        return get_default_project_id(user)
+
+    project_ids = {role.project_id for role in user.roles}
+    if requested_project_id in project_ids:
+        return requested_project_id
+    if user.is_super_admin:
+        return requested_project_id
+    return get_default_project_id(user)
+
+
 def decode_access_token(token: str) -> dict:
     """解析 JWT，返回载荷字典。"""
     try:
@@ -70,6 +104,7 @@ async def register_user(
         username=username,
         hashed_password=hash_password(password),
         is_super_admin=False,
+        primary_project_id=project_id,
     )
     db.add(user)
     await db.flush()

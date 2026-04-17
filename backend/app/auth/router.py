@@ -19,8 +19,10 @@ from backend.app.auth.schemas import (
 from backend.app.auth.service import (
     authenticate_user,
     create_access_token,
+    get_default_project_id,
     hash_password,
     register_user,
+    resolve_active_project_id,
     verify_password,
 )
 from backend.app.database import get_db
@@ -74,13 +76,14 @@ async def register(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    token = create_access_token(user.id, project_id=payload.project_id)
+    default_project_id = get_default_project_id(user)
+    token = create_access_token(user.id, project_id=default_project_id)
     return {
         "code": 200,
         "msg": "注册成功",
         "data": {
             "token": token,
-            "user": _build_user_info(user, payload.project_id).model_dump(),
+            "user": _build_user_info(user, default_project_id).model_dump(),
         },
     }
 
@@ -96,14 +99,14 @@ async def login(
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    first_project_id = user.roles[0].project_id if user.roles else None
-    token = create_access_token(user.id, project_id=first_project_id)
+    default_project_id = get_default_project_id(user)
+    token = create_access_token(user.id, project_id=default_project_id)
     return {
         "code": 200,
         "msg": "登录成功",
         "data": {
             "token": token,
-            "user": _build_user_info(user, first_project_id).model_dump(),
+            "user": _build_user_info(user, default_project_id).model_dump(),
         },
     }
 
@@ -116,7 +119,10 @@ async def get_me(
     return {
         "code": 200,
         "msg": "ok",
-        "data": _build_user_info(ctx.user, ctx.project_id).model_dump(),
+        "data": _build_user_info(
+            ctx.user,
+            resolve_active_project_id(ctx.user, ctx.project_id),
+        ).model_dump(),
     }
 
 
@@ -137,7 +143,10 @@ async def switch_project(
         "msg": "ok",
         "data": {
             "token": token,
-            "user": _build_user_info(ctx.user, project_id).model_dump(),
+            "user": _build_user_info(
+                ctx.user,
+                resolve_active_project_id(ctx.user, project_id),
+            ).model_dump(),
         },
     }
 

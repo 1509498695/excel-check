@@ -48,6 +48,7 @@ async def _auth_context(test_db) -> tuple[dict[str, str], int]:
             username="testuser",
             hashed_password=hash_password("testpass"),
             is_super_admin=True,
+            primary_project_id=project_id,
         )
         session.add(user)
         await session.flush()

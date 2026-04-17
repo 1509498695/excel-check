@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import select, update
+from sqlalchemy import inspect, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -39,8 +39,24 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _ensure_user_primary_project_column()
     default_project = await _seed_default_project()
     await _seed_default_super_admin(default_project.id)
+    await _backfill_user_primary_projects()
+
+
+async def _ensure_user_primary_project_column() -> None:
+    """为已有运行时数据库补齐 users.primary_project_id 列。"""
+
+    def _has_primary_project_column(sync_conn) -> bool:
+        inspector = inspect(sync_conn)
+        user_columns = inspector.get_columns("users")
+        return any(column["name"] == "primary_project_id" for column in user_columns)
+
+    async with engine.begin() as conn:
+        has_column = await conn.run_sync(_has_primary_project_column)
+        if not has_column:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN primary_project_id INTEGER"))
 
 
 async def _seed_default_project():
@@ -79,6 +95,7 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
                 username=settings.default_super_admin_username,
                 hashed_password=hash_password(settings.default_super_admin_password),
                 is_super_admin=True,
+                primary_project_id=default_project_id,
             )
             session.add(admin_user)
             await session.flush()
@@ -92,8 +109,11 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
                         settings.default_super_admin_password
                     ),
                     is_super_admin=True,
+                    primary_project_id=default_project_id,
                 )
             )
+        if admin_user_id is None:
+            raise RuntimeError("默认超级管理员创建失败")
 
         await session.execute(
             update(User)
@@ -124,3 +144,33 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
             session.add(role)
 
         await session.commit()
+
+
+async def _backfill_user_primary_projects() -> None:
+    """为缺少主归属项目的旧用户回填默认项目。"""
+    from sqlalchemy.orm import selectinload
+
+    from backend.app.auth.service import get_default_project_id
+    from backend.app.models import User, UserProjectRole
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).options(
+                selectinload(User.roles).selectinload(UserProjectRole.project)
+            )
+        )
+        users = result.scalars().all()
+
+        dirty = False
+        for user in users:
+            default_project_id = get_default_project_id(user)
+            if default_project_id is None:
+                continue
+            if user.primary_project_id == default_project_id:
+                continue
+            user.primary_project_id = default_project_id
+            session.add(user)
+            dirty = True
+
+        if dirty:
+            await session.commit()

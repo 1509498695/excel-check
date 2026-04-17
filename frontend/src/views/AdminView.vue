@@ -8,6 +8,7 @@ import {
   apiDeleteProject,
   apiListProjectMembers,
   apiListProjects,
+  apiMoveMemberProject,
   apiRemoveMember,
   apiResetUserPassword,
   apiSetMemberRole,
@@ -26,10 +27,17 @@ const isLoadingProjects = ref(false)
 const isLoadingMembers = ref(false)
 const isProjectDialogVisible = ref(false)
 const isSavingProject = ref(false)
+const isMoveProjectDialogVisible = ref(false)
+const isMovingMemberProject = ref(false)
 const projectDialogMode = ref<'create' | 'edit'>('create')
 const projectForm = reactive({
   name: '',
   description: '',
+})
+const moveProjectForm = reactive({
+  userId: null as number | null,
+  username: '',
+  targetProjectId: null as number | null,
 })
 
 onMounted(async () => {
@@ -40,21 +48,41 @@ const projectDialogTitle = computed(() =>
   projectDialogMode.value === 'create' ? '创建项目' : '编辑项目',
 )
 
+const canCreateProject = computed(() => auth.isSuperAdmin)
 const canSubmitProject = computed(() => Boolean(projectForm.name.trim()))
+const moveTargetProjects = computed(() =>
+  projects.value.filter((project) => project.id !== selectedProject.value?.id),
+)
+const canSubmitMoveProject = computed(() => moveProjectForm.targetProjectId !== null)
 
 async function loadProjects(): Promise<void> {
   isLoadingProjects.value = true
   try {
     const response = await apiListProjects()
     projects.value = response.data
+
+    const nextSelectedProject =
+      projects.value.find((item) => item.id === selectedProject.value?.id) ?? projects.value[0] ?? null
+
+    if (!nextSelectedProject) {
+      selectedProject.value = null
+      members.value = []
+      return
+    }
+
+    selectedProject.value = nextSelectedProject
+    await loadMembers(nextSelectedProject)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载项目列表失败')
+    projects.value = []
+    selectedProject.value = null
+    members.value = []
   } finally {
     isLoadingProjects.value = false
   }
 }
 
-async function selectProject(project: ProjectDetail): Promise<void> {
+async function loadMembers(project: ProjectDetail): Promise<void> {
   selectedProject.value = project
   isLoadingMembers.value = true
   try {
@@ -66,6 +94,10 @@ async function selectProject(project: ProjectDetail): Promise<void> {
   } finally {
     isLoadingMembers.value = false
   }
+}
+
+async function selectProject(project: ProjectDetail): Promise<void> {
+  await loadMembers(project)
 }
 
 function openCreateProjectDialog(): void {
@@ -85,6 +117,20 @@ function openEditProjectDialog(project: ProjectDetail): void {
 
 function closeProjectDialog(): void {
   isProjectDialogVisible.value = false
+}
+
+function openMoveProjectDialog(member: ProjectMember): void {
+  moveProjectForm.userId = member.user_id
+  moveProjectForm.username = member.username
+  moveProjectForm.targetProjectId = moveTargetProjects.value[0]?.id ?? null
+  isMoveProjectDialogVisible.value = true
+}
+
+function closeMoveProjectDialog(): void {
+  isMoveProjectDialogVisible.value = false
+  moveProjectForm.userId = null
+  moveProjectForm.username = ''
+  moveProjectForm.targetProjectId = null
 }
 
 async function handleSubmitProject(): Promise<void> {
@@ -115,10 +161,6 @@ async function handleSubmitProject(): Promise<void> {
       await apiUpdateProject(selectedProject.value.id, payload)
       ElMessage.success('项目更新成功')
       await loadProjects()
-      const updatedProject = projects.value.find((item) => item.id === selectedProject.value?.id)
-      if (updatedProject) {
-        await selectProject(updatedProject)
-      }
     }
     closeProjectDialog()
   } catch (error) {
@@ -163,9 +205,31 @@ async function handleSetRole(member: ProjectMember, role: string): Promise<void>
   try {
     await apiSetMemberRole(selectedProject.value.id, member.user_id, role)
     ElMessage.success(`已将 ${member.username} 设为${role === 'admin' ? '管理员' : '普通用户'}`)
-    await selectProject(selectedProject.value)
+    await loadMembers(selectedProject.value)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '操作失败')
+  }
+}
+
+async function handleSubmitMoveProject(): Promise<void> {
+  if (!selectedProject.value || moveProjectForm.userId === null || moveProjectForm.targetProjectId === null) {
+    return
+  }
+
+  isMovingMemberProject.value = true
+  try {
+    await apiMoveMemberProject(
+      selectedProject.value.id,
+      moveProjectForm.userId,
+      moveProjectForm.targetProjectId,
+    )
+    ElMessage.success('归属项目已更新')
+    closeMoveProjectDialog()
+    await loadProjects()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '调整归属项目失败')
+  } finally {
+    isMovingMemberProject.value = false
   }
 }
 
@@ -186,7 +250,7 @@ async function handleRemoveMember(member: ProjectMember): Promise<void> {
     ElMessage.success(
       isDefaultProjectSelected ? '用户账号已删除' : '成员已移入默认项目',
     )
-    await selectProject(selectedProject.value)
+    await loadProjects()
   } catch {
     // 取消
   }
@@ -212,6 +276,13 @@ async function handleResetPassword(member: ProjectMember): Promise<void> {
   }
 }
 
+function canMoveMemberProject(member: ProjectMember): boolean {
+  if (member.is_super_admin || member.role !== 'user') {
+    return false
+  }
+  return moveTargetProjects.value.length > 0
+}
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
   return new Date(dateStr).toLocaleString('zh-CN')
@@ -227,17 +298,22 @@ function isDefaultProject(project: ProjectDetail): boolean {
     <header class="admin-header">
       <div>
         <h1>管理后台</h1>
-        <p>项目管理与成员权限控制</p>
+        <p>{{ auth.isSuperAdmin ? '全局项目与成员管理' : '可管理项目与成员权限控制' }}</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreateProjectDialog">
+      <el-button
+        v-if="canCreateProject"
+        type="primary"
+        :icon="Plus"
+        @click="openCreateProjectDialog"
+      >
         创建项目
       </el-button>
     </header>
 
     <div class="admin-layout">
       <section class="admin-projects" v-loading="isLoadingProjects">
-        <h2>项目列表</h2>
-        <div v-if="!projects.length" class="admin-empty">暂无项目</div>
+        <h2>{{ auth.isSuperAdmin ? '项目列表' : '可管理项目' }}</h2>
+        <div v-if="!projects.length" class="admin-empty">暂无可管理项目</div>
         <div
           v-for="project in projects"
           :key="project.id"
@@ -261,7 +337,7 @@ function isDefaultProject(project: ProjectDetail): boolean {
               编辑项目
             </el-button>
             <el-button
-              v-if="!isDefaultProject(project)"
+              v-if="auth.isSuperAdmin && !isDefaultProject(project)"
               link
               type="danger"
               :icon="Delete"
@@ -275,7 +351,7 @@ function isDefaultProject(project: ProjectDetail): boolean {
 
       <section class="admin-members" v-loading="isLoadingMembers">
         <div v-if="!selectedProject" class="admin-empty">
-          选择左侧项目查看成员
+          当前没有可管理项目
         </div>
         <template v-else>
           <h2>{{ selectedProject.name }} - 成员列表</h2>
@@ -292,12 +368,17 @@ function isDefaultProject(project: ProjectDetail): boolean {
                 </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="归属项目" min-width="140">
+              <template #default="{ row }">
+                {{ row.primary_project_name ?? '-' }}
+              </template>
+            </el-table-column>
             <el-table-column label="加入时间" min-width="180">
               <template #default="{ row }">
                 {{ formatDate(row.joined_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="280" fixed="right">
+            <el-table-column label="操作" width="380" fixed="right">
               <template #default="{ row }">
                 <div class="table-actions">
                   <el-button
@@ -324,6 +405,14 @@ function isDefaultProject(project: ProjectDetail): boolean {
                       @click="handleSetRole(row, 'user')"
                     >
                       设为普通用户
+                    </el-button>
+                    <el-button
+                      v-if="canMoveMemberProject(row)"
+                      link
+                      type="primary"
+                      @click="openMoveProjectDialog(row)"
+                    >
+                      调整归属项目
                     </el-button>
                     <el-button
                       v-if="row.user_id !== auth.user?.id"
@@ -385,6 +474,46 @@ function isDefaultProject(project: ProjectDetail): boolean {
             @click="handleSubmitProject"
           >
             {{ projectDialogMode === 'create' ? '创建项目' : '保存修改' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="isMoveProjectDialogVisible"
+      title="调整归属项目"
+      width="480px"
+      destroy-on-close
+    >
+      <el-form label-position="top" class="dialog-form">
+        <el-form-item label="成员">
+          <el-input :model-value="moveProjectForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="目标归属项目" required>
+          <el-select
+            v-model="moveProjectForm.targetProjectId"
+            placeholder="请选择目标项目"
+            class="full-width"
+          >
+            <el-option
+              v-for="project in moveTargetProjects"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="closeMoveProjectDialog">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="isMovingMemberProject"
+            :disabled="!canSubmitMoveProject"
+            @click="handleSubmitMoveProject"
+          >
+            保存
           </el-button>
         </div>
       </template>

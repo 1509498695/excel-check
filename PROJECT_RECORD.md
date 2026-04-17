@@ -2,6 +2,75 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-17 19:33
+
+### 本次目标
+- 收口普通用户主归属项目语义，开放项目管理员受限版 `/admin`，并补齐后台成员区归属项目调整闭环。
+
+### 本次完成
+- `backend/app/models.py`：
+  - 为 `User` 新增 `primary_project_id`，用于表达稳定的主归属项目。
+- `backend/app/database.py`：
+  - 启动初始化时补齐已有 SQLite 运行库的 `users.primary_project_id` 列。
+  - 对旧用户回填主归属项目，默认超级管理员播种时同步写入主归属项目。
+- `backend/app/auth/service.py`、`backend/app/auth/router.py`、`backend/app/auth/dependencies.py`：
+  - 登录与 `/auth/me` 的当前项目选择改为优先使用主归属项目，不再依赖 `roles[0]`。
+  - 注册用户时自动把注册项目写入主归属项目。
+- `backend/app/admin/schemas.py`、`backend/app/admin/router.py`：
+  - 新增普通用户归属项目调整接口 `PUT /api/v1/admin/projects/{project_id}/members/{user_id}/project`。
+  - `/admin/projects` 与项目编辑接口开放给项目管理员的受限版权限。
+  - 成员列表新增 `primary_project_id / primary_project_name` 返回。
+  - 归属项目调整明确禁止作用于超级管理员和项目管理员。
+  - 项目删除、成员删除迁移到默认项目时，同步修正主归属项目。
+- `frontend/src/router/index.ts`、`frontend/src/App.vue`：
+  - `/admin` 路由守卫与导航入口改为对项目管理员和超级管理员开放。
+- `frontend/src/api/admin.ts`、`frontend/src/types/auth.ts`、`frontend/src/views/AdminView.vue`：
+  - 管理后台成员区新增“归属项目”列和“调整归属项目”交互。
+  - 页面打开或刷新项目列表后，默认选中第一个可管理项目，避免右侧空白。
+  - 项目管理员当前只能管理自己可管理项目，且不能创建或删除项目。
+- `backend/tests/test_admin_projects.py`、`backend/tests/test_auth_bootstrap.py`、`backend/tests/conftest.py`：
+  - 补充主归属项目登录选择、项目管理员受限后台权限、普通用户归属项目调整、成员列表归属项目返回等回归测试。
+
+### 回归结果
+- `python -m pytest backend/tests -q` → `62 passed`
+- `cd frontend && npm run build` → 通过
+- 运行态补充验证：
+  - `GET http://127.0.0.1:8001/health` → `200`
+  - `POST http://127.0.0.1:8001/api/v1/auth/login` 使用 `admin / 123456` → `200`
+  - `GET http://127.0.0.1:8001/api/v1/auth/me` → `200`
+  - `GET http://127.0.0.1:8001/api/v1/admin/projects` → `200`
+  - `GET http://127.0.0.1:5174` → 可访问
+
+### 当前项目进度
+
+#### 已完成功能
+- 默认管理员与唯一超级管理员收口
+- 主归属项目语义与登录默认项目选择收口
+- 项目管理员受限版管理后台
+- 普通用户归属项目展示与调整闭环
+- 多用户认证、项目隔离、主工作台与固定规则页主链路
+
+#### 已实现但未打通 / 占位功能
+- `regex` 规则已注册但未闭环
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源仍为占位实现
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- 多用户协同编辑冲突处理
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `frontend/README.md`
+- 更新 `CHANGELOG.md`
+- 更新 `需求文档.md`
+- 追加本次分钟级进度记录到 `PROJECT_RECORD.md`
+
+### 未完成项与风险
+- 当前运行时数据库仍未接入 Alembic 迁移脚本，本轮通过启动阶段轻量补列兼容已有 SQLite 库；后续表结构演进仍需标准迁移方案。
+- 本轮默认端口 `8000 / 5173` 被现有本地进程占用，因此新增运行态验证改用 `8001 / 5174` 补充完成；未主动干预用户现有进程。
+
 ## 进度记录 2026-04-17 18:56
 
 ### 本次目标

@@ -6,7 +6,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.auth.service import decode_access_token, get_user_with_roles
+from backend.app.auth.service import (
+    decode_access_token,
+    get_user_with_roles,
+    resolve_active_project_id,
+)
 from backend.app.database import get_db
 from backend.app.models import User
 
@@ -110,7 +114,8 @@ async def get_current_user(
             detail="用户不存在",
         )
 
-    return CurrentUserContext(user=user, project_id=project_id)
+    resolved_project_id = resolve_active_project_id(user, project_id)
+    return CurrentUserContext(user=user, project_id=resolved_project_id)
 
 
 async def get_optional_user(
@@ -132,4 +137,5 @@ async def get_optional_user(
     if user is None:
         return None
 
-    return CurrentUserContext(user=user, project_id=project_id)
+    resolved_project_id = resolve_active_project_id(user, project_id)
+    return CurrentUserContext(user=user, project_id=resolved_project_id)
