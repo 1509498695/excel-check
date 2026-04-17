@@ -6,18 +6,36 @@
 - **默认超级管理员**：系统启动时会固定维护 `admin / 123456` 作为全局超级管理员；注册页创建的新用户默认都是普通用户，不再自动晋升为超级管理员。
 - **请求封装**：`src/utils/apiFetch.ts` 统一发起 API 请求，自动注入 JWT；收到 `401` 时清理本地会话并跳转登录。
 - **认证状态**：`src/store/auth.ts`（Pinia）维护登录态、当前用户与角色等信息。
-- **API 模块**：`src/api/auth.ts`（注册、登录、当前用户等）、`src/api/admin.ts`（项目与成员等管理接口）。
+- **API 模块**：`src/api/auth.ts`（注册、登录、当前用户等）、`src/api/admin.ts`（项目创建、修改、删除与成员管理接口）。
 - **路由守卫**：`src/router/index.ts` 中全局 `beforeEach`，按路由元信息区分需登录、仅访客（guest）、超级管理员（admin）等访问策略。
 - **工作台自动保存**：`workbench` store 在主要状态变更后采用 **2 秒防抖（debounce）** 自动调用后端持久化，减少频繁写入。
 - **切换项目数据同步**：项目切换后不再整页刷新，改为 SPA 内重置 `workbench` 和 `fixedRules` store 并重新加载对应项目数据，空项目不残留旧配置。
 - **`App.vue`**：头部增加用户下拉菜单（个人资料、退出等）；**超级管理员** 可见 **管理后台** 导航入口。
+- **管理后台项目交互**：`AdminView.vue` 现已支持编辑项目名称/描述、删除普通项目；删除时会先把成员迁移到默认项目并统一降为普通用户，删除成功后整页刷新后台状态。
+- **管理后台成员删除规则**：
+  - 默认项目中删除成员 = 删除用户账号
+  - 其他项目中删除成员 = 迁移到默认项目
+  - 成员删除统一需要二次确认
+- **删除项目空响应兼容**：管理后台删除项目接口仍返回 `204 No Content`，`apiFetch.ts` 已兼容空响应体，不再出现 `Unexpected end of JSON input`。
 
 ## 2026-04-14 主工作台步骤 3 规则组编排
 - 步骤 3 使用 `WorkbenchRuleOrchestrationPanel.vue`，与 `/fixed-rules` 规则组/规则弹窗交互同构；状态仅存 `useWorkbenchStore`，与 `fixed-rules` store 隔离。
 - 删除 `RuleComposerPanel.vue`；样例编排改为 `fixed_value_compare` + `not_null` + `unique` 组合，最小样例当前 `abnormal_results = 4`。
 - 回归：`npm run build` 通过；`pytest backend/tests` 由根目录执行仍为 `40 passed`。
 
-文档更新时间：2026-04-17 15:46
+文档更新时间：2026-04-17 18:56
+
+## 2026-04-17 默认管理员登录修复说明
+
+- 当前前端登录页 `/login` 不再需要规避后端 `500`；问题已经从后端启动初始化链路修复。
+- 系统启动时会自动：
+  - 初始化运行时数据库表结构
+  - 确保默认项目 `默认项目` 存在
+  - 确保默认超级管理员 `admin / 123456` 可登录
+- 当前真实联调结果：
+  - `GET http://127.0.0.1:8000/health`：`200`
+  - `GET http://127.0.0.1:5173/login`：`200`
+  - `POST /api/v1/auth/login` 使用 `admin / 123456`：成功返回 token
  
 ## 2026-04-13 固定规则页文案收口
 - `/fixed-rules` 页面的 Hero、步骤说明、变量池提示、规则编辑辅助文案和结果区文案已做强收口。

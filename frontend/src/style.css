@@ -2255,6 +2255,18 @@ a {
   color: var(--text-muted);
 }
 
+.admin-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.admin-project-actions .el-button {
+  padding: 0;
+  min-height: auto;
+}
+
 .admin-members {
   background: var(--surface);
   border-radius: 12px;
@@ -2278,6 +2290,10 @@ a {
 
 .admin-no-action {
   color: var(--text-muted);
+}
+
+.project-dialog .el-textarea__inner {
+  resize: vertical;
 }
 
 /* ===== 个人设置 ===== */

@@ -6,6 +6,7 @@ import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 
 from backend.app.auth.service import create_access_token, hash_password
 from backend.app.database import Base, engine, async_session_factory
@@ -16,11 +17,22 @@ from backend.run import app
 @pytest.fixture
 async def test_db():
     """在每个测试前创建表结构，测试结束后清理。"""
+    # 显式导入模型，确保测试环境中的 metadata 完整可用。
+    from backend.app import models as _models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    async with async_session_factory() as session:
+        for table in reversed(Base.metadata.sorted_tables):
+            await session.execute(delete(table))
+        await session.commit()
+
     yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+
+    async with async_session_factory() as session:
+        for table in reversed(Base.metadata.sorted_tables):
+            await session.execute(delete(table))
+        await session.commit()
 
 
 @pytest.fixture

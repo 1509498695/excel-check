@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,9 +18,42 @@ from backend.app.admin.schemas import (
 from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.auth.service import hash_password
 from backend.app.database import get_db
-from backend.app.models import Project, User, UserProjectRole
+from backend.app.models import (
+    FixedRulesConfigRecord,
+    Project,
+    User,
+    UserProjectRole,
+    WorkbenchConfigRecord,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+DEFAULT_PROJECT_NAME = "默认项目"
+
+
+async def _get_project_or_404(db: AsyncSession, project_id: int) -> Project:
+    """按项目 ID 获取项目，不存在时抛出 404。"""
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return project
+
+
+async def _get_default_project_or_500(db: AsyncSession) -> Project:
+    """获取系统默认项目，不存在时视为服务端配置异常。"""
+    result = await db.execute(
+        select(Project).where(Project.name == DEFAULT_PROJECT_NAME)
+    )
+    default_project = result.scalar_one_or_none()
+    if default_project is None:
+        raise HTTPException(status_code=500, detail="默认项目不存在，请先初始化系统默认项目")
+    return default_project
+
+
+def _ensure_project_deletable(project: Project) -> None:
+    """默认项目不可删除，避免破坏系统默认空间。"""
+    if project.name == DEFAULT_PROJECT_NAME:
+        raise HTTPException(status_code=400, detail="默认项目不可删除")
 
 
 @router.get("/projects")
@@ -59,11 +92,12 @@ async def create_project(
     """创建新项目（仅超级管理员）。"""
     ctx.require_super_admin()
 
-    existing = await db.execute(select(Project).where(Project.name == payload.name))
+    normalized_name = payload.name.strip()
+    existing = await db.execute(select(Project).where(Project.name == normalized_name))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail=f"项目名 '{payload.name}' 已存在")
+        raise HTTPException(status_code=400, detail=f"项目名 '{normalized_name}' 已存在")
 
-    project = Project(name=payload.name, description=payload.description)
+    project = Project(name=normalized_name, description=payload.description)
     db.add(project)
     await db.commit()
     await db.refresh(project)
@@ -90,12 +124,19 @@ async def update_project(
     """更新项目信息。"""
     ctx.require_super_admin()
 
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    project = await _get_project_or_404(db, project_id)
 
     if payload.name is not None:
-        project.name = payload.name
+        normalized_name = payload.name.strip()
+        existing = await db.execute(
+            select(Project).where(
+                Project.name == normalized_name,
+                Project.id != project_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail=f"项目名 '{normalized_name}' 已存在")
+        project.name = normalized_name
     if payload.description is not None:
         project.description = payload.description
 
@@ -112,6 +153,60 @@ async def update_project(
             "description": project.description,
         },
     }
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: int,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """删除普通项目前先迁移成员到默认项目，再清理项目级数据。"""
+    ctx.require_super_admin()
+
+    project = await _get_project_or_404(db, project_id)
+    _ensure_project_deletable(project)
+    default_project = await _get_default_project_or_500(db)
+
+    memberships_result = await db.execute(
+        select(UserProjectRole).where(UserProjectRole.project_id == project_id)
+    )
+    memberships = memberships_result.scalars().all()
+
+    default_memberships_result = await db.execute(
+        select(UserProjectRole).where(UserProjectRole.project_id == default_project.id)
+    )
+    existing_default_memberships = {
+        membership.user_id: membership
+        for membership in default_memberships_result.scalars().all()
+    }
+
+    for membership in memberships:
+        if membership.user_id in existing_default_memberships:
+            continue
+        db.add(
+            UserProjectRole(
+                user_id=membership.user_id,
+                project_id=default_project.id,
+                role="user",
+            )
+        )
+
+    # SQLite 测试环境默认不会可靠触发所有外键级联，这里显式清理项目级记录，
+    # 保证删除行为与业务预期一致。
+    await db.execute(
+        delete(FixedRulesConfigRecord).where(
+            FixedRulesConfigRecord.project_id == project_id
+        )
+    )
+    await db.execute(
+        delete(WorkbenchConfigRecord).where(
+            WorkbenchConfigRecord.project_id == project_id
+        )
+    )
+    await db.delete(project)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/projects/{project_id}/members")
@@ -195,19 +290,51 @@ async def remove_member(
             raise HTTPException(status_code=403, detail="需要管理员权限")
 
     if user_id == ctx.user_id:
-        raise HTTPException(status_code=400, detail="不能移除自己")
+        raise HTTPException(status_code=400, detail="不能删除自己")
 
+    project = await _get_project_or_404(db, project_id)
     result = await db.execute(
-        delete(UserProjectRole).where(
+        select(UserProjectRole)
+        .where(
             UserProjectRole.project_id == project_id,
             UserProjectRole.user_id == user_id,
         )
+        .options(selectinload(UserProjectRole.user))
     )
-    if result.rowcount == 0:
+    membership = result.scalar_one_or_none()
+    if membership is None:
         raise HTTPException(status_code=404, detail="该用户不属于此项目")
 
+    if project.name == DEFAULT_PROJECT_NAME:
+        if membership.user.is_super_admin:
+            raise HTTPException(status_code=400, detail="默认项目中的超级管理员不可删除")
+        await db.execute(
+            delete(WorkbenchConfigRecord).where(WorkbenchConfigRecord.user_id == user_id)
+        )
+        await db.delete(membership.user)
+        await db.commit()
+        return {"code": 200, "msg": "用户账号已删除"}
+
+    default_project = await _get_default_project_or_500(db)
+    default_membership_result = await db.execute(
+        select(UserProjectRole).where(
+            UserProjectRole.project_id == default_project.id,
+            UserProjectRole.user_id == user_id,
+        )
+    )
+    default_membership = default_membership_result.scalar_one_or_none()
+    if default_membership is None:
+        db.add(
+            UserProjectRole(
+                user_id=user_id,
+                project_id=default_project.id,
+                role="user",
+            )
+        )
+
+    await db.delete(membership)
     await db.commit()
-    return {"code": 200, "msg": "成员已移除"}
+    return {"code": 200, "msg": "成员已移入默认项目"}
 
 
 @router.post("/users/{user_id}/reset-password")

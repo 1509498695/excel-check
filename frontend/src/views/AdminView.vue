@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 
 import {
   apiCreateProject,
+  apiDeleteProject,
   apiListProjectMembers,
   apiListProjects,
   apiRemoveMember,
   apiResetUserPassword,
   apiSetMemberRole,
+  apiUpdateProject,
 } from '../api/admin'
 import { useAuthStore } from '../store/auth'
 import type { ProjectDetail, ProjectMember } from '../types/auth'
+
+const DEFAULT_PROJECT_NAME = '默认项目'
 
 const auth = useAuthStore()
 const projects = ref<ProjectDetail[]>([])
@@ -20,10 +24,23 @@ const selectedProject = ref<ProjectDetail | null>(null)
 const members = ref<ProjectMember[]>([])
 const isLoadingProjects = ref(false)
 const isLoadingMembers = ref(false)
+const isProjectDialogVisible = ref(false)
+const isSavingProject = ref(false)
+const projectDialogMode = ref<'create' | 'edit'>('create')
+const projectForm = reactive({
+  name: '',
+  description: '',
+})
 
 onMounted(async () => {
   await loadProjects()
 })
+
+const projectDialogTitle = computed(() =>
+  projectDialogMode.value === 'create' ? '创建项目' : '编辑项目',
+)
+
+const canSubmitProject = computed(() => Boolean(projectForm.name.trim()))
 
 async function loadProjects(): Promise<void> {
   isLoadingProjects.value = true
@@ -51,18 +68,93 @@ async function selectProject(project: ProjectDetail): Promise<void> {
   }
 }
 
-async function handleCreateProject(): Promise<void> {
+function openCreateProjectDialog(): void {
+  projectDialogMode.value = 'create'
+  projectForm.name = ''
+  projectForm.description = ''
+  isProjectDialogVisible.value = true
+}
+
+function openEditProjectDialog(project: ProjectDetail): void {
+  projectDialogMode.value = 'edit'
+  projectForm.name = project.name
+  projectForm.description = project.description ?? ''
+  selectedProject.value = project
+  isProjectDialogVisible.value = true
+}
+
+function closeProjectDialog(): void {
+  isProjectDialogVisible.value = false
+}
+
+async function handleSubmitProject(): Promise<void> {
+  if (!canSubmitProject.value) {
+    ElMessage.warning('项目名称不能为空')
+    return
+  }
+
+  isSavingProject.value = true
+  const payload = {
+    name: projectForm.name.trim(),
+    description: projectForm.description.trim(),
+  }
+
   try {
-    const result = await ElMessageBox.prompt('输入项目名称', '创建项目', {
-      confirmButtonText: '创建',
-      cancelButtonText: '取消',
-      inputValidator: (value) => Boolean(value?.trim()) || '项目名称不能为空',
-    })
-    await apiCreateProject(result.value.trim(), '')
-    ElMessage.success('项目创建成功')
-    await loadProjects()
-  } catch {
-    // 取消
+    if (projectDialogMode.value === 'create') {
+      const response = await apiCreateProject(payload.name, payload.description)
+      ElMessage.success('项目创建成功')
+      await loadProjects()
+      const createdProject = projects.value.find((item) => item.id === response.data.id)
+      if (createdProject) {
+        await selectProject(createdProject)
+      }
+    } else {
+      if (!selectedProject.value) {
+        throw new Error('未找到要编辑的项目')
+      }
+      await apiUpdateProject(selectedProject.value.id, payload)
+      ElMessage.success('项目更新成功')
+      await loadProjects()
+      const updatedProject = projects.value.find((item) => item.id === selectedProject.value?.id)
+      if (updatedProject) {
+        await selectProject(updatedProject)
+      }
+    }
+    closeProjectDialog()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存项目失败')
+  } finally {
+    isSavingProject.value = false
+  }
+}
+
+async function handleDeleteProject(project: ProjectDetail): Promise<void> {
+  if (project.name === DEFAULT_PROJECT_NAME) {
+    ElMessage.warning('默认项目不可删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认永久删除项目「${project.name}」？该项目下的成员关系、固定规则配置和工作台配置都会一并清理，且无法恢复。`,
+      '删除项目',
+      {
+        confirmButtonText: '永久删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+    await apiDeleteProject(project.id)
+    ElMessage.success('项目已删除，正在刷新页面')
+    window.setTimeout(() => {
+      window.location.reload()
+    }, 300)
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') {
+      return
+    }
+    ElMessage.error(error instanceof Error ? error.message : '删除项目失败')
   }
 }
 
@@ -80,13 +172,20 @@ async function handleSetRole(member: ProjectMember, role: string): Promise<void>
 async function handleRemoveMember(member: ProjectMember): Promise<void> {
   if (!selectedProject.value) return
   try {
+    const isDefaultProjectSelected = isDefaultProject(selectedProject.value)
+    const confirmMessage = isDefaultProjectSelected
+      ? `确认删除用户「${member.username}」？删除后将永久移除该账号及其项目关系，且不可恢复。`
+      : `确认删除成员「${member.username}」？删除后将把该成员移入默认项目，并从当前项目中移除。`
+
     await ElMessageBox.confirm(
-      `确认将 ${member.username} 从项目中移除？`,
-      '移除成员',
-      { confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning' },
+      confirmMessage,
+      '删除成员',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
     await apiRemoveMember(selectedProject.value.id, member.user_id)
-    ElMessage.success('成员已移除')
+    ElMessage.success(
+      isDefaultProjectSelected ? '用户账号已删除' : '成员已移入默认项目',
+    )
     await selectProject(selectedProject.value)
   } catch {
     // 取消
@@ -117,6 +216,10 @@ function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
   return new Date(dateStr).toLocaleString('zh-CN')
 }
+
+function isDefaultProject(project: ProjectDetail): boolean {
+  return project.name === DEFAULT_PROJECT_NAME
+}
 </script>
 
 <template>
@@ -126,7 +229,7 @@ function formatDate(dateStr: string | null): string {
         <h1>管理后台</h1>
         <p>项目管理与成员权限控制</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="handleCreateProject">
+      <el-button type="primary" :icon="Plus" @click="openCreateProjectDialog">
         创建项目
       </el-button>
     </header>
@@ -148,6 +251,25 @@ function formatDate(dateStr: string | null): string {
             <span>{{ formatDate(project.created_at) }}</span>
           </div>
           <p v-if="project.description">{{ project.description }}</p>
+          <div class="admin-project-actions">
+            <el-button
+              link
+              type="primary"
+              :icon="Edit"
+              @click.stop="openEditProjectDialog(project)"
+            >
+              编辑项目
+            </el-button>
+            <el-button
+              v-if="!isDefaultProject(project)"
+              link
+              type="danger"
+              :icon="Delete"
+              @click.stop="handleDeleteProject(project)"
+            >
+              删除项目
+            </el-button>
+          </div>
         </div>
       </section>
 
@@ -209,7 +331,7 @@ function formatDate(dateStr: string | null): string {
                       type="danger"
                       @click="handleRemoveMember(row)"
                     >
-                      移除
+                      删除
                     </el-button>
                   </template>
                   <span
@@ -225,5 +347,47 @@ function formatDate(dateStr: string | null): string {
         </template>
       </section>
     </div>
+
+    <el-dialog
+      v-model="isProjectDialogVisible"
+      :title="projectDialogTitle"
+      width="520px"
+      destroy-on-close
+      class="project-dialog"
+    >
+      <el-form label-position="top" class="dialog-form">
+        <el-form-item label="项目名称" required>
+          <el-input
+            v-model="projectForm.name"
+            placeholder="请输入项目名称"
+            maxlength="128"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="项目描述">
+          <el-input
+            v-model="projectForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="请输入项目描述（可选）"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="closeProjectDialog">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="isSavingProject"
+            :disabled="!canSubmitProject"
+            @click="handleSubmitProject"
+          >
+            {{ projectDialogMode === 'create' ? '创建项目' : '保存修改' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>

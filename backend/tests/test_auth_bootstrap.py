@@ -7,7 +7,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from backend.app.auth.service import verify_password
-from backend.app.database import async_session_factory, init_db, _seed_default_super_admin
+from backend.app.database import (
+    async_session_factory,
+    init_db,
+    _seed_default_project,
+    _seed_default_super_admin,
+)
 from backend.app.models import Project, User, UserProjectRole
 from backend.config import settings
 from backend.run import app
@@ -127,3 +132,43 @@ async def test_register_user_never_becomes_super_admin(test_db) -> None:
 
     assert user.is_super_admin is False
     assert role.role == "user"
+
+
+@pytest.mark.anyio
+async def test_seed_default_project_creates_named_default_project(test_db) -> None:
+    """即使库里已有普通项目，也应补齐名为“默认项目”的系统项目。"""
+    async with async_session_factory() as session:
+        session.add(Project(name="业务项目", description="普通项目"))
+        await session.commit()
+
+    default_project = await _seed_default_project()
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(Project).order_by(Project.id))
+        projects = result.scalars().all()
+
+    assert default_project.name == "默认项目"
+    assert {project.name for project in projects} == {"业务项目", "默认项目"}
+
+
+@pytest.mark.anyio
+async def test_login_admin_after_init_db_on_empty_database(test_db) -> None:
+    """空库执行初始化后，默认超级管理员应能直接登录。"""
+    await init_db()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": settings.default_super_admin_username,
+                "password": settings.default_super_admin_password,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["user"]["username"] == settings.default_super_admin_username
+    assert payload["data"]["user"]["is_super_admin"] is True

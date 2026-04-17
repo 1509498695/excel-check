@@ -60,5 +60,14 @@ export async function apiFetch<T = unknown>(
     throw new Error(message)
   }
 
-  return (await response.json()) as T
+  if (response.status === 204) {
+    return undefined as T
+  }
+
+  const rawText = await response.text()
+  if (!rawText.trim()) {
+    return undefined as T
+  }
+
+  return JSON.parse(rawText) as T
 }

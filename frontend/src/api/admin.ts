@@ -37,6 +37,12 @@ export async function apiUpdateProject(
   })
 }
 
+export async function apiDeleteProject(projectId: number): Promise<void> {
+  await apiFetch(`/api/v1/admin/projects/${projectId}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function apiListProjectMembers(
   projectId: number,
 ): Promise<ListResponse<ProjectMember>> {

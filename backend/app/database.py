@@ -10,6 +10,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 from backend.config import settings
 
+DEFAULT_PROJECT_NAME = "默认项目"
+DEFAULT_PROJECT_DESCRIPTION = "系统自动创建的默认项目"
+
 engine = create_async_engine(settings.db_url, echo=settings.debug)
 
 async_session_factory = async_sessionmaker(
@@ -31,6 +34,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """应用启动时创建所有表结构（幂等操作），并确保默认项目与管理员存在。"""
+    # 先显式导入 ORM 模型，确保 Base.metadata 已完整收集所有表。
+    from backend.app import models as _models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     default_project = await _seed_default_project()
@@ -38,14 +44,19 @@ async def init_db() -> None:
 
 
 async def _seed_default_project():
-    """若 projects 表为空，插入默认项目，并返回默认项目实例。"""
+    """确保系统默认项目存在，并返回该项目实例。"""
     from backend.app.models import Project  # 延迟导入，避免循环依赖
 
     async with async_session_factory() as session:
-        result = await session.execute(select(Project).order_by(Project.id).limit(1))
+        result = await session.execute(
+            select(Project).where(Project.name == DEFAULT_PROJECT_NAME).limit(1)
+        )
         project = result.scalar_one_or_none()
         if project is None:
-            project = Project(name="默认项目", description="系统自动创建的默认项目")
+            project = Project(
+                name=DEFAULT_PROJECT_NAME,
+                description=DEFAULT_PROJECT_DESCRIPTION,
+            )
             session.add(project)
             await session.commit()
             await session.refresh(project)
@@ -59,11 +70,11 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
 
     async with async_session_factory() as session:
         result = await session.execute(
-            select(User).where(User.username == settings.default_super_admin_username)
+            select(User.id).where(User.username == settings.default_super_admin_username)
         )
-        admin_user = result.scalar_one_or_none()
+        admin_user_id = result.scalar_one_or_none()
 
-        if admin_user is None:
+        if admin_user_id is None:
             admin_user = User(
                 username=settings.default_super_admin_username,
                 hashed_password=hash_password(settings.default_super_admin_password),
@@ -71,18 +82,23 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
             )
             session.add(admin_user)
             await session.flush()
+            admin_user_id = admin_user.id
         else:
-            admin_user.hashed_password = hash_password(
-                settings.default_super_admin_password
+            await session.execute(
+                update(User)
+                .where(User.id == admin_user_id)
+                .values(
+                    hashed_password=hash_password(
+                        settings.default_super_admin_password
+                    ),
+                    is_super_admin=True,
+                )
             )
-            admin_user.is_super_admin = True
-            session.add(admin_user)
-            await session.flush()
 
         await session.execute(
             update(User)
             .where(
-                User.id != admin_user.id,
+                User.id != admin_user_id,
                 User.is_super_admin.is_(True),
             )
             .values(is_super_admin=False)
@@ -90,7 +106,7 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
 
         role_result = await session.execute(
             select(UserProjectRole).where(
-                UserProjectRole.user_id == admin_user.id,
+                UserProjectRole.user_id == admin_user_id,
                 UserProjectRole.project_id == default_project_id,
             )
         )
@@ -98,7 +114,7 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
         if role is None:
             session.add(
                 UserProjectRole(
-                    user_id=admin_user.id,
+                    user_id=admin_user_id,
                     project_id=default_project_id,
                     role="admin",
                 )
