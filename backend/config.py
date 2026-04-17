@@ -51,7 +51,8 @@ class Settings:
     jwt_expire_minutes: int = 1440  # 24 小时
 
     # --- 超级管理员 ---
-    auto_promote_first_user: bool = True
+    default_super_admin_username: str = "admin"
+    default_super_admin_password: str = "123456"
 
 
 settings = Settings()

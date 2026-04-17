@@ -6,7 +6,7 @@ import datetime
 
 import bcrypt
 from jose import JWTError, jwt
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -66,15 +66,10 @@ async def register_user(
     if not project:
         raise ValueError(f"项目 ID {project_id} 不存在")
 
-    is_first_user = False
-    if settings.auto_promote_first_user:
-        user_count = await db.scalar(select(func.count(User.id)))
-        is_first_user = user_count == 0
-
     user = User(
         username=username,
         hashed_password=hash_password(password),
-        is_super_admin=is_first_user,
+        is_super_admin=False,
     )
     db.add(user)
     await db.flush()
@@ -82,7 +77,7 @@ async def register_user(
     role = UserProjectRole(
         user_id=user.id,
         project_id=project_id,
-        role="admin" if is_first_user else "user",
+        role="user",
     )
     db.add(role)
     await db.commit()

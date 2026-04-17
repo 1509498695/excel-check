@@ -3,6 +3,7 @@
 ## 2026-04-14 多用户认证与前端配套
 
 - **新增页面**：`LoginView.vue`、`RegisterView.vue`（登录 / 注册）、`AdminView.vue`（管理控制台）、`ProfileView.vue`（个人资料）。
+- **默认超级管理员**：系统启动时会固定维护 `admin / 123456` 作为全局超级管理员；注册页创建的新用户默认都是普通用户，不再自动晋升为超级管理员。
 - **请求封装**：`src/utils/apiFetch.ts` 统一发起 API 请求，自动注入 JWT；收到 `401` 时清理本地会话并跳转登录。
 - **认证状态**：`src/store/auth.ts`（Pinia）维护登录态、当前用户与角色等信息。
 - **API 模块**：`src/api/auth.ts`（注册、登录、当前用户等）、`src/api/admin.ts`（项目与成员等管理接口）。
@@ -16,7 +17,7 @@
 - 删除 `RuleComposerPanel.vue`；样例编排改为 `fixed_value_compare` + `not_null` + `unique` 组合，最小样例当前 `abnormal_results = 4`。
 - 回归：`npm run build` 通过；`pytest backend/tests` 由根目录执行仍为 `40 passed`。
 
-文档更新时间：2026-04-14 16:30
+文档更新时间：2026-04-17 15:46
  
 ## 2026-04-13 固定规则页文案收口
 - `/fixed-rules` 页面的 Hero、步骤说明、变量池提示、规则编辑辅助文案和结果区文案已做强收口。
