@@ -6,6 +6,8 @@ import {
   fetchCompositePreview,
   fetchSourceCapabilities,
   fetchSourceMetadata,
+  fetchWorkbenchConfig,
+  saveWorkbenchConfig,
 } from '../api/workbench'
 import type { FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
 import type {
@@ -671,6 +673,59 @@ export const useWorkbenchStore = defineStore('workbench', {
         throw error
       } finally {
         this.isExecuting = false
+      }
+    },
+
+    _getAutoSavePayload(): Record<string, unknown> {
+      return {
+        sources: this.sources,
+        variables: this.variables,
+        ruleGroups: this.ruleGroups,
+        orchestrationRules: this.orchestrationRules,
+      }
+    },
+
+    _scheduleAutoSave(): void {
+      if ((this as any)._autoSaveTimer) {
+        clearTimeout((this as any)._autoSaveTimer)
+      }
+      (this as any)._autoSaveTimer = setTimeout(() => {
+        saveWorkbenchConfig(this._getAutoSavePayload()).catch(() => {
+          /* 静默失败 */
+        })
+      }, 2000)
+    },
+
+    triggerAutoSave(): void {
+      this._scheduleAutoSave()
+    },
+
+    async loadFromServer(): Promise<void> {
+      try {
+        const response = await fetchWorkbenchConfig()
+        const data = response.data
+
+        this.sources = []
+        this.variables = []
+        this.ruleGroups = [{ ...UNGROUPED_GROUP }]
+        this.orchestrationRules = []
+        this.abnormalResults = []
+        this.executionMeta = null
+        this.sourceMetadataMap = {}
+        this.variablePreviewMap = {}
+        this.activeTag = null
+        this.preferredSourceId = null
+
+        if (data && typeof data === 'object') {
+          if (Array.isArray(data.sources)) this.sources = data.sources as DataSource[]
+          if (Array.isArray(data.variables)) this.variables = data.variables as VariableTag[]
+          if (Array.isArray(data.ruleGroups))
+            this.ruleGroups = data.ruleGroups as FixedRuleGroup[]
+          if (Array.isArray(data.orchestrationRules))
+            this.orchestrationRules = data.orchestrationRules as FixedRuleDefinition[]
+        }
+      } catch {
+        /* 首次加载无数据正常 */
       }
     },
   },

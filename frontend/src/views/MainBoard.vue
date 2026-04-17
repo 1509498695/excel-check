@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   CircleCheckFilled,
@@ -20,6 +20,18 @@ import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import { useWorkbenchStore } from '../store/workbench'
 
 const store = useWorkbenchStore()
+
+onMounted(async () => {
+  await Promise.all([store.loadCapabilities(), store.loadFromServer()])
+})
+
+watch(
+  () => [store.sources, store.variables, store.ruleGroups, store.orchestrationRules],
+  () => {
+    store.triggerAutoSave()
+  },
+  { deep: true },
+)
 const sourceStepRef = ref<HTMLElement | null>(null)
 const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)

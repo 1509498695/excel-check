@@ -2,6 +2,130 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-15 13:30
+
+### 本次目标
+- 修复切换项目后工作台和固定规则页数据不跟随切换的问题，防止空项目残留旧数据。
+
+### 本次完成
+- `frontend/src/store/workbench.ts`：`loadFromServer` 改为先重置所有状态（sources / variables / ruleGroups / orchestrationRules / abnormalResults / executionMeta / 缓存）再合并服务端返回，空 `{}` 不再沿用旧内存。
+- `frontend/src/store/fixedRules.ts`：新增 `resetState()` action，将 config、UI 标志、执行结果和元数据缓存恢复到初始默认态。
+- `frontend/src/App.vue` 和 `frontend/src/views/ProfileView.vue`：项目切换去掉 `window.location.reload()`，改为 `fixedRules.resetState()` + 并行 `workbench.loadFromServer()` / `fixedRules.loadConfig()` + `router.push('/')`。
+
+### 回归结果
+- `python -m pytest backend/tests -q` → `40 passed`
+- `cd frontend && npm run build` → 通过
+- API 隔离验证：项目 A 保存数据源 → 切换项目 B → 工作台为空 → 切回项目 A 数据恢复
+
+### 当前项目进度
+
+#### 已完成功能
+- JWT 用户认证体系（注册 / 登录 / 令牌管理 / 首用户自动超管）
+- 三级角色权限（超级管理员 / 项目管理员 / 普通用户）
+- 多项目数据隔离（固定规则按 `project_id`，工作台按 `project_id + user_id`）
+- 切换项目后工作台与固定规则数据自动同步（SPA 内 store 重载，无整页刷新）
+- SQLite 数据持久化（SQLAlchemy 异步引擎）
+- 管理后台（项目管理 + 成员管理）
+- 个人中心（修改密码 + 切换项目）
+- 四步工作台完整校验主流程
+- 固定规则模块完整持久化与执行闭环
+- 主工作台步骤 3 规则组编排
+
+#### 已实现但未打通 / 占位功能
+- `regex` 规则已注册但返回空结果
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源为占位实现
+- CSV 变量池下拉提取未开放
+- Alembic 数据库迁移脚本未配置
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- 多用户协同编辑冲突处理
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `需求文档.md`
+
+### 未完成项与风险
+- 工作台自动保存的 2 秒防抖在多标签页同时编辑时可能产生覆盖。
+- Alembic 迁移脚本尚未配置。
+
+## 进度记录 2026-04-14 20:30
+
+### 本次目标
+- 将 Excel Check 从单用户文件存储架构升级为多用户 Web 应用：新增 JWT 认证、角色权限、项目隔离、数据库持久化、管理后台和个人中心。
+
+### 本次完成
+- 后端新增 `backend/app/database.py`（SQLAlchemy 异步引擎 + SQLite）和 `backend/app/models.py`（`Project`、`User`、`UserProjectRole`、`FixedRulesConfigRecord`、`WorkbenchConfigRecord` 五张表）。
+- 后端新增 `backend/app/auth/` 模块：注册 / 登录 / JWT 令牌生成与验证 / `CurrentUserContext` 权限依赖注入。
+- 后端新增 `backend/app/admin/` 模块：项目增删改查 + 项目成员管理 API。
+- 后端新增 `backend/app/api/workbench_api.py`：工作台配置的数据库读写（按 `project_id + user_id` 隔离）。
+- 固定规则 API 从文件 IO 迁移到数据库存储（`FixedRulesConfigRecord`），新增 `db_service.py` 和 `parse_raw_fixed_rules_config` 兼容遗留格式。
+- 密码哈希从 `passlib[bcrypt]` 切换为直接使用 `bcrypt` 库，解决 `bcrypt 5.x` 兼容性问题。
+- 前端新增 `apiFetch.ts`（JWT 注入 + 401 跳转）、`auth.ts` store、`LoginView.vue`、`RegisterView.vue`、`AdminView.vue`、`ProfileView.vue`。
+- 前端路由新增 `/login`、`/register`、`/admin`、`/profile`，全局守卫保护需登录路由。
+- 前端 `App.vue` 新增用户下拉菜单和管理后台入口。
+- 后端测试 `conftest.py` 新增 `test_db`、`_auth_context`、`auth_headers`、`test_project_id`、`seed_fixed_rules_config` fixtures。
+- `test_fixed_rules_api.py` 从文件预填充改为数据库预填充，所有 23 个测试通过认证。
+
+### 回归结果
+- `python -m pytest backend/tests -q` → `40 passed`
+- `cd frontend && npm run build` → 通过
+- `GET http://127.0.0.1:8000/health` → `200`
+- `GET http://127.0.0.1:5173` → `200`
+
+### 当前项目进度
+
+#### 已完成功能
+- JWT 用户认证体系（注册 / 登录 / 令牌管理 / 首用户自动超管）
+- 三级角色权限（超级管理员 / 项目管理员 / 普通用户）
+- 多项目数据隔离（固定规则按 `project_id`，工作台按 `project_id + user_id`）
+- SQLite 数据持久化（SQLAlchemy 异步引擎）
+- 管理后台（项目管理 + 成员管理）
+- 个人中心（修改密码 + 切换项目）
+- 四步工作台完整校验主流程
+- 固定规则模块完整持久化与执行闭环
+- 主工作台步骤 3 规则组编排
+
+#### 已实现但未打通 / 占位功能
+- `regex` 规则已注册但返回空结果
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源为占位实现
+- CSV 变量池下拉提取未开放
+- Alembic 数据库迁移脚本未配置
+
+#### 未开始功能
+- 固定规则结果导出
+- 固定规则多配置集切换
+- 多用户协同编辑冲突处理
+
+### 规范化调整
+- 保持 `POST /api/v1/engine/execute` 不变
+- 保持 `TaskTree -> sources / variables / rules` 不变
+- 保持统一结果结构 `code / msg / meta / data.abnormal_results` 不变
+- 固定规则 API 所有端点新增 `CurrentUserContext` 认证依赖
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `PROJECT_RECORD.md`
+- 更新 `CHANGELOG.md`
+- 更新 `frontend/README.md`
+- 更新 `需求文档.md`
+
+### 未完成项与风险
+- 当前使用内存 SQLite 默认路径，生产部署需配置持久化数据库路径。
+- Alembic 迁移脚本尚未配置，表结构变更需手动管理。
+- 工作台自动保存的 2 秒防抖在多标签页同时编辑时可能产生覆盖。
+
+### 下一步建议
+1. 配置 Alembic 迁移框架，固化数据库 schema 变更管理。
+2. 实现工作台自动保存的乐观并发控制。
+3. 按需添加操作审计日志。
+
 ## 进度记录 2026-04-14 16:30
 
 ### 本次目标

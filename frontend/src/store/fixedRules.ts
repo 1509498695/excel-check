@@ -1,4 +1,4 @@
-﻿import { defineStore } from 'pinia'
+import { defineStore } from 'pinia'
 
 import {
   executeFixedRules,
@@ -267,6 +267,27 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
   },
 
   actions: {
+    resetState(): void {
+      this.config = createDefaultConfig()
+      this.activeTag = null
+      this.preferredSourceId = null
+      this.sourceMetadataMap = {}
+      this.variablePreviewMap = {}
+      this.selectedGroupId = UNGROUPED_GROUP.group_id
+      this.groupKeyword = ''
+      this.currentPage = 1
+      this.isLoading = false
+      this.isSaving = false
+      this.isExecuting = false
+      this.isUpdatingSvn = false
+      this.pageError = ''
+      this.configIssues = []
+      this.executionMeta = null
+      this.abnormalResults = []
+      this.svnUpdateResults = []
+      this.svnUpdateSummary = ''
+    },
+
     clearPageError(): void {
       this.pageError = ''
     },

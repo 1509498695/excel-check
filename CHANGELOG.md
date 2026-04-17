@@ -1,8 +1,26 @@
 # 更新日志
 
-文档更新时间：2026-04-14 16:30
+文档更新时间：2026-04-15 13:30
 
 ## [Unreleased]
+
+- **[重大] 多用户认证与项目隔离体系**：
+  - 新增 JWT 认证（注册 / 登录 / 令牌管理），首个注册用户自动成为超级管理员。
+  - 新增三级角色权限：超级管理员、项目管理员、普通用户。
+  - 新增数据持久化层：SQLAlchemy 异步引擎 + SQLite，包含 `Project`、`User`、`UserProjectRole`、`FixedRulesConfigRecord`、`WorkbenchConfigRecord` 五张 ORM 模型。
+  - 固定规则配置从文件存储迁移到数据库，按 `project_id` 隔离。
+  - 工作台配置新增数据库持久化，按 `project_id + user_id` 隔离，支持 2 秒防抖自动保存。
+  - 新增管理后台 `/admin`：项目增删改查与成员管理。
+  - 新增个人中心 `/profile`：修改密码与切换项目。
+  - 前端新增 `apiFetch` 统一 JWT 注入与 401 跳转，路由新增全局认证守卫。
+  - 密码哈希从 `passlib[bcrypt]` 切换为直接使用 `bcrypt`，兼容 `bcrypt 5.x`。
+  - 回归：`40 passed` / `npm run build` 通过。
+
+- **切换项目数据同步**：
+  - `workbench.loadFromServer` 改为先重置状态再合并服务端数据，空项目不再残留上一项目配置。
+  - `fixedRules` store 新增 `resetState` action，切换项目时清空配置、执行结果和 UI 缓存。
+  - `App.vue` 和 `ProfileView.vue` 的项目切换去掉 `window.location.reload()`，改为 SPA 内 store 重载 + `router.push('/')`。
+  - 回归：`40 passed` / `npm run build` 通过 / API 隔离验证通过。
 
 - 主工作台步骤 3 改为规则组编排（`WorkbenchRuleOrchestrationPanel`），与 `/fixed-rules` 规则能力对齐且 Pinia 状态隔离；移除 `RuleComposerPanel` 与三卡片静态模板入口。
 - `workbench` store 使用 `ruleGroups` + `orchestrationRules`（`FixedRuleDefinition`），执行前映射为 `ValidationRule`；`taskTree.ts` 支持 `fixed_value_compare` 与 `composite_condition_check` 归一化。

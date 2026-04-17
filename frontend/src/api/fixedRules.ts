@@ -4,68 +4,29 @@ import type {
   FixedRulesExecuteResponse,
   FixedRulesSvnUpdateResponse,
 } from '../types/fixedRules'
-
-async function parseApiError(response: Response): Promise<never> {
-  let message = '请求失败，请稍后重试。'
-
-  try {
-    const payload = (await response.json()) as { detail?: string }
-    message = payload.detail ?? message
-  } catch {
-    message = `${response.status} ${response.statusText}`
-  }
-
-  throw new Error(message)
-}
+import { apiFetch } from '../utils/apiFetch'
 
 export async function fetchFixedRulesConfig(): Promise<FixedRulesConfigResponse> {
-  const response = await fetch('/api/v1/fixed-rules/config')
-
-  if (!response.ok) {
-    await parseApiError(response)
-  }
-
-  return (await response.json()) as FixedRulesConfigResponse
+  return apiFetch<FixedRulesConfigResponse>('/api/v1/fixed-rules/config')
 }
 
 export async function saveFixedRulesConfig(
   config: FixedRulesConfig,
 ): Promise<FixedRulesConfigResponse> {
-  const response = await fetch('/api/v1/fixed-rules/config', {
+  return apiFetch<FixedRulesConfigResponse>('/api/v1/fixed-rules/config', {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify(config),
   })
-
-  if (!response.ok) {
-    await parseApiError(response)
-  }
-
-  return (await response.json()) as FixedRulesConfigResponse
 }
 
 export async function executeFixedRules(): Promise<FixedRulesExecuteResponse> {
-  const response = await fetch('/api/v1/fixed-rules/execute', {
+  return apiFetch<FixedRulesExecuteResponse>('/api/v1/fixed-rules/execute', {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    await parseApiError(response)
-  }
-
-  return (await response.json()) as FixedRulesExecuteResponse
 }
 
 export async function triggerFixedRulesSvnUpdate(): Promise<FixedRulesSvnUpdateResponse> {
-  const response = await fetch('/api/v1/fixed-rules/svn-update', {
+  return apiFetch<FixedRulesSvnUpdateResponse>('/api/v1/fixed-rules/svn-update', {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    await parseApiError(response)
-  }
-
-  return (await response.json()) as FixedRulesSvnUpdateResponse
 }

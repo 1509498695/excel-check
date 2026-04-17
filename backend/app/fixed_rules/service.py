@@ -73,8 +73,20 @@ def load_fixed_rules_config() -> FixedRulesConfig:
     return config
 
 
-def load_fixed_rules_config_with_issues() -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
-    """?????????????????????????"""
+def parse_raw_fixed_rules_config(raw: dict) -> FixedRulesConfig:
+    """将数据库读出的原始 dict 解析为 FixedRulesConfig，兼容遗留格式。"""
+    return _parse_fixed_rules_payload(raw)
+
+
+def load_fixed_rules_config_with_issues(
+    config: FixedRulesConfig | None = None,
+) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
+    """从文件或传入的配置加载并校验固定规则，返回配置与问题列表。"""
+    if config is not None:
+        return _validate_and_normalize_fixed_rules_config(
+            _ensure_v4_config(config),
+            allow_runtime_issues=True,
+        )
     return _load_fixed_rules_config_payload(allow_runtime_issues=True)
 
 
@@ -115,17 +127,23 @@ def save_fixed_rules_config(config: FixedRulesConfig) -> FixedRulesConfig:
     return normalized_config
 
 
-def execute_saved_fixed_rules() -> dict[str, object]:
-    """???????????????"""
-    config = load_fixed_rules_config()
+def execute_saved_fixed_rules(
+    config: FixedRulesConfig | None = None,
+) -> dict[str, object]:
+    """执行固定规则。如果传入 config 则直接使用，否则从文件加载。"""
+    if config is None:
+        config = load_fixed_rules_config()
     if not config.rules:
-        raise ValueError("??????????????????????????")
+        raise ValueError("当前没有可执行的固定规则，请先配置规则再执行。")
     return execute_engine(build_fixed_rules_task_tree(config))
 
 
-def run_saved_fixed_rules_svn_update() -> dict[str, object]:
-    """??????????????????? SVN ???"""
-    config = load_fixed_rules_config()
+def run_saved_fixed_rules_svn_update(
+    config: FixedRulesConfig | None = None,
+) -> dict[str, object]:
+    """对固定规则配置中的数据源目录执行 SVN 更新。"""
+    if config is None:
+        config = load_fixed_rules_config()
     working_copies = _collect_working_copies(config.sources)
     if not working_copies:
         raise ValueError("??????? SVN ?????????????")

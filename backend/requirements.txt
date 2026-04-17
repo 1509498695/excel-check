@@ -7,3 +7,9 @@ xlrd
 requests
 pytest
 httpx
+sqlalchemy>=2.0
+aiosqlite
+alembic
+python-jose[cryptography]
+bcrypt
+python-multipart

@@ -10,8 +10,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app.fixed_rules import service as fixed_rules_service
-from backend.config import Settings
 from backend.run import app
+from backend.tests.conftest import seed_fixed_rules_config
+
+
+def _auth_client_ctx(headers: dict[str, str]):
+    """返回带认证 headers 的 AsyncClient 上下文。"""
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    )
 
 
 def _create_fixed_rules_workbook(
@@ -188,33 +197,13 @@ def _build_v4_payload(
     }
 
 
-@pytest.fixture
-def isolated_fixed_rules_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Path:
-    """把固定规则配置文件重定向到测试临时目录。"""
-    config_path = tmp_path / "fixed-rules" / "default.json"
-    monkeypatch.setattr(
-        fixed_rules_service,
-        "settings",
-        Settings(
-            fixed_rules_config_path=config_path,
-            runtime_dir=tmp_path / ".runtime",
-        ),
-    )
-    return config_path
-
 
 @pytest.mark.anyio
 async def test_get_fixed_rules_config_returns_default_when_missing(
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证未保存配置时会返回 v4 默认空结构。"""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
@@ -237,21 +226,15 @@ async def test_get_fixed_rules_config_returns_default_when_missing(
 @pytest.mark.anyio
 async def test_get_fixed_rules_config_returns_issues_when_source_path_missing(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证读取失效本地路径时仍返回配置和 config_issues。"""
     missing_workbook_path = tmp_path / "missing.xlsx"
     payload = _build_v4_payload(missing_workbook_path)
-    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
-    isolated_fixed_rules_config.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    await seed_fixed_rules_config(payload, test_project_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
@@ -269,7 +252,8 @@ async def test_get_fixed_rules_config_returns_issues_when_source_path_missing(
 @pytest.mark.anyio
 async def test_get_fixed_rules_config_returns_source_issue_without_variables(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证仅保存数据源时，失效路径也会返回 source 级 config_issues。"""
     missing_workbook_path = tmp_path / "missing-source-only.xlsx"
@@ -279,16 +263,9 @@ async def test_get_fixed_rules_config_returns_source_issue_without_variables(
         rules=[],
         groups=[{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
     )
-    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
-    isolated_fixed_rules_config.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    await seed_fixed_rules_config(payload, test_project_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
@@ -306,7 +283,8 @@ async def test_get_fixed_rules_config_returns_source_issue_without_variables(
 @pytest.mark.anyio
 async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证失效路径只在读取配置时降级，不放宽保存和执行。"""
     missing_workbook_path = tmp_path / "missing-source-only.xlsx"
@@ -316,16 +294,9 @@ async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
         rules=[],
         groups=[{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
     )
-    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
-    isolated_fixed_rules_config.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    await seed_fixed_rules_config(payload, test_project_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -338,7 +309,7 @@ async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_persists_valid_v4_payload(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证合法的 v4 固定规则配置可以保存并再次读取。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -347,15 +318,11 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
     )
     payload = _build_v4_payload(workbook_path)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         get_response = await client.get("/api/v1/fixed-rules/config")
 
     assert save_response.status_code == 200
-    assert isolated_fixed_rules_config.exists() is True
 
     get_payload = get_response.json()["data"]
     assert get_payload["version"] == 4
@@ -368,7 +335,8 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
 @pytest.mark.anyio
 async def test_get_fixed_rules_config_migrates_legacy_payload(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证旧版全局单文件配置读取时会自动迁移到 v4。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -394,16 +362,9 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
             }
         ],
     }
-    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
-    isolated_fixed_rules_config.write_text(
-        json.dumps(legacy_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    await seed_fixed_rules_config(legacy_payload, test_project_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
@@ -419,7 +380,8 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
 @pytest.mark.anyio
 async def test_get_fixed_rules_config_migrates_v3_binding_rules(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证旧版 version=3 binding 规则会自动迁移到变量引用结构。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -446,16 +408,9 @@ async def test_get_fixed_rules_config_migrates_v3_binding_rules(
             }
         ],
     }
-    isolated_fixed_rules_config.parent.mkdir(parents=True, exist_ok=True)
-    isolated_fixed_rules_config.write_text(
-        json.dumps(v3_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    await seed_fixed_rules_config(v3_payload, test_project_id)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
@@ -469,7 +424,7 @@ async def test_get_fixed_rules_config_migrates_v3_binding_rules(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_unknown_target_variable(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证规则引用不存在变量时会返回 400。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -479,10 +434,7 @@ async def test_put_fixed_rules_config_rejects_unknown_target_variable(
     payload = _build_v4_payload(workbook_path)
     payload["rules"][0]["target_variable_tag"] = "[missing-tag]"
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -492,7 +444,7 @@ async def test_put_fixed_rules_config_rejects_unknown_target_variable(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_variable_binding(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证固定规则只能绑定单个变量。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -523,10 +475,7 @@ async def test_put_fixed_rules_config_rejects_composite_variable_binding(
         ],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -536,7 +485,7 @@ async def test_put_fixed_rules_config_rejects_composite_variable_binding(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_accepts_composite_rule_and_round_trips(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_round_trip.xlsx",
@@ -554,10 +503,7 @@ async def test_put_fixed_rules_config_accepts_composite_rule_and_round_trips(
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         get_response = await client.get("/api/v1/fixed-rules/config")
 
@@ -571,7 +517,7 @@ async def test_put_fixed_rules_config_accepts_composite_rule_and_round_trips(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_variable(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "single_cannot_use_composite.xlsx",
@@ -583,10 +529,7 @@ async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_var
         rules=[_build_composite_rule(target_tag, rule_name="单变量不能绑定组合规则")],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -596,7 +539,7 @@ async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_var
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_rule_without_branches(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_no_branches.xlsx",
@@ -615,10 +558,7 @@ async def test_put_fixed_rules_config_rejects_composite_rule_without_branches(
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -628,7 +568,7 @@ async def test_put_fixed_rules_config_rejects_composite_rule_without_branches(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_branch_without_assertions(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_no_assertions.xlsx",
@@ -647,10 +587,7 @@ async def test_put_fixed_rules_config_rejects_composite_branch_without_assertion
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -660,7 +597,7 @@ async def test_put_fixed_rules_config_rejects_composite_branch_without_assertion
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_unique_in_composite_filters(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_invalid_filter_operator.xlsx",
@@ -680,10 +617,7 @@ async def test_put_fixed_rules_config_rejects_unique_in_composite_filters(
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -693,7 +627,7 @@ async def test_put_fixed_rules_config_rejects_unique_in_composite_filters(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_compare_assertion_without_rhs(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_missing_rhs.xlsx",
@@ -713,10 +647,7 @@ async def test_put_fixed_rules_config_rejects_composite_compare_assertion_withou
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -726,7 +657,7 @@ async def test_put_fixed_rules_config_rejects_composite_compare_assertion_withou
 @pytest.mark.anyio
 async def test_execute_fixed_rules_supports_composite_condition_check(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "composite_execute.xlsx",
@@ -744,10 +675,7 @@ async def test_execute_fixed_rules_supports_composite_condition_check(
         rules=[composite_rule],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -766,7 +694,7 @@ async def test_execute_fixed_rules_supports_composite_condition_check(
 @pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_compare_rule_without_expected_value(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证比较类规则缺少 expected_value 时会返回 400。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -776,10 +704,7 @@ async def test_put_fixed_rules_config_rejects_compare_rule_without_expected_valu
     payload = _build_v4_payload(workbook_path)
     payload["rules"][0]["expected_value"] = ""
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
@@ -789,7 +714,7 @@ async def test_put_fixed_rules_config_rejects_compare_rule_without_expected_valu
 @pytest.mark.anyio
 async def test_execute_fixed_rules_passes_gt_zero_rule(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证 INT_ID > 0 在合法数据上返回 0 条异常。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -798,10 +723,7 @@ async def test_execute_fixed_rules_passes_gt_zero_rule(
     )
     payload = _build_v4_payload(workbook_path)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -816,7 +738,7 @@ async def test_execute_fixed_rules_passes_gt_zero_rule(
 @pytest.mark.anyio
 async def test_execute_fixed_rules_reports_not_null_with_fixed_rule_location(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证固定规则页的非空校验沿用 error，并保留自定义规则名和定位。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -837,10 +759,7 @@ async def test_execute_fixed_rules_reports_not_null_with_fixed_rule_location(
         ],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -856,7 +775,7 @@ async def test_execute_fixed_rules_reports_not_null_with_fixed_rule_location(
 @pytest.mark.anyio
 async def test_execute_fixed_rules_reports_unique_with_warning_level(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证唯一校验沿用 warning 语义。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -877,10 +796,7 @@ async def test_execute_fixed_rules_reports_unique_with_warning_level(
         ],
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -895,7 +811,7 @@ async def test_execute_fixed_rules_reports_unique_with_warning_level(
 @pytest.mark.anyio
 async def test_execute_fixed_rules_supports_mixed_rule_types_in_one_run(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证比较类、非空和唯一规则可以在一次执行中混合运行。"""
     workbook_a = _create_fixed_rules_workbook(
@@ -981,10 +897,7 @@ async def test_execute_fixed_rules_supports_mixed_rule_types_in_one_run(
         ],
     }
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
@@ -1000,8 +913,8 @@ async def test_execute_fixed_rules_supports_mixed_rule_types_in_one_run(
 @pytest.mark.anyio
 async def test_fixed_rules_svn_update_deduplicates_working_copies_from_saved_sources(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
     monkeypatch: pytest.MonkeyPatch,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证 SVN 更新会按已保存数据源目录去重后统一执行。"""
     dir_a = tmp_path / "svn-a"
@@ -1077,10 +990,7 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies_from_saved_sou
 
     monkeypatch.setattr(fixed_rules_service, "update_svn_working_copy", fake_update)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         await client.put("/api/v1/fixed-rules/config", json=payload)
         response = await client.post("/api/v1/fixed-rules/svn-update")
 
@@ -1096,8 +1006,8 @@ async def test_fixed_rules_svn_update_deduplicates_working_copies_from_saved_sou
 @pytest.mark.anyio
 async def test_fixed_rules_svn_update_returns_clear_error_when_cli_missing(
     tmp_path: Path,
-    isolated_fixed_rules_config: Path,
     monkeypatch: pytest.MonkeyPatch,
+    auth_headers: dict[str, str],
 ) -> None:
     """验证当前环境缺少 svn CLI 时会返回明确提示。"""
     workbook_path = _create_fixed_rules_workbook(
@@ -1113,10 +1023,7 @@ async def test_fixed_rules_svn_update_returns_clear_error_when_cli_missing(
 
     monkeypatch.setattr(fixed_rules_service, "update_svn_working_copy", raise_missing_cli)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
+    async with _auth_client_ctx(auth_headers) as client:
         await client.put("/api/v1/fixed-rules/config", json=payload)
         response = await client.post("/api/v1/fixed-rules/svn-update")
 
