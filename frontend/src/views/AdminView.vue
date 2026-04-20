@@ -359,10 +359,26 @@ async function handleResetPassword(member: ProjectMember): Promise<void> {
 }
 
 function canMoveMemberProject(member: ProjectMember): boolean {
-  if (member.is_super_admin || member.role !== 'user') {
+  if (member.is_super_admin) {
+    return auth.isSuperAdmin && member.user_id === auth.user?.id && moveTargetProjects.value.length > 0
+  }
+  if (member.role !== 'user') {
     return false
   }
   return moveTargetProjects.value.length > 0
+}
+
+function canRemoveMember(member: ProjectMember): boolean {
+  if (!selectedProject.value) {
+    return false
+  }
+  if (member.user_id === auth.user?.id) {
+    return false
+  }
+  if (isDefaultProject(selectedProject.value) && !auth.isSuperAdmin) {
+    return false
+  }
+  return true
 }
 
 function formatDate(dateStr: string | null): string {
@@ -708,6 +724,14 @@ function getMemberRoleLabel(member: ProjectMember): string {
                         >
                           重置密码
                         </button>
+                        <button
+                          v-if="row.is_super_admin && canMoveMemberProject(row)"
+                          type="button"
+                          class="ec-action-link"
+                          @click="openMoveProjectDialog(row)"
+                        >
+                          调整归属
+                        </button>
                         <template v-if="!row.is_super_admin">
                           <button
                             v-if="row.role !== 'admin'"
@@ -734,7 +758,7 @@ function getMemberRoleLabel(member: ProjectMember): string {
                             调整归属
                           </button>
                           <button
-                            v-if="row.user_id !== auth.user?.id"
+                            v-if="canRemoveMember(row)"
                             type="button"
                             class="ec-action-link-danger"
                             @click="handleRemoveMember(row)"
@@ -743,7 +767,11 @@ function getMemberRoleLabel(member: ProjectMember): string {
                           </button>
                         </template>
                         <span
-                          v-if="row.is_super_admin && !(auth.isSuperAdmin && row.user_id !== auth.user?.id)"
+                          v-if="
+                            row.is_super_admin &&
+                            !(auth.isSuperAdmin && row.user_id !== auth.user?.id) &&
+                            !canMoveMemberProject(row)
+                          "
                           class="text-ink-500"
                         >
                           —

@@ -176,14 +176,14 @@ class TaskTree:
 
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
-| `GET` | `/admin/projects` | 列出当前用户可管理项目（超级管理员见全部）。 |
+| `GET` | `/admin/projects` | 列出当前用户可管理项目（超级管理员见全部；项目管理员额外包含默认项目）。 |
 | `POST` | `/admin/projects` | 创建项目（仅超级管理员）。 |
 | `PUT` | `/admin/projects/{project_id}` | 修改项目名称 / 描述。 |
 | `DELETE` | `/admin/projects/{project_id}` | 删除项目（默认项目禁止删除）；返回 `204`。 |
-| `GET` | `/admin/projects/{id}/members` | 列出成员，含归属项目。 |
-| `PUT` | `/admin/projects/{id}/members/{user_id}/role` | 调整成员在该项目内的角色。 |
-| `PUT` | `/admin/projects/{id}/members/{user_id}/project` | 调整普通用户的归属项目。 |
-| `DELETE` | `/admin/projects/{id}/members/{user_id}` | 默认项目内 = 删除账号；其他项目内 = 迁回默认项目。 |
+| `GET` | `/admin/projects/{id}/members` | 列出成员，含归属项目；项目管理员可查看默认项目成员。 |
+| `PUT` | `/admin/projects/{id}/members/{user_id}/role` | 调整成员在该项目内的角色；默认项目对项目管理员开放该非删除操作。 |
+| `PUT` | `/admin/projects/{id}/members/{user_id}/project` | 调整成员归属项目；普通用户仍按单项目收口，超级管理员仅可调整自己的归属项目并自动补目标项目 `admin` 角色，其他成员不能调整超管归属。 |
+| `DELETE` | `/admin/projects/{id}/members/{user_id}` | 默认项目内 = 删除账号（仅超级管理员）；其他项目内 = 迁回默认项目。 |
 | `POST` | `/admin/users/{user_id}/reset-password` | 重置指定用户密码。 |
 | `GET` | `/admin/projects-public` | 公开的项目列表（注册页选项）。 |
 
@@ -237,7 +237,7 @@ class TaskTree:
 
 | 页面 | 组成 |
 |:---|:---|
-| `/admin` | KPI（项目数 / 当前项目成员 / 超级管理员 / 我的归属项目）+ 单列三模块（项目列表 / 项目详情 / 项目成员），项目卡片 `border-blue-500 + bg-blue-50` 选中态，成员表用极浅 `border-gray-100` 网格线。 |
+| `/admin` | KPI（项目数 / 当前项目成员 / 超级管理员 / 我的归属项目）+ 单列三模块（项目列表 / 项目详情 / 项目成员），项目卡片 `border-blue-500 + bg-blue-50` 选中态，成员表用极浅 `border-gray-100` 网格线；项目管理员也可在后台选中默认项目，但默认项目中的删除成员入口仍受限。 |
 | `/profile` | 全宽 3 模块：账号信息（横向 4 列描述列表）/ 修改密码（`max-w-md` 表单 + 左对齐保存按钮）/ 我的项目（4 列等宽表格）。 |
 
 ## 7. 规则引擎
@@ -291,7 +291,7 @@ def handle_composite(ctx): ...
 - `User`：含 `is_super_admin: bool`、`primary_project_id: int | null`（主归属项目）。
 - `UserProjectRole`：多对多关系表，`role ∈ {admin, user}`，描述用户在某项目内的角色。
 - 登录 / `/auth/me` 当前项目按主归属项目优先选择，不再依赖 `roles[0]`。
-- 普通用户始终保持单归属项目，归属调整在管理后台完成；超级管理员与项目管理员的归属项目不允许在后台调整。
+- 普通用户始终保持单归属项目，归属调整在管理后台完成；项目管理员的归属项目仍不允许在后台调整；超级管理员仅允许在后台调整自己的归属项目，且会自动补齐目标项目 `admin` 角色记录。
 
 ### 8.2 数据隔离
 
@@ -306,6 +306,8 @@ def handle_composite(ctx): ...
 ### 8.3 默认项目
 
 - 系统保留项目 `默认项目`，启动时自动创建；任何角色都禁止删除。
+- 项目管理员进入管理后台时可额外看到默认项目，用于查看成员、调角色与调归属；默认项目中的成员删除仍只允许超级管理员。
+- 超级管理员可在管理后台成员表的本人行执行“调整归属项目”；除本人外，任何成员都不能调整超级管理员归属项目。
 - 删除自定义项目时，成员自动迁移到默认项目并降为普通用户；若成员已存在角色记录则保留。
 
 ## 9. 异常处理与性能

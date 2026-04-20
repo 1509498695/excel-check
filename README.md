@@ -10,7 +10,7 @@
 - 多项目数据隔离：固定规则按 `project_id`、工作台配置按 `project_id + user_id`。
 - 主工作台 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。
 - 固定规则页 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
-- 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置。
+- 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，其他成员不能调整超管归属。
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
 - 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`cross_table_mapping`、`composite_condition_check`。
 - 数据源能力：本地 Excel（`.xlsx` / `.xls`）、本地 CSV；飞书与 SVN 作为独立 source 类型当前为占位。
