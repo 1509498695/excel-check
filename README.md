@@ -1,5 +1,7 @@
 # Excel Check
 
+> 历史变更记录与早期 SDD 已搬到 [docs/archive/](docs/archive/)；本 README、[docs/MODULES.md](docs/MODULES.md) 与 [CHANGELOG.md](CHANGELOG.md) 是当前唯一稳定文档。
+
 ## 2026-04-20 全站 1:1 参考稿收口（主页面骨架 + 弹窗/Table tokens 对齐）
 
 - 以 `C:/Users/chenzhen/Desktop/htm.html` 和 `C:/Users/chenzhen/Desktop/弹窗样式.html` 为唯一视觉基准，对当前前端继续做了一轮 **1:1 收口**，本轮重点把还残留的“折叠工作流卡 + 非参考稿结果区”彻底切回参考稿式展开工作台。
@@ -1015,9 +1017,9 @@ npm run build
 - 多用户协同编辑冲突处理
 
 ## 相关文档
-- 模块一览：[MODULES.md](MODULES.md)
-- 项目记录：[PROJECT_RECORD.md](D:/project/excel-check/PROJECT_RECORD.md)
-- 更新日志：[CHANGELOG.md](D:/project/excel-check/CHANGELOG.md)
+- 模块一览：[docs/MODULES.md](docs/MODULES.md)
+- 项目记录：[docs/archive/PROJECT_RECORD.md](docs/archive/PROJECT_RECORD.md)
+- 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
 ## 2026-04-03 交互补充说明
 
