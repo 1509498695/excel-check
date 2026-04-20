@@ -15,7 +15,7 @@ const isLoading = ref(false)
 
 async function handleLogin(): Promise<void> {
   if (!username.value.trim() || !password.value) {
-    ElMessage.warning('请填写用户名和密码')
+    ElMessage.warning('用户名与密码均为必填')
     return
   }
 
@@ -34,47 +34,55 @@ async function handleLogin(): Promise<void> {
 </script>
 
 <template>
-  <div class="auth-page">
-    <div class="auth-card">
-      <div class="auth-header">
-        <span class="auth-brand">EC</span>
-        <h1>登录 Excel Check</h1>
-        <p>配置表校验工作台</p>
+  <div class="flex min-h-screen w-screen flex-col items-center justify-center bg-canvas px-6 font-sans text-ink-700">
+    <!-- 品牌：方块 + 表格 SVG（与左边栏同款，强化一致性） -->
+    <div class="flex flex-col items-center gap-3 mb-8">
+      <div class="flex h-12 w-12 items-center justify-center rounded-md bg-accent text-white">
+        <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 5h16v14H4z M4 10h16 M9 5v14" />
+        </svg>
       </div>
-
-      <el-form class="auth-form" @submit.prevent="handleLogin">
-        <el-form-item>
-          <el-input
-            v-model="username"
-            placeholder="用户名"
-            size="large"
-            autofocus
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-input
-            v-model="password"
-            type="password"
-            placeholder="密码"
-            size="large"
-            show-password
-          />
-        </el-form-item>
-        <el-button
-          type="primary"
-          size="large"
-          :loading="isLoading"
-          class="auth-submit"
-          native-type="submit"
-        >
-          登录
-        </el-button>
-      </el-form>
-
-      <div class="auth-footer">
-        <span>还没有账号？</span>
-        <router-link to="/register">立即注册</router-link>
+      <div class="text-center">
+        <div class="text-[18px] font-semibold tracking-tight text-ink-900">Excel Check</div>
+        <div class="text-[12px] text-ink-500">配置表校验工作台</div>
       </div>
     </div>
+
+    <!-- 登录卡 -->
+    <form
+      class="w-[380px] rounded-card border border-line bg-card p-6 shadow-card-2"
+      @submit.prevent="handleLogin"
+    >
+      <div class="mb-5">
+        <h1 class="text-[15px] font-semibold tracking-tight text-ink-900">登录</h1>
+        <p class="mt-1 text-[12px] text-ink-500">使用账户名与密码进入工作台</p>
+      </div>
+
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">用户名</label>
+          <el-input v-model="username" placeholder="例如：admin" autofocus />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">密码</label>
+          <el-input v-model="password" type="password" placeholder="密码" show-password />
+        </div>
+
+        <button
+          type="submit"
+          class="ec-btn ec-btn-primary mt-2 w-full"
+          :disabled="isLoading"
+        >
+          {{ isLoading ? '登录中…' : '登录' }}
+        </button>
+      </div>
+
+      <div class="mt-5 text-center text-[12px] text-ink-500">
+        还没有账号？
+        <router-link to="/register" class="text-accent-ink transition hover:underline">立即注册</router-link>
+      </div>
+    </form>
+
+    <div class="mt-10 text-[12px] text-ink-500">© Excel Check · 2026</div>
   </div>
 </template>

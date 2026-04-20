@@ -2,6 +2,308 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-20 17:40
+
+### 本次目标
+
+- 以桌面参考稿 `htm.html` 和 `弹窗样式.html` 为唯一视觉真相，把当前项目继续收口到 **1:1 参考稿风格**。
+- 重点修复当前主工作台还残留的两处偏差：
+  - 仍在使用 `WorkbenchStepCard` 折叠式工作流卡，而不是参考稿的 4 个展开模块
+  - 结果区仍是上一版 `alert + progress + element table` 混合结构，不是参考稿的统计块 + 异常表格
+
+### 本次完成
+
+#### 触达文件
+
+- [`frontend/src/views/MainBoard.vue`](frontend/src/views/MainBoard.vue)
+  - 移除 `WorkbenchStepCard` 引用与折叠壳层，把步骤 1~4 全部改回参考稿式展开模块：
+    - `01 数据源`
+    - `02 变量池`
+    - `03 规则`
+    - `04 结果`
+  - 每个模块统一为：`顶部 2px 激活色带 + 左侧编号 badge + 标题 + 状态胶囊 + 副说明 + 下方正文`
+  - `scrollToStep(step)`、步骤点击高亮、样例填充、执行校验、`@saved -> scrollToStep` 等行为全部沿用。
+- [`frontend/src/components/workbench/ResultBoardPanel.vue`](frontend/src/components/workbench/ResultBoardPanel.vue)
+  - 结果区从旧的 `el-alert + 通过率 progress + summary tiles + el-table`，重写为参考稿同构结构：
+    - 上方告警 Banner（失败数据源 / 执行错误）
+    - 中部 4 个统计块：扫描总行数 / 失败数据源 / 异常结果 / 执行耗时
+    - 下方异常明细表：`命中规则 / 定位 / 行号 / 原始值 / 级别 / 说明`
+  - `store.executionMeta`、`store.abnormalResults`、`store.pageError` 的消费口径零改动。
+- [`frontend/src/style.css`](frontend/src/style.css)
+  - 新增统一 `Dialog / Table / Form tokens`：
+    - `el-dialog` 统一圆角、边框、阴影、header/body/footer padding
+    - `workbench-table` 统一参考稿式浅表头、12px uppercase 表头、白底正文
+    - `mono-chip / truncate-line / table-actions` 统一 reference 味道的辅助样式
+  - 这组全局 tokens 会同步影响主工作台、固定规则页以及共享弹窗，是本轮“全站统一”的真实落点。
+
+#### 严格未触碰
+
+- [`frontend/src/store/`](frontend/src/store/) 全部 Pinia 状态
+- [`frontend/src/api/`](frontend/src/api/) 全部请求封装
+- [`frontend/src/types/`](frontend/src/types/) 全部协议定义
+- [`backend/`](backend/) 任何 `.py` 与测试
+
+### 回归结果
+
+- `python -m pytest backend/tests -q` => `67 passed`
+- `cd frontend && npm run build` => 通过（vue-tsc + Vite v8.0.3）
+- 运行态探活：
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/` => `200`
+  - `GET http://127.0.0.1:5173/login` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+
+### 当前项目进度
+
+#### 已完成功能
+
+- 主工作台骨架现已与 `htm.html` 收口到同一套展开式工作台结构，不再残留折叠工作流卡。
+- 结果区现已切回参考稿式统计块 + 异常表格结构。
+- 共享弹窗 / 表格 / 表单 tokens 进一步统一，工作台与弹窗风格更加一致。
+
+#### 已知遗留
+
+- `frontend/src/components/workbench/WorkbenchStepCard.vue` 文件仍保留在仓库中，但主工作台已不再使用；后续如无其它页面复用，可单独立项清理。
+- 变量详情弹窗仍沿用上一轮详情型布局，本轮未纳入“5 个核心弹窗”范围内的再次收口。
+
+## 进度记录 2026-04-20 16:55
+
+### 本次目标
+
+- 修复主工作台步骤 3「规则」展开后的排版崩坏（根因是上一轮删除 `frontend/src/fixed-rules.css` 时，`WorkbenchRuleOrchestrationPanel.vue` 仍在引用 `rule-binding-board / group-band-card / group-pill / rule-workspace-card / composite-condition-card` 等 class，layout 全失效）。
+- 把工作台页签的 5 个弹窗（新增数据源 / 添加单变量 / 添加组合变量 / 新建规则组 / 新建规则）按已确认的设计稿全量重写，对齐全站 Linear 风格。
+
+### 本次完成
+
+#### 触达文件（按 Phase）
+
+- **Phase A** [`frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue`](frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue)：
+  - 模板全量重写为 Tailwind utility，与 [`frontend/src/views/FixedRulesBoard.vue`](frontend/src/views/FixedRulesBoard.vue) 同款规则编排区 1:1 对齐：左侧 260px 规则组垂直列表（`bg-canvas/40 + 4px 左主色色带 + bg-accent-soft 选中态`）+ 右侧极简 HTML 表格。
+  - **Dialog 4** 新建 / 重命名规则组：从原 `ElMessageBox.prompt` 升级为 420px 自定义 `<el-dialog>`，新增 4 个 reactive 状态（`isGroupDialogVisible / groupDialogMode / groupForm / isSubmittingGroup`）+ `openCreateGroupDialog / openRenameGroupDialog / handleSubmitGroup` 3 个新函数，业务调用仍走原 `store.createOrchestrationGroup / store.renameOrchestrationGroup`。
+  - **Dialog 5** 新增 / 编辑规则：760px、三段式 SectionHeader 风格（基本信息 / 校验配置 / 组合分支），段 2 在目标为组合变量时整段 `opacity-50 pointer-events-none` 并显示「当前不适用」胶囊；段 3 嵌套层次 `bg-subtle → bg-card → border-line`；全部 `el-form-item` 替换为 `<label>` + 控件直渲。
+  - 删除 `Delete / EditPen` 图标 import；保留 `Plus / Search`。
+  - 顶部待修复告警从 `el-alert` 换成 `border + 4px 左 warning 色带` 的极简 Banner。
+  - **业务函数零改动**：`handleSaveRule / validateRuleForm / openCreateRuleDialog / openEditRuleDialog / handleRemoveRule / handleRemoveGroup / addBranch / removeBranch / addBranchFilter / removeBranchFilter / addBranchAssertion / removeBranchAssertion / setConditionOperator / setConditionValueSource / validateCompositeCondition / buildRuleCondition / buildRuleSelectionSummary / buildRuleVariableSummary / buildRuleSourcePathSummary / syncRuleNameWithForm` 等约 40 个全部沿用。
+- **Phase B** [`frontend/src/components/workbench/DataSourcePanel.vue`](frontend/src/components/workbench/DataSourcePanel.vue)：
+  - 仅重写「新增 / 编辑数据源」`<el-dialog>` 内部 body：从 `el-form / el-form-item` 改为 `flex flex-col gap-4 + label.text-[12px].text-ink-500 + el-input/el-select`；520px 宽。
+  - 路径输入行改为 `flex items-center gap-2 + flex-1 input + 选择文件按钮`，`needsToken` 飞书分支保留。
+  - footer 按钮换成原生 `<button>`（`border-line bg-card` 取消 + `bg-accent` 保存数据源）。
+  - 外层「面板表头 + 数据源表格 + 状态 Tag」全部保留，所有 props / emit / computed / watch / 函数零改动。
+- **Phase C** [`frontend/src/components/workbench/VariablePoolPanel.vue`](frontend/src/components/workbench/VariablePoolPanel.vue)：
+  - 重写「添加单个变量」弹窗：520px、双列 grid 排布（来源 / Sheet / 列名 / 期望类型）+ 全宽变量标签 + 1 句副文 "默认按 [来源-Sheet-列名] 自动生成；改后不再覆盖"。
+  - 重写「添加组合变量」弹窗：720px、`grid grid-cols-[1fr_280px] gap-6`；左栏完整表单；右栏 JSON 映射预览（`<pre> bg-canvas font-mono text-[11px]`，`max-h-[300px]` 内部滚动），含统计行（行数 / key 数 / Key 列名）。
+  - 错误告警从 `el-alert` 换成同款 4px 左 warning 色带 Banner。
+  - 「变量详情」弹窗本轮未触碰，留待后续单独清理。
+  - 所有 props / emit / computed / watch、`fetchCompositePreview` 调用链路、`handleSingleSourceChange / handleCompositeSourceChange / saveSingleVariable / saveCompositeVariable` 等业务函数零改动。
+
+#### 严格未触碰
+
+- [`frontend/src/store/`](frontend/src/store/) 全部 Pinia 状态
+- [`frontend/src/api/`](frontend/src/api/) 全部请求封装
+- [`frontend/src/types/`](frontend/src/types/) 全部协议定义
+- [`backend/`](backend/) 任何 `.py` 与测试
+
+### 回归结果
+
+- `python -m pytest backend/tests -q` => `67 passed`
+- `cd frontend && npm run build` => 通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告；产物：`index-D-IzhydK.css 419.68KB / gzip 60.48KB`，`index-1x24Im5o.js 189.03KB`）
+- `python backend/run.py` 启动；`GET http://127.0.0.1:8000/health` => `200`
+- `npm run dev -- --host 127.0.0.1 --port 5173` 启动；6 路由实测：
+  - `/login` / `/register` / `/` / `/fixed-rules` / `/admin` / `/profile` => 全部 `200`
+- 主工作台最小样例（`POST /api/v1/engine/execute` + `minimal_rules.xlsx` + `not_null / unique / cross_table_mapping`）：
+  - `code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+- 固定规则 qa88 真样例（`PUT /api/v1/fixed-rules/config` + `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`，再 `POST /api/v1/fixed-rules/execute`）：
+  - `code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+### 当前项目进度
+
+#### 已完成功能
+
+- 工作台页签 4 个步骤展开后视觉 1:1 对齐 Linear 风格设计稿，步骤 3 排版崩坏完全修复。
+- 5 个工作台弹窗 1:1 对齐设计稿（420 / 520 / 720 / 760 四档宽度），共享组件改动同步惠及固定规则页 `/fixed-rules`。
+- 主工作台与固定规则页的端到端业务接口与 baseline 字节级一致。
+
+#### 已实现但未打通 / 占位功能
+
+- `regex` 规则已注册但未闭环
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源仍为占位实现
+- 「变量详情」弹窗未对齐新设计语言（本轮显式留作下一轮单独立项）
+
+#### 未开始功能
+
+- 固定规则结果导出 / 多配置集切换
+- 多用户协同编辑冲突处理
+
+### 文档同步
+
+- 更新 [`README.md`](README.md) 顶部追加本轮变更条目
+- 更新 [`PROJECT_RECORD.md`](PROJECT_RECORD.md)：追加本次分钟级记录（即本节）
+- 更新 [`CHANGELOG.md`](CHANGELOG.md)：在 `[Unreleased]` 顶部追加阶段性变更条目
+- 更新 [`frontend/README.md`](frontend/README.md)：追加本轮前端实际触达范围与运行态验证结果
+- 更新 [`需求文档.md`](需求文档.md)：0 章追加本轮需求补充
+
+### 未完成项与风险
+
+- DataSourcePanel / VariablePoolPanel 是共享组件，新弹窗外形对 `/fixed-rules` 同步生效——这是统一设计系统的预期效果，已通过 qa88 固定规则联调兜住。
+- 「变量详情」弹窗仍保留旧外形（`detail-dialog-shell / variable-detail-panel / detail-meta-grid` 等老 class），属于「已知遗留 + 等待下一轮单独立项清理」状态；功能完整可用，仅外形与新设计不一致。
+- 「新建规则组 / 重命名规则组」从 ElMessageBox.prompt 升级到自定义 el-dialog，新增 4 个 reactive ref；已确认 watcher / computed 不会捕获到这些内部状态。
+
+## 进度记录 2026-04-20 16:10
+
+### 本次目标
+
+- 按已确认的 6 片重构 spec，把 Excel Check 全站 6 个页面（共享壳层、主工作台、固定规则、管理后台、个人设置、登录、注册）一次性收口到同一套 Linear 冷静风 + Tailwind v3 + 单 accent 体系，弃用旧的 Apple 玻璃质感样式。
+- **业务红线**：不动 Pinia store、API 模块、类型协议、路由守卫、后端字段；只动模板结构、布局容器、CSS、文案。
+
+### 本次完成
+
+#### 触达文件（按阶段）
+
+- **Phase 0** 新增 6 个共享展示组件：
+  - [`frontend/src/components/shell/PageHeader.vue`](frontend/src/components/shell/PageHeader.vue)
+  - [`frontend/src/components/shell/SectionHeader.vue`](frontend/src/components/shell/SectionHeader.vue)
+  - [`frontend/src/components/shell/StatPill.vue`](frontend/src/components/shell/StatPill.vue)
+  - [`frontend/src/components/shell/StatusDot.vue`](frontend/src/components/shell/StatusDot.vue)
+  - [`frontend/src/components/shell/EmptyState.vue`](frontend/src/components/shell/EmptyState.vue)
+  - [`frontend/src/components/shell/DataTable.vue`](frontend/src/components/shell/DataTable.vue)
+- **Phase 1** [`frontend/src/App.vue`](frontend/src/App.vue)：删除顶部 `app-shell-toolbar`（含「当前空间」label + 角色 Tag + 项目 Tag）；左边栏品牌区改为主色方块 + 24×24 表格 SVG；TopBar 改由各页面自己提供；导航激活态用 `bg-accent-soft + 主色文字`。
+- **Phase 2** [`frontend/src/views/MainBoard.vue`](frontend/src/views/MainBoard.vue) + [`frontend/src/components/workbench/WorkbenchStepCard.vue`](frontend/src/components/workbench/WorkbenchStepCard.vue)：接入 `PageHeader / StatPill`；KPI 卡去 hover 浮起；当前激活步骤改为顶部 2px 主色色带（`before:bg-accent`）；折叠步骤的 chevron 加 hover 旋转 180° 200ms 缓动；KPI 与 Stepper 文案 utility 化（`数据源 / 至少接入 1 个`、`变量池 / 沉淀字段与组合变量` 等）。
+- **Phase 3** [`frontend/src/views/FixedRulesBoard.vue`](frontend/src/views/FixedRulesBoard.vue) 全量重构：
+  - **删除**文件 [`frontend/src/fixed-rules.css`](frontend/src/fixed-rules.css)，并从 [`frontend/src/main.ts`](frontend/src/main.ts) 移除 `import './fixed-rules.css'`。
+  - 接入 `PageHeader / SectionHeader / StatPill / StatusDot`；Hero 段、`SectionBlock` 包装与玻璃质感全部删除。
+  - 规则组从横向 pill 改为左侧垂直列表 + `4px 左主色色带 + bg-accent-soft + accent-ink 主色文字` 的选中态。
+  - 规则列表改为极简 HTML 表格（`bg-canvas` 浅表头 + 行 hover `bg-canvas`）。
+  - 「新建规则」弹窗内部用 3 个 `SectionHeader` 分隔「基本信息 / 校验配置 / 组合分支」，弃用 `el-form-item` 框；组合规则的「全局筛选 / 分支筛选 / 分支校验」用 `bg-subtle` 嵌套层次表达。
+  - 失效告警从 `el-alert` 换成自定义 Banner（`border + border-l-4 border-l-warning bg-warning-soft/40`）。
+- **Phase 4** [`frontend/src/views/AdminView.vue`](frontend/src/views/AdminView.vue) 标准化：接入 `PageHeader / SectionHeader`；项目列表改垂直列表 + 4px 左色带；成员表格改为极简 HTML 表格 + 行 hover；编辑/调整归属弹窗用 `label + 控件` 双行布局；主按钮只保留 `创建项目 / 保存`。
+- **Phase 5** [`frontend/src/views/ProfileView.vue`](frontend/src/views/ProfileView.vue) 单列叙事：居中 720px 单列；3 段「账号信息 / 修改密码 / 我的项目」用 `SectionHeader + border-b border-line` 分隔；不再使用任何卡片底色与浮起。
+- **Phase 6** [`frontend/src/views/LoginView.vue`](frontend/src/views/LoginView.vue) + [`frontend/src/views/RegisterView.vue`](frontend/src/views/RegisterView.vue) 回归克制：删除任何渐变 / 模糊 / 装饰光斑；卡片宽度 380px + 1px line 边 + `shadow-card-2`；品牌方块外置（与左边栏同款），底部 `© Excel Check · 2026`。
+- **Phase 7** [`frontend/src/style.css`](frontend/src/style.css) 全局收口：
+  - `:root / body` 背景从原橙蓝双 radial gradient + 渐变改为纯 `#f7f8fa`。
+  - 兼容旧组件的 CSS 变量（`--accent / --brand / --success / --warning / --danger / --shadow-soft / --shadow-panel`）全部对齐 Tailwind 新 token，去掉残留的 `#ff984d` 暖橙系。
+  - 新增 `prefers-reduced-motion` 兜底，统一关闭过渡 / 动画 / scroll-behavior。
+  - 新增 Element Plus token 校准段：`--el-button-bg-color` 等按钮、`el-input/select` 聚焦光晕、`el-pagination`、`el-dropdown-menu__item`、`el-message` 图标颜色全部对齐 `#2563eb / #10b981 / #f59e0b / #ef4444`。
+
+#### 严格未触碰
+
+- [`frontend/src/store/`](frontend/src/store/) 全部 Pinia 状态
+- [`frontend/src/api/`](frontend/src/api/) 全部请求封装
+- [`frontend/src/types/`](frontend/src/types/) 全部协议定义
+- [`frontend/src/router/`](frontend/src/router/) 与全局守卫
+- [`backend/`](backend/) 任何 `.py` 与测试
+
+### 回归结果
+
+- `python -m pytest backend/tests -q` => `67 passed`
+- `cd frontend && npm run build` => 通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告；产物：`index-D1hkGF37.css 419.18KB / gzip 60.38KB`，`index-p6N8XX7f.js 178.35KB`，`auth-alxLMu_a.js 951.96KB`，`AdminView-Dd7BOH0Z.js / ProfileView-C_0snwP9.js / LoginView-BxJPImUM.js / RegisterView-DntV6b-5.js`）
+- `python backend/run.py` 启动；`GET http://127.0.0.1:8000/health` => `200`
+- `npm run dev -- --host 127.0.0.1 --port 5173` 启动；6 路由实测：
+  - `GET http://127.0.0.1:5173/login` => `200`
+  - `GET http://127.0.0.1:5173/register` => `200`
+  - `GET http://127.0.0.1:5173/` => `200`
+  - `GET http://127.0.0.1:5173/fixed-rules` => `200`
+  - `GET http://127.0.0.1:5173/admin` => `200`
+  - `GET http://127.0.0.1:5173/profile` => `200`
+- 主工作台最小样例联调（`backend/tests/data/minimal_rules.xlsx` + `not_null + unique + cross_table_mapping`，使用 `admin / 123456` 登录后调用 `POST /api/v1/engine/execute`）：
+  - `code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+- 固定规则 qa88 真样例联调（`PUT /api/v1/fixed-rules/config` 写入 `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`，再 `POST /api/v1/fixed-rules/execute`）：
+  - `code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+### 当前项目进度
+
+#### 已完成功能
+
+- 全站 6 个页面统一到同一套 design tokens（Linear 冷静风 + Tailwind v3 + 单 accent #2563eb），切换无割裂感。
+- 共享展示组件库（PageHeader / SectionHeader / StatPill / StatusDot / EmptyState / DataTable）首发落地，可复用于后续新页面。
+- `frontend/src/fixed-rules.css` 已彻底退役。
+- 主工作台与固定规则页主链路与 PR-2 / PR-3 完成态字节级一致。
+
+#### 已实现但未打通 / 占位功能
+
+- `regex` 规则已注册但未闭环
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源仍为占位实现
+
+#### 未开始功能
+
+- 固定规则结果导出 / 多配置集切换
+- 多用户协同编辑冲突处理
+
+### 文档同步
+
+- 更新 [`README.md`](README.md) 顶部追加本轮全站统一重构条目
+- 更新 [`PROJECT_RECORD.md`](PROJECT_RECORD.md)：追加本次分钟级记录（即本节）
+- 更新 [`CHANGELOG.md`](CHANGELOG.md)：在 `[Unreleased]` 顶部追加阶段性变更条目
+- 更新 [`frontend/README.md`](frontend/README.md)：追加本轮前端实际触达范围与运行态验证结果
+- 更新 [`需求文档.md`](需求文档.md)：0. 文档说明追加本轮需求补充
+
+### 未完成项与风险
+
+- 旧的页面级 CSS（如 `.admin-* / .profile-* / .auth-*`）仍残留在 `frontend/src/style.css` 中（约 200 行死代码），属于「兼容旧组件 + 等待下一轮单独立项清理」状态。本轮不主动删除是为了避免误删 `DataSourcePanel` / `VariablePoolPanel` 内部仍依赖的 `workbench-table / .full-width / .compact-empty-state` 等共享样式。
+- `auth-alxLMu_a.js` 单 chunk 仍偏大（951.96KB / gzip 307.42KB），主要来自 Element Plus + Pinia + 路由 + Vue 运行时；这与本轮重构无关，后续可单独立项做 chunk 拆分。
+- 当前未补 Playwright/UI 自动化截图基线；本轮以构建、pytest、运行态接口与路由 200 为最终验收口径。
+
+## 进度记录 2026-04-20 14:35
+
+### 本次目标
+- 按「Linear 冷静 + 图书馆目录清楚」的设计哲学，把主工作台 `/` 的视觉与结构重构落地，并引入 Tailwind v3 作为项目从此之后的标准样式方案。
+
+### 本次完成
+- `frontend/package.json`：新增 dev 依赖 `tailwindcss@^3 / postcss / autoprefixer`。
+- `frontend/tailwind.config.js`：新增。把工作台 design tokens 固化（色板：`canvas / card / subtle / ink / line / accent / accent-soft / accent-ink / success / warning / danger`；字体：`Inter + Noto Sans SC + JetBrains Mono`；阴影：`card-1 / card-2`；圆角：`field=6px / card=12px`；缓动：`premium`）。`corePlugins.preflight = false` 关闭重置以避免冲掉 Element Plus 与既有 4000+ 行 CSS。
+- `frontend/postcss.config.js`：新增。
+- `frontend/index.html`：`lang` 改为 `zh-CN`，标题更新为「Excel Check 配置表校验工作台」，加载 Google Fonts 三族字体（`display=swap` 异步）。
+- `frontend/src/style.css`：顶部插入 `@tailwind base/components/utilities`；`:root` 字体栈把 `Inter / Noto Sans SC` 提到最前；清理仅服务于 MainBoard 的废弃 class（`workbench-toolbar-tray / workbench-toolbar-meta / workbench-toolbar-actions / meta-card-compact strong / workbench-step-guide-shell / workbench-step-guide-nav / workbench-step-guide-detail / workbench-step-guide-copy / workbench-step-guide-context / workbench-step-guide-meta / workbench-step-guide-actions / step-guide-nav-item / step-guide-nav-index / step-guide-summary-card / step-guide-detail-tags / overview-item-top / overview-item-label / overview-item-value`，以及移动端响应式段里对应引用）。
+- `frontend/src/components/workbench/WorkbenchStepCard.vue`：新增。Props `step / title / description / status / expanded / isCurrent`，emit `update:expanded`。折叠态单行可点击展开，展开态在 `isCurrent` 时呈现 1px 主色边 + 略深阴影；展开态 header 提供「收起」按钮。
+- `frontend/src/views/MainBoard.vue`：整页结构与视觉重写：
+  - 顶栏改为 `space-between`，左侧面包屑 + 标题，右侧「加载样例 + 执行校验 + 清除错误（条件出现）」；删除原日期/模式/状态三胶囊。
+  - 新增 Stepper（4 步水平进度条），点击仍走 `handleStepperClick → scrollToStep` 链路；当前步骤唯一带主色高亮。
+  - 删除原「先接入数据源」引导卡（信息已合并到 Stepper 的描述行）。
+  - KPI 4 列纯白卡：caption + 等宽大数字 + 状态胶囊；保留 `overviewItems` 的遍历与数据来源。
+  - 4 个步骤区改用 `WorkbenchStepCard` 包裹原有 panel；新增 `expandedSteps` reactive 与 `watch(activeGuideStep)` 实现「真折叠」：默认仅当前步骤展开，其他三步折叠为单行，可点击展开 / 收起。
+  - `scrollToStep(step)` 会自动把目标步骤展开后再滚动，避免跳过去后看到空白。
+- `SectionBlock.vue` 不动（继续为 `FixedRulesBoard.vue` 服务）。
+- `FixedRulesBoard.vue` 与 `fixed-rules.css` 本轮零变更。
+
+### 回归结果
+- `cd frontend && npm run build` → 通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告，CSS 体积 425.42 KB / gzip 60.59 KB）。
+- 服务实测：
+  - `python backend/run.py` 启动；`curl http://127.0.0.1:8000/health` → `200`
+  - `npm run dev -- --host 127.0.0.1 --port 5173` 启动；`curl http://127.0.0.1:5173/` → `200`
+- 业务回归（代码层面）：所有 store 调用、计算属性、子组件 props 与事件零改动，下列调用链完整保留：
+  - 加载样例：`applyDemoScenario`
+  - 执行校验：`runExecution → store.executeValidation → scrollToStep(4)`
+  - 步骤导航点击：`handleStepperClick → scrollToStep`
+  - DataSourcePanel `@saved` → `handleSourceSaved → scrollToStep(2)`（自动展开步骤 2）
+
+### 当前项目进度
+
+#### 已完成功能
+- 主工作台视觉系统对齐 Linear 冷静风 + Tailwind v3 + 三族字体加载
+- 多用户认证、项目隔离、主工作台与固定规则页主链路（含组合变量条件分支校验）
+- 默认管理员、运行时数据库自动播种
+
+#### 已实现但未打通 / 占位功能
+- `regex` 规则已注册但未闭环
+- `svn` 作为主工作台独立 source 类型的完整闭环未开放
+- `feishu` 数据源仍为占位实现
+
+#### 未开始功能
+- 固定规则页 `/fixed-rules` 同款视觉系统对齐（本轮显式不做，留下一轮独立立项）
+- 固定规则结果导出 / 多配置集切换 / 多用户协同编辑冲突处理
+
+### 文档同步
+- 更新 `README.md`
+- 更新 `frontend/README.md`
+- 更新 `CHANGELOG.md`
+- 更新 `需求文档.md`
+- 追加本次分钟级进度记录到 `PROJECT_RECORD.md`
+
+### 未完成项与风险
+- Tailwind 与既有 4000+ 行 CSS 并存：本轮通过 `corePlugins.preflight = false` 关闭浏览器重置，避免冲突；后续若大规模迁移既有页面到 Tailwind，需要分页面单独立项。
+- `FixedRulesBoard.vue` 视觉与主工作台不再一致：用户在两个页面间切换会感到节奏差异。计划下一轮单独立项把固定规则页对齐同款 design tokens。
+
 ## 进度记录 2026-04-20 13:43
 
 ### 本次目标

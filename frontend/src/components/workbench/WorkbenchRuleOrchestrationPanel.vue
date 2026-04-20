@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, EditPen, Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 
 import { useWorkbenchStore } from '../../store/workbench'
 import type {
@@ -20,6 +20,7 @@ type ConditionMode = 'filter' | 'assertion'
 
 const KEY_FIELD = '__key__'
 
+// 保留原有业务逻辑：规则编排面板的状态管理、保存、删除等行为完全沿用 store。
 const store = useWorkbenchStore()
 const isRuleDialogVisible = ref(false)
 const ruleDialogMode = ref<'create' | 'edit'>('create')
@@ -48,6 +49,12 @@ const compositeRuleForm = reactive<CompositeRuleConfig>({
   global_filters: [],
   branches: [],
 })
+
+// 规则组弹窗（替代原 ElMessageBox.prompt，与设计稿 DIALOG 04 对齐）
+const isGroupDialogVisible = ref(false)
+const groupDialogMode = ref<'create' | 'rename'>('create')
+const groupForm = reactive<{ id: string; name: string }>({ id: '', name: '' })
+const isSubmittingGroup = ref(false)
 
 const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> = [
   { label: '等于 (=)', value: 'eq' },
@@ -154,6 +161,11 @@ const currentGroupVariableCount = computed(() => {
   )
   return tags.size
 })
+
+const groupDialogTitle = computed(() =>
+  groupDialogMode.value === 'create' ? '新建规则组' : '重命名规则组',
+)
+const canSubmitGroup = computed(() => groupForm.name.trim().length > 0)
 
 watch(
   () => ruleForm.selected_rule,
@@ -606,37 +618,43 @@ async function persistConfig(successMessage?: string, silent = true): Promise<bo
   return true
 }
 
-async function handleCreateGroup(): Promise<void> {
-  try {
-    const result = await ElMessageBox.prompt('输入新的规则组名称。', '新建规则组', {
-      confirmButtonText: '创建',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：基础规则校验',
-      inputValidator: (value) => Boolean(value.trim()) || '规则组名称不能为空。',
-    })
-    store.createOrchestrationGroup(result.value)
-    await persistConfig('规则组已创建并保存。', false)
-  } catch {
-    // 用户取消时不提示。
-  }
+function openCreateGroupDialog(): void {
+  groupDialogMode.value = 'create'
+  groupForm.id = ''
+  groupForm.name = ''
+  isGroupDialogVisible.value = true
 }
 
-async function handleRenameGroup(): Promise<void> {
+function openRenameGroupDialog(): void {
   if (store.selectedRuleGroup.builtin) {
     return
   }
+  groupDialogMode.value = 'rename'
+  groupForm.id = store.selectedRuleGroup.group_id
+  groupForm.name = store.selectedRuleGroup.group_name
+  isGroupDialogVisible.value = true
+}
 
+async function handleSubmitGroup(): Promise<void> {
+  const trimmed = groupForm.name.trim()
+  if (!trimmed) {
+    ElMessage.warning('规则组名称不能为空。')
+    return
+  }
+  isSubmittingGroup.value = true
   try {
-    const result = await ElMessageBox.prompt('修改当前规则组名称。', '编辑规则组', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputValue: store.selectedRuleGroup.group_name,
-      inputValidator: (value) => Boolean(value.trim()) || '规则组名称不能为空。',
-    })
-    store.renameOrchestrationGroup(store.selectedRuleGroup.group_id, result.value)
-    await persistConfig('规则组名称已更新并保存。', false)
-  } catch {
-    // 用户取消时不提示。
+    if (groupDialogMode.value === 'create') {
+      // 保留原有业务逻辑：仍调用原 store action 创建规则组
+      store.createOrchestrationGroup(trimmed)
+      await persistConfig('规则组已创建并保存。', false)
+    } else {
+      // 保留原有业务逻辑：仍调用原 store action 重命名规则组
+      store.renameOrchestrationGroup(groupForm.id, trimmed)
+      await persistConfig('规则组名称已更新并保存。', false)
+    }
+    isGroupDialogVisible.value = false
+  } finally {
+    isSubmittingGroup.value = false
   }
 }
 
@@ -855,178 +873,207 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
     // 用户取消时不提示。
   }
 }
-
 </script>
 
 <template>
-  <div class="workbench-rule-orchestration rule-binding-board">
-    <el-alert
+  <div class="flex flex-col gap-4">
+    <!-- 待修复 Banner（极简：1px 边 + 4px 左 warning 色带） -->
+    <div
       v-if="store.invalidOrchestrationRuleIds.length"
-      class="result-alert"
-      type="warning"
-      show-icon
-      :closable="false"
-      title="存在待修复规则"
-      description="补齐目标变量、规则名、比较值或分支配置后才能执行（与固定规则页规则列表相互独立）。"
-    />
+      role="alert"
+      class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-5 py-3"
+    >
+      <div class="text-[13px] font-medium text-ink-900">存在待修复规则</div>
+      <div class="mt-1 text-[12px] text-ink-500">
+        补齐目标变量、规则名、比较值或分支配置后才能执行
+      </div>
+    </div>
 
-    <div class="rule-binding-layout">
-      <section class="group-band-card">
-        <div class="group-band-head">
-          <div>
-            <strong>规则组导航</strong>
-            <p>管理规则分组。</p>
-          </div>
+    <!-- 内层卡：左规则组 + 右规则表 -->
+    <div class="workbench-rule-shell">
+      <div class="workbench-rule-layout">
 
-          <div class="group-band-actions">
+        <!-- 左侧：规则组导航 -->
+        <aside class="workbench-rule-sidebar">
+          <div class="workbench-rule-sidebar-toolbar">
             <el-input
               v-model="store.groupKeyword"
-              class="group-band-search"
               placeholder="搜索规则组"
               :prefix-icon="Search"
               clearable
+              size="default"
             />
-            <el-button :icon="Plus" plain @click="handleCreateGroup">新建规则组</el-button>
+            <button
+              type="button"
+              class="ec-btn ec-btn-secondary ec-btn-sm shrink-0"
+              @click="openCreateGroupDialog"
+            >
+              <Plus class="h-3 w-3" />
+              新建
+            </button>
           </div>
-        </div>
 
-        <div class="group-pill-row">
-          <button
-            v-for="group in store.filteredRuleGroups"
-            :key="group.group_id"
-            type="button"
-            class="group-pill"
-            :class="{ 'is-active': group.group_id === store.selectedRuleGroup.group_id }"
-            @click="store.setSelectedOrchestrationGroup(group.group_id)"
-          >
-            <div class="group-pill-main">
-              <strong>{{ group.group_name }}</strong>
-              <span class="group-pill-badge">
-                {{ store.groupOrchestrationCounts[group.group_id] ?? 0 }}
-              </span>
-            </div>
-            <div class="group-pill-meta">
-              <span class="group-pill-tag">
-                {{ group.builtin ? '系统默认组' : '自定义组' }}
-              </span>
+          <nav class="workbench-rule-menu">
+            <!-- 保留原有业务逻辑：规则组导航仍基于 store.filteredRuleGroups 遍历并复用原选中逻辑 -->
+            <button
+              v-for="group in store.filteredRuleGroups"
+              :key="group.group_id"
+              type="button"
+              class="workbench-rule-menu-item"
+              :class="
+                group.group_id === store.selectedRuleGroup.group_id
+                  ? 'is-active'
+                  : ''
+              "
+              @click="store.setSelectedOrchestrationGroup(group.group_id)"
+            >
+              <span class="workbench-rule-menu-item__label">{{ group.group_name }}</span>
               <span
                 v-if="invalidGroupIdSet.has(group.group_id)"
-                class="group-pill-tag is-danger"
+                class="workbench-rule-menu-item__dot"
+                title="待修复"
+              ></span>
+              <span
+                class="workbench-rule-menu-item__count"
               >
-                待修复
+                {{ store.groupOrchestrationCounts[group.group_id] ?? 0 }}
               </span>
-            </div>
-          </button>
-        </div>
-      </section>
+            </button>
+          </nav>
+        </aside>
 
-      <section class="rule-workspace-card">
-        <div class="rule-workspace-head">
-          <div class="rule-workspace-copy">
-            <div class="rule-workspace-title">
-              <strong>{{ store.selectedRuleGroup.group_name }}</strong>
-              <el-tag type="info" effect="light" round>
-                当前组 {{ currentGroupCount }} 条规则
-              </el-tag>
-              <el-tag type="warning" effect="light" round>
-                当前组 {{ currentGroupVariableCount }} 个目标变量
-              </el-tag>
+        <!-- 右侧主区 -->
+        <div class="workbench-rule-main">
+          <div class="workbench-rule-header">
+            <div class="min-w-0">
+              <div class="truncate text-[14px] font-semibold text-ink-900">
+                {{ store.selectedRuleGroup.group_name }}
+              </div>
+              <div class="text-[12px] text-ink-500">
+                共 {{ currentGroupCount }} 条规则 · {{ currentGroupVariableCount }} 个变量
+              </div>
             </div>
-            <p>单变量做基础校验，组合变量做分支校验。</p>
+            <div class="workbench-rule-header__actions">
+              <button
+                type="button"
+                class="ec-btn ec-btn-secondary ec-btn-sm"
+                :disabled="store.selectedRuleGroup.builtin"
+                @click="openRenameGroupDialog"
+              >
+                重命名
+              </button>
+              <button
+                type="button"
+                class="ec-btn ec-btn-secondary ec-btn-sm"
+                :disabled="store.selectedRuleGroup.builtin"
+                @click="handleRemoveGroup"
+              >
+                删除组
+              </button>
+              <button
+                type="button"
+                class="ec-btn ec-btn-primary ec-btn-sm"
+                :disabled="!canCreateRule"
+                @click="openCreateRuleDialog"
+              >
+                <Plus class="h-3.5 w-3.5" />
+                新增规则
+              </button>
+            </div>
           </div>
 
-          <div class="toolbar-actions">
-            <el-button
-              :icon="EditPen"
-              plain
-              :disabled="store.selectedRuleGroup.builtin"
-              @click="handleRenameGroup"
-            >
-              编辑组名
-            </el-button>
-            <el-button
-              :icon="Delete"
-              plain
-              :disabled="store.selectedRuleGroup.builtin"
-              @click="handleRemoveGroup"
-            >
-              删除规则组
-            </el-button>
-            <el-button
-              type="primary"
-              :icon="Plus"
-              :disabled="!canCreateRule"
-              @click="openCreateRuleDialog"
-            >
-              新增规则
-            </el-button>
+          <div
+            v-if="!canCreateRule"
+            class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[13px] text-ink-500"
+          >
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-canvas">
+              <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12h6 M12 9v6 M5 5h14v14H5z" />
+              </svg>
+            </div>
+            <div>请先在上方变量池保存变量</div>
           </div>
-        </div>
 
-        <div
-          v-if="!canCreateRule"
-          class="compact-empty-state rule-empty-state"
-        >
-          先在上方变量池中保存变量。
-        </div>
+          <div
+            v-else-if="!store.currentOrchestrationGroupRules.length"
+            class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[13px] text-ink-500"
+          >
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-canvas">
+              <Plus class="h-4 w-4 text-ink-500" />
+            </div>
+            <div>当前还没有规则</div>
+            <div class="text-[12px] text-ink-500">点击“新增规则”开始</div>
+          </div>
 
-        <div
-          v-else-if="!store.currentOrchestrationGroupRules.length"
-          class="compact-empty-state rule-empty-state"
-        >
-          当前规则组还没有规则。
-        </div>
+          <div v-else class="overflow-hidden rounded-field border border-line">
+            <table class="w-full text-[13px]">
+              <thead class="bg-canvas text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                <tr>
+                  <th class="px-4 py-3 w-[28%]">规则名称</th>
+                  <th class="px-4 py-3">目标变量</th>
+                  <th class="px-4 py-3 w-[20%]">规则选择</th>
+                  <th class="px-4 py-3 w-[110px] text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- 保留原有业务逻辑：规则表格仍消费 pagedCurrentOrchestrationGroupRules -->
+                <tr
+                  v-for="row in store.pagedCurrentOrchestrationGroupRules"
+                  :key="row.rule_id"
+                  class="border-t border-line transition hover:bg-canvas"
+                >
+                  <td class="px-4 py-3 align-top">
+                    <div
+                      class="font-medium truncate"
+                      :class="invalidRuleIdSet.has(row.rule_id) ? 'text-danger' : 'text-ink-900'"
+                    >
+                      {{ row.rule_name }}
+                    </div>
+                    <div class="mt-1 text-[12px] text-ink-500 line-clamp-2">{{ buildRuleCondition(row) }}</div>
+                  </td>
+                  <td class="px-4 py-3 align-top">
+                    <div class="font-mono text-[12px] text-ink-900 truncate">{{ row.target_variable_tag }}</div>
+                    <div class="mt-1 text-[12px] text-ink-500 truncate">{{ buildRuleVariableSummary(row) }}</div>
+                    <div class="text-[11px] text-ink-500 truncate">{{ buildRuleSourcePathSummary(row) }}</div>
+                  </td>
+                  <td class="px-4 py-3 align-top">
+                    <div class="text-ink-700">{{ buildRuleSelectionSummary(row) }}</div>
+                    <div class="mt-1 font-mono text-[12px] text-ink-500">
+                      <template v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</template>
+                      <template v-else-if="row.rule_type === 'composite_condition_check'">
+                        {{ row.composite_config?.branches.length ?? 0 }} 个分支
+                      </template>
+                      <template v-else>—</template>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 align-top text-right text-[12px]">
+                    <div class="table-actions">
+                      <button
+                        type="button"
+                        class="ec-action-link workbench-rule-action-link"
+                        @click="openEditRuleDialog(row)"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        class="ec-action-link-danger workbench-rule-action-link"
+                        @click="handleRemoveRule(row)"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-        <div v-else class="rule-table-shell">
-          <el-table class="workbench-table" :data="store.pagedCurrentOrchestrationGroupRules">
-            <el-table-column prop="rule_name" label="规则名称" min-width="220">
-              <template #default="{ row }">
-                <div class="rule-name-cell">
-                  <strong :class="{ 'fixed-invalid-text': invalidRuleIdSet.has(row.rule_id) }">
-                    {{ row.rule_name }}
-                  </strong>
-                  <span>{{ buildRuleCondition(row) }}</span>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="目标变量" min-width="360">
-              <template #default="{ row }">
-                <div class="rule-binding-cell">
-                  <div class="rule-binding-top">
-                    <strong>{{ row.target_variable_tag }}</strong>
-                    <span>{{ buildRuleVariableSummary(row) }}</span>
-                  </div>
-                  <small>{{ buildRuleSourcePathSummary(row) }}</small>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="规则选择" min-width="220">
-              <template #default="{ row }">
-                <div class="rule-operator-cell">
-                  <span>{{ buildRuleSelectionSummary(row) }}</span>
-                  <strong v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</strong>
-                  <strong v-else-if="row.rule_type === 'composite_condition_check'">
-                    {{ row.composite_config?.branches.length ?? 0 }} 个分支
-                  </strong>
-                  <strong v-else>无需比较值</strong>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button link type="primary" @click="openEditRuleDialog(row)">编辑</el-button>
-                  <el-button link type="danger" @click="handleRemoveRule(row)">删除</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div v-if="store.currentOrchestrationGroupRuleTotal > 20" class="fixed-pagination-row">
-            <span class="pagination-caption">
+          <div
+            v-if="store.currentOrchestrationGroupRuleTotal > 20"
+            class="flex items-center justify-between gap-3 pt-2"
+          >
+            <span class="text-[12px] text-ink-500">
               第 {{ store.orchestrationCurrentPage }} 页 / 共 {{ store.currentOrchestrationGroupRuleTotal }} 条
             </span>
             <el-pagination
@@ -1038,109 +1085,201 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
             />
           </div>
         </div>
-      </section>
+      </div>
     </div>
 
+    <!-- Dialog 4：新建规则组 / 重命名规则组 -->
+    <el-dialog
+      v-model="isGroupDialogVisible"
+      :title="groupDialogTitle"
+      width="420px"
+      destroy-on-close
+    >
+      <div class="flex flex-col gap-1">
+        <label class="text-[12px] font-medium text-ink-500">规则组名称</label>
+        <el-input
+          v-model="groupForm.name"
+          placeholder="例如：基础规则校验"
+          maxlength="64"
+          show-word-limit
+          @keyup.enter="handleSubmitGroup"
+        />
+        <div class="mt-1 text-[12px] text-ink-500">分组用于组织规则，不参与执行</div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="ec-btn ec-btn-secondary"
+            @click="isGroupDialogVisible = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ec-btn ec-btn-primary"
+            :disabled="!canSubmitGroup || isSubmittingGroup"
+            @click="handleSubmitGroup"
+          >
+            {{ isSubmittingGroup ? '保存中…' : groupDialogMode === 'create' ? '创建' : '保存' }}
+          </button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- Dialog 5：新增 / 编辑规则 -->
     <el-dialog
       v-model="isRuleDialogVisible"
-      width="760px"
       :title="ruleDialogMode === 'create' ? '新增规则' : '编辑规则'"
+      width="760px"
+      destroy-on-close
     >
-      <el-form label-position="top" class="dialog-form">
-        <div class="rule-dialog-grid">
-          <el-form-item label="规则组">
-            <el-select v-model="ruleForm.group_id" class="full-width">
+      <div class="flex flex-col gap-7">
+
+        <!-- 段 1：基本信息 -->
+        <section class="flex flex-col gap-3">
+          <div class="flex items-end justify-between border-b border-line pb-2">
+            <div>
+              <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">基本信息</h3>
+              <p class="mt-0.5 text-[12px] text-ink-500">规则归属、命名与目标变量</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则组</label>
+              <el-select v-model="ruleForm.group_id" class="w-full">
+                <el-option
+                  v-for="group in store.allRuleGroups"
+                  :key="group.group_id"
+                  :label="group.group_name"
+                  :value="group.group_id"
+                />
+              </el-select>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则名称</label>
+              <el-input
+                v-model="ruleForm.rule_name"
+                placeholder="例如：items-INT_ID-大于+0"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标变量</label>
+            <el-select
+              v-model="ruleForm.target_variable_tag"
+              class="w-full"
+              filterable
+              placeholder="选择目标变量"
+            >
               <el-option
-                v-for="group in store.allRuleGroups"
-                :key="group.group_id"
-                :label="group.group_name"
-                :value="group.group_id"
+                v-for="variable in variableOptions"
+                :key="variable.tag"
+                :label="buildVariableOptionLabel(variable)"
+                :value="variable.tag"
               />
             </el-select>
-          </el-form-item>
-
-          <el-form-item label="规则名称">
-            <el-input
-              v-model="ruleForm.rule_name"
-              placeholder="例如：items-INT_ID-大于+0"
-            />
-          </el-form-item>
-        </div>
-
-        <el-form-item label="目标变量">
-          <el-select
-            v-model="ruleForm.target_variable_tag"
-            class="full-width"
-            filterable
-            placeholder="选择目标变量"
-          >
-            <el-option
-              v-for="variable in variableOptions"
-              :key="variable.tag"
-              :label="buildVariableOptionLabel(variable)"
-              :value="variable.tag"
-            />
-          </el-select>
-        </el-form-item>
-
-        <div class="rule-dialog-hint">
-          <span v-if="selectedRuleVariable">
-            {{ selectedRuleVariable.source_id }} · {{ selectedRuleVariable.sheet }} · {{
-              (selectedRuleVariable.variable_kind ?? 'single') === 'composite'
-                ? getVariableColumnSummary(selectedRuleVariable)
-                : selectedRuleVariable.column
-            }}
-          </span>
-          <span v-else>
-            先选目标变量。
-          </span>
-        </div>
-
-        <div v-if="!isCompositeRuleTarget" class="rule-grid">
-          <el-form-item label="规则选择">
-            <el-select v-model="ruleForm.selected_rule" class="full-width">
-              <el-option
-                v-for="option in ruleSelectionOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item v-if="shouldShowExpectedValue" label="比较值">
-            <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
-          </el-form-item>
-        </div>
-
-        <div v-else class="composite-rule-builder">
-          <section class="composite-rule-section">
-            <div class="composite-rule-section-head">
-              <div>
-                <strong>全局筛选条件</strong>
-                <p>先筛记录。</p>
-              </div>
-              <el-button plain :icon="Plus" @click="addGlobalFilter">添加全局条件</el-button>
+            <div class="mt-1.5 text-[12px] text-ink-500">
+              <span v-if="selectedRuleVariable">
+                {{ selectedRuleVariable.source_id }} · {{ selectedRuleVariable.sheet }} · {{
+                  (selectedRuleVariable.variable_kind ?? 'single') === 'composite'
+                    ? getVariableColumnSummary(selectedRuleVariable)
+                    : selectedRuleVariable.column
+                }}
+              </span>
+              <span v-else>请先选择目标变量</span>
             </div>
+          </div>
+        </section>
 
-            <div v-if="!compositeRuleForm.global_filters.length" class="composite-rule-empty">
-              暂无全局条件。
+        <!-- 段 2：校验配置（仅单变量） -->
+        <section
+          class="flex flex-col gap-3"
+          :class="isCompositeRuleTarget ? 'opacity-50 pointer-events-none' : ''"
+        >
+          <div class="flex items-end justify-between border-b border-line pb-2">
+            <div>
+              <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">校验配置</h3>
+              <p class="mt-0.5 text-[12px] text-ink-500">仅当目标为单变量时显示</p>
             </div>
+            <span
+              v-if="isCompositeRuleTarget"
+              class="inline-flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[12px] font-medium text-ink-500"
+            >
+              <span class="h-1.5 w-1.5 rounded-full bg-ink-300"></span>
+              当前不适用
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则选择</label>
+              <el-select
+                v-model="ruleForm.selected_rule"
+                class="w-full"
+                :disabled="isCompositeRuleTarget"
+              >
+                <el-option
+                  v-for="option in ruleSelectionOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </div>
+            <div v-if="shouldShowExpectedValue">
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值</label>
+              <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
+            </div>
+          </div>
+        </section>
 
+        <!-- 段 3：组合分支（仅组合变量） -->
+        <section v-if="isCompositeRuleTarget" class="flex flex-col gap-4">
+          <div class="flex items-end justify-between border-b border-line pb-2">
+            <div>
+              <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">组合分支</h3>
+              <p class="mt-0.5 text-[12px] text-ink-500">先做全局筛选，再按分支匹配 + 校验</p>
+            </div>
+            <span class="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-medium text-accent-ink">
+              <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+              组合变量已激活
+            </span>
+          </div>
+
+          <!-- 全局筛选 -->
+          <div class="rounded-field bg-subtle p-4">
+            <div class="flex items-center justify-between">
+              <div class="text-[13px] font-medium text-ink-900">全局筛选条件</div>
+              <button
+                type="button"
+                class="ec-btn ec-btn-secondary ec-btn-sm"
+                @click="addGlobalFilter"
+              >
+                <Plus class="h-3 w-3" /> 添加全局条件
+              </button>
+            </div>
+            <div v-if="!compositeRuleForm.global_filters.length" class="mt-3 text-[12px] text-ink-500">
+              暂无全局条件
+            </div>
             <div
               v-for="(condition, index) in compositeRuleForm.global_filters"
               :key="condition.condition_id"
-              class="composite-condition-card"
+              class="mt-3 rounded-field border border-line bg-card p-4"
             >
-              <div class="composite-condition-head">
-                <strong>全局条件 {{ index + 1 }}</strong>
-                <el-button link type="danger" @click="removeGlobalFilter(condition.condition_id)">
+              <div class="mb-3 flex items-center justify-between">
+                <span class="text-[12px] font-medium text-ink-700">全局条件 {{ index + 1 }}</span>
+                <button
+                  type="button"
+                  class="ec-btn-link-danger"
+                  @click="removeGlobalFilter(condition.condition_id)"
+                >
                   删除
-                </el-button>
+                </button>
               </div>
-              <div class="composite-condition-grid">
-                <el-form-item label="字段">
-                  <el-select v-model="condition.field" class="full-width">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                  <el-select v-model="condition.field" class="w-full">
                     <el-option
                       v-for="field in compositeFieldOptions"
                       :key="field.value"
@@ -1148,12 +1287,12 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                       :value="field.value"
                     />
                   </el-select>
-                </el-form-item>
-
-                <el-form-item label="筛选条件">
+                </div>
+                <div>
+                  <label class="mb-1 block text-[12px] text-ink-500">筛选条件</label>
                   <el-select
                     :model-value="condition.operator"
-                    class="full-width"
+                    class="w-full"
                     @change="handleFilterOperatorChange(condition, $event)"
                   >
                     <el-option
@@ -1163,25 +1302,25 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                       :value="option.value"
                     />
                   </el-select>
-                </el-form-item>
-
-                <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
+                </div>
+                <div v-if="shouldShowConditionValueSource(condition)">
+                  <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
                   <el-select
                     :model-value="condition.value_source ?? 'literal'"
-                    class="full-width"
+                    class="w-full"
                     @change="handleConditionValueSourceChange(condition, $event)"
                   >
                     <el-option label="固定值" value="literal" />
                     <el-option label="字段" value="field" />
                   </el-select>
-                </el-form-item>
-
-                <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
+                </div>
+                <div v-if="shouldShowConditionExpectedValue(condition)">
+                  <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
                   <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
-                </el-form-item>
-
-                <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
-                  <el-select v-model="condition.expected_field" class="full-width">
+                </div>
+                <div v-if="shouldShowConditionExpectedField(condition)">
+                  <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                  <el-select v-model="condition.expected_field" class="w-full">
                     <el-option
                       v-for="field in compositeFieldOptions"
                       :key="field.value"
@@ -1189,196 +1328,230 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                       :value="field.value"
                     />
                   </el-select>
-                </el-form-item>
+                </div>
               </div>
             </div>
-          </section>
+          </div>
 
-          <section class="composite-rule-section">
-            <div class="composite-rule-section-head">
-              <div>
-                <strong>条件分支列表</strong>
-                <p>命中后再校验。</p>
-              </div>
-              <el-button type="primary" plain :icon="Plus" @click="addBranch">添加分支</el-button>
-            </div>
-
-            <div
-              v-for="(branch, branchIndex) in compositeRuleForm.branches"
-              :key="branch.branch_id"
-              class="composite-branch-card"
+          <!-- 分支列表 -->
+          <div class="flex items-center justify-between">
+            <div class="text-[13px] font-medium text-ink-900">条件分支</div>
+            <button
+              type="button"
+              class="ec-btn ec-btn-primary ec-btn-sm"
+              @click="addBranch"
             >
-              <div class="composite-condition-head">
-                <div>
-                  <strong>分支 {{ branchIndex + 1 }}</strong>
-                  <p>命中后校验。</p>
-                </div>
-                <el-button link type="danger" @click="removeBranch(branch.branch_id)">删除分支</el-button>
-              </div>
+              <Plus class="h-3 w-3" /> 添加分支
+            </button>
+          </div>
 
-              <div class="composite-branch-section">
-                <div class="composite-rule-subhead">
-                  <strong>分支筛选条件</strong>
-                  <el-button plain @click="addBranchFilter(branch)">添加筛选条件</el-button>
-                </div>
-                <div v-if="!branch.filters.length" class="composite-rule-empty">
-                  暂无分支条件。
-                </div>
-                <div
-                  v-for="(condition, filterIndex) in branch.filters"
-                  :key="condition.condition_id"
-                  class="composite-condition-card is-nested"
+          <div
+            v-for="(branch, branchIndex) in compositeRuleForm.branches"
+            :key="branch.branch_id"
+            class="rounded-field border border-line bg-subtle p-4"
+          >
+            <div class="mb-3 flex items-center justify-between">
+              <div class="text-[13px] font-medium text-ink-900">分支 {{ branchIndex + 1 }}</div>
+              <button
+                type="button"
+                class="ec-btn-link-danger"
+                @click="removeBranch(branch.branch_id)"
+              >
+                删除分支
+              </button>
+            </div>
+
+            <!-- 分支筛选 -->
+            <div class="rounded-field bg-card p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <div class="text-[12px] font-medium text-ink-700">分支筛选条件</div>
+                <button
+                  type="button"
+                  class="ec-btn ec-btn-secondary ec-btn-sm"
+                  @click="addBranchFilter(branch)"
                 >
-                  <div class="composite-condition-head">
-                    <strong>筛选条件 {{ filterIndex + 1 }}</strong>
-                    <el-button link type="danger" @click="removeBranchFilter(branch, condition.condition_id)">
-                      删除
-                    </el-button>
-                  </div>
-                  <div class="composite-condition-grid">
-                    <el-form-item label="字段">
-                      <el-select v-model="condition.field" class="full-width">
-                        <el-option
-                          v-for="field in compositeFieldOptions"
-                          :key="field.value"
-                          :label="field.label"
-                          :value="field.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item label="筛选条件">
-                      <el-select
-                        :model-value="condition.operator"
-                        class="full-width"
-                        @change="handleFilterOperatorChange(condition, $event)"
-                      >
-                        <el-option
-                          v-for="option in getConditionOptions('filter')"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
-                      <el-select
-                        :model-value="condition.value_source ?? 'literal'"
-                        class="full-width"
-                        @change="handleConditionValueSourceChange(condition, $event)"
-                      >
-                        <el-option label="固定值" value="literal" />
-                        <el-option label="字段" value="field" />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
-                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
-                      <el-select v-model="condition.expected_field" class="full-width">
-                        <el-option
-                          v-for="field in compositeFieldOptions"
-                          :key="field.value"
-                          :label="field.label"
-                          :value="field.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-                  </div>
-                </div>
+                  <Plus class="h-3 w-3" /> 添加筛选
+                </button>
               </div>
-
-              <div class="composite-branch-section">
-                <div class="composite-rule-subhead">
-                  <strong>分支校验条件</strong>
-                  <el-button type="primary" plain @click="addBranchAssertion(branch)">添加校验条件</el-button>
+              <div v-if="!branch.filters.length" class="text-[12px] text-ink-500">
+                暂无分支筛选条件，命中所有记录
+              </div>
+              <div
+                v-for="(condition, filterIndex) in branch.filters"
+                :key="condition.condition_id"
+                class="mt-3 rounded-field border border-line p-3"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
+                  <button
+                    type="button"
+                    class="ec-btn-link-danger"
+                    @click="removeBranchFilter(branch, condition.condition_id)"
+                  >
+                    删除
+                  </button>
                 </div>
-                <div class="composite-rule-empty">
-                  支持比较 / 唯一 / 必须重复。
-                </div>
-                <div
-                  v-for="(condition, assertionIndex) in branch.assertions"
-                  :key="condition.condition_id"
-                  class="composite-condition-card is-nested"
-                >
-                  <div class="composite-condition-head">
-                    <strong>校验条件 {{ assertionIndex + 1 }}</strong>
-                    <el-button
-                      link
-                      type="danger"
-                      :disabled="branch.assertions.length === 1"
-                      @click="removeBranchAssertion(branch, condition.condition_id)"
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                    <el-select v-model="condition.field" class="w-full">
+                      <el-option
+                        v-for="field in compositeFieldOptions"
+                        :key="field.value"
+                        :label="field.label"
+                        :value="field.value"
+                      />
+                    </el-select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-[12px] text-ink-500">筛选条件</label>
+                    <el-select
+                      :model-value="condition.operator"
+                      class="w-full"
+                      @change="handleFilterOperatorChange(condition, $event)"
                     >
-                      删除
-                    </el-button>
+                      <el-option
+                        v-for="option in getConditionOptions('filter')"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-select>
                   </div>
-                  <div class="composite-condition-grid">
-                    <el-form-item label="字段">
-                      <el-select v-model="condition.field" class="full-width">
-                        <el-option
-                          v-for="field in compositeFieldOptions"
-                          :key="field.value"
-                          :label="field.label"
-                          :value="field.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item label="校验条件">
-                      <el-select
-                        :model-value="condition.operator"
-                        class="full-width"
-                        @change="handleAssertionOperatorChange(condition, $event)"
-                      >
-                        <el-option
-                          v-for="option in getConditionOptions('assertion')"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionValueSource(condition)" label="右值来源">
-                      <el-select
-                        :model-value="condition.value_source ?? 'literal'"
-                        class="full-width"
-                        @change="handleConditionValueSourceChange(condition, $event)"
-                      >
-                        <el-option label="固定值" value="literal" />
-                        <el-option label="字段" value="field" />
-                      </el-select>
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionExpectedValue(condition)" label="比较值">
-                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
-                    </el-form-item>
-
-                    <el-form-item v-if="shouldShowConditionExpectedField(condition)" label="右侧字段">
-                      <el-select v-model="condition.expected_field" class="full-width">
-                        <el-option
-                          v-for="field in compositeFieldOptions"
-                          :key="field.value"
-                          :label="field.label"
-                          :value="field.value"
-                        />
-                      </el-select>
-                    </el-form-item>
+                  <div v-if="shouldShowConditionValueSource(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
+                    <el-select
+                      :model-value="condition.value_source ?? 'literal'"
+                      class="w-full"
+                      @change="handleConditionValueSourceChange(condition, $event)"
+                    >
+                      <el-option label="固定值" value="literal" />
+                      <el-option label="字段" value="field" />
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValue(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                    <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                  </div>
+                  <div v-if="shouldShowConditionExpectedField(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                    <el-select v-model="condition.expected_field" class="w-full">
+                      <el-option
+                        v-for="field in compositeFieldOptions"
+                        :key="field.value"
+                        :label="field.label"
+                        :value="field.value"
+                      />
+                    </el-select>
                   </div>
                 </div>
               </div>
             </div>
-          </section>
-        </div>
-      </el-form>
+
+            <!-- 分支校验 -->
+            <div class="mt-4 rounded-field bg-card p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <div class="text-[12px] font-medium text-ink-700">分支校验条件</div>
+                <button
+                  type="button"
+                  class="ec-btn ec-btn-primary ec-btn-sm"
+                  @click="addBranchAssertion(branch)"
+                >
+                  <Plus class="h-3 w-3" /> 添加校验
+                </button>
+              </div>
+              <div
+                v-for="(condition, assertionIndex) in branch.assertions"
+                :key="condition.condition_id"
+                class="mt-3 rounded-field border border-line p-3"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="text-[12px] text-ink-700">校验条件 {{ assertionIndex + 1 }}</span>
+                  <button
+                    type="button"
+                    class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+                    :disabled="branch.assertions.length === 1"
+                    @click="removeBranchAssertion(branch, condition.condition_id)"
+                  >
+                    删除
+                  </button>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                    <el-select v-model="condition.field" class="w-full">
+                      <el-option
+                        v-for="field in compositeFieldOptions"
+                        :key="field.value"
+                        :label="field.label"
+                        :value="field.value"
+                      />
+                    </el-select>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-[12px] text-ink-500">校验条件</label>
+                    <el-select
+                      :model-value="condition.operator"
+                      class="w-full"
+                      @change="handleAssertionOperatorChange(condition, $event)"
+                    >
+                      <el-option
+                        v-for="option in getConditionOptions('assertion')"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionValueSource(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
+                    <el-select
+                      :model-value="condition.value_source ?? 'literal'"
+                      class="w-full"
+                      @change="handleConditionValueSourceChange(condition, $event)"
+                    >
+                      <el-option label="固定值" value="literal" />
+                      <el-option label="字段" value="field" />
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValue(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                    <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                  </div>
+                  <div v-if="shouldShowConditionExpectedField(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                    <el-select v-model="condition.expected_field" class="w-full">
+                      <el-option
+                        v-for="field in compositeFieldOptions"
+                        :key="field.value"
+                        :label="field.label"
+                        :value="field.value"
+                      />
+                    </el-select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
 
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="isRuleDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSaveRule">保存规则</el-button>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="ec-btn ec-btn-secondary"
+            @click="isRuleDialogVisible = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ec-btn ec-btn-primary"
+            @click="handleSaveRule"
+          >
+            保存规则
+          </button>
         </div>
       </template>
     </el-dialog>

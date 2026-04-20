@@ -1,26 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  CircleCheckFilled,
-  CollectionTag,
-  DataBoard,
-  FolderOpened,
-  Operation,
-  SetUp,
-  TrendCharts,
-  VideoPlay,
-} from '@element-plus/icons-vue'
 
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
-import SectionBlock from '../components/workbench/SectionBlock.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
+import PageHeader from '../components/shell/PageHeader.vue'
+import SectionHeader from '../components/shell/SectionHeader.vue'
+import StatPill from '../components/shell/StatPill.vue'
 import { useWorkbenchStore } from '../store/workbench'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
+
+type StepIndex = 1 | 2 | 3 | 4
+type SectionStatus = 'pending' | 'active' | 'done'
+type StatTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
+
 const selectedGuideStep = ref<StepIndex | null>(null)
 const hasManuallySelectedGuideStep = ref(false)
 
@@ -36,72 +33,60 @@ watch(
   },
   { deep: true },
 )
+
 const sourceStepRef = ref<HTMLElement | null>(null)
 const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)
 const resultStepRef = ref<HTMLElement | null>(null)
+const dataSourcePanelRef = ref<{ openCreateDialog: () => void } | null>(null)
+const variablePoolPanelRef = ref<{
+  openSingleCreateTab: () => Promise<void>
+  openCompositeCreateTab: () => Promise<void>
+} | null>(null)
 
-type StepIndex = 1 | 2 | 3 | 4
-type SectionStatus = 'pending' | 'active' | 'done'
-
-const overviewItems = computed(() => [
+const overviewItems = computed<
+  Array<{
+    label: string
+    value: number
+    pendingHint: string
+    readyHint: string
+    pendingTone: StatTone
+    readyTone: StatTone
+  }>
+>(() => [
   {
     label: '数据源',
     value: store.sources.length,
-    icon: FolderOpened,
-    tone: 'brand',
+    pendingHint: '未接入',
+    readyHint: '已接入',
+    pendingTone: 'warn',
+    readyTone: 'done',
   },
   {
     label: '变量',
     value: store.variables.length,
-    icon: CollectionTag,
-    tone: 'info',
+    pendingHint: '未配置',
+    readyHint: '已就绪',
+    pendingTone: 'pending',
+    readyTone: 'done',
   },
   {
-    label: '规则数',
+    label: '规则',
     value: store.orchestrationRuleCount,
-    icon: SetUp,
-    tone: 'accent',
+    pendingHint: '未配置',
+    readyHint: '已就绪',
+    pendingTone: 'pending',
+    readyTone: 'done',
   },
   {
-    label: '异常结果',
+    label: '最近异常',
     value: store.abnormalResults.length,
-    icon: TrendCharts,
-    tone: 'danger',
+    pendingHint: '尚未执行',
+    readyHint: '需关注',
+    pendingTone: 'pending',
+    readyTone: 'warn',
   },
 ])
-
-const currentDateLabel = computed(() =>
-  new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date()),
-)
-
-const integrationStatus = computed(() => {
-  if (store.pageError) {
-    return {
-      label: '待处理',
-      type: 'danger' as const,
-      helper: '校验未完成，请先查看结果面板中的报错信息。',
-    }
-  }
-
-  if (store.capabilities.length) {
-    return {
-      label: '已连接',
-      type: 'success' as const,
-      helper: '后端能力已就绪，可直接执行本地校验。',
-    }
-  }
-
-  return {
-    label: '连接中',
-    type: 'info' as const,
-    helper: '正在读取后端能力信息。',
-  }
-})
 
 const stepStatuses = computed<{
   source: SectionStatus
@@ -121,218 +106,88 @@ const stepStatuses = computed<{
 
 const stepHints = computed(() => ({
   source: store.sources.length
-    ? `已接入 ${store.sources.length} 个数据源，可以继续沉淀变量。`
-    : '先接入至少一个数据源，作为变量与规则配置的基础输入。',
+    ? `已接入 ${store.sources.length} 个数据源`
+    : '至少接入 1 个',
   variable: !store.sources.length
-    ? '请先完成数据源接入，再继续配置变量。'
-    : store.variables.length
-      ? `已沉淀 ${store.variables.length} 个变量，可继续核对字段或进入规则配置。`
-      : '建议优先补齐关键字段变量，后续配置规则会更顺手。',
+    ? `已沉淀 ${store.variables.length} 个变量`
+    : `已沉淀 ${store.variables.length} 个变量`,
   rule: !store.variables.length
-    ? '请先完成变量配置。'
-    : store.orchestrationRuleCount
-      ? `已配置 ${store.orchestrationRuleCount} 条规则，可继续补充条件或直接执行校验。`
-      : '使用规则组与「新增规则」配置比较、非空、唯一或组合变量分支校验。',
-  result: !store.orchestrationRuleCount
-    ? '请先完成前三步，再在这里查看结果。'
-    : store.executionMeta
-      ? `最近一次扫描 ${store.executionMeta.total_rows_scanned} 行数据，结果已同步刷新。`
-      : store.pageError
-        ? '执行失败后，错误与失败来源会集中展示在这里。'
-        : '规则准备完成后，可在这里查看扫描统计与异常明细。',
+    ? `已编排 ${store.orchestrationRuleCount} 条规则`
+    : `已编排 ${store.orchestrationRuleCount} 条规则`,
+  result: '扫描统计与异常明细',
 }))
+
+function getSectionStatusLabel(step: StepIndex): string {
+  if (step === 4) {
+    if (store.pageError) {
+      return '需关注'
+    }
+    return store.executionMeta ? '已完成' : '待执行'
+  }
+
+  if (step === 1) {
+    return store.sources.length ? '已完成' : '待配置'
+  }
+
+  if (step === 2) {
+    return store.variables.length ? '已完成' : '待配置'
+  }
+
+  return store.orchestrationRuleCount ? '已完成' : '待配置'
+}
+
+function getSectionStatusTone(step: StepIndex): 'pending' | 'done' | 'warn' {
+  if (step === 4 && store.pageError) {
+    return 'warn'
+  }
+
+  return getSectionStatusLabel(step) === '已完成' ? 'done' : 'pending'
+}
 
 const workflowGuide = computed(() => {
   if (!store.sources.length) {
-    return {
-      tone: 'info',
-      badge: '下一步',
-      title: '先接入数据源',
-      description: '新增一个本地 Excel 或 CSV 来源，后续变量和规则都会复用它。',
-      step: 1 as StepIndex,
-      actionLabel: '查看步骤 1',
-      action: 'scroll' as const,
-    }
+    return { step: 1 as StepIndex, action: 'scroll' as const }
   }
-
   if (!store.variables.length) {
-    const preferredSource = store.preferredSourceId ?? store.sources[0]?.id ?? '当前数据源'
-    return {
-      tone: 'brand',
-      badge: '下一步',
-      title: `数据源 ${preferredSource} 已就绪`,
-      description: '补充 Sheet、字段和变量标签，保存后即可继续配置规则。',
-      step: 2 as StepIndex,
-      actionLabel: '配置变量',
-      action: 'scroll' as const,
-    }
+    return { step: 2 as StepIndex, action: 'scroll' as const }
   }
-
   if (!store.orchestrationRuleCount) {
-    return {
-      tone: 'warning',
-      badge: '下一步',
-      title: '变量已准备完成',
-      description: '在规则组中新增规则后，即可开始首轮校验。',
-      step: 3 as StepIndex,
-      actionLabel: '配置规则',
-      action: 'scroll' as const,
-    }
+    return { step: 3 as StepIndex, action: 'scroll' as const }
   }
-
-  if (store.isExecuting) {
-    return {
-      tone: 'info',
-      badge: '执行中',
-      title: '正在运行校验任务',
-      description: '系统正在读取数据并刷新结果，请稍候。',
-      step: 4 as StepIndex,
-      actionLabel: '查看结果',
-      action: 'scroll' as const,
-    }
+  if (store.isExecuting || store.pageError || store.executionMeta) {
+    return { step: 4 as StepIndex, action: 'scroll' as const }
   }
-
-  if (store.pageError) {
-    return {
-      tone: 'danger',
-      badge: '需处理',
-      title: '本次执行未完成',
-      description: '请先查看结果看板中的错误提示，再决定是否调整数据源或规则。',
-      step: 4 as StepIndex,
-      actionLabel: '查看结果',
-      action: 'scroll' as const,
-    }
-  }
-
-  if (store.executionMeta) {
-    return {
-      tone: 'success',
-      badge: '已完成',
-      title: '校验已完成',
-      description: `最近一次扫描 ${store.executionMeta.total_rows_scanned} 行数据，返回 ${store.abnormalResults.length} 条异常记录。`,
-      step: 4 as StepIndex,
-      actionLabel: '查看结果',
-      action: 'scroll' as const,
-    }
-  }
-
-  return {
-    tone: 'brand',
-    badge: '可执行',
-    title: '可以开始校验',
-    description: '当前规则已满足执行条件，可直接发起一次完整校验。',
-    step: 4 as StepIndex,
-    actionLabel: '开始校验',
-    action: 'execute' as const,
-  }
-})
-
-const stepGuideItems = computed(() => {
-  const recommendedStep = workflowGuide.value.step
-  const getToneByStatus = (status: SectionStatus) => {
-    if (status === 'done') {
-      return 'success' as const
-    }
-    if (status === 'active') {
-      return 'brand' as const
-    }
-    return 'info' as const
-  }
-  const getBadgeByStatus = (status: SectionStatus) => {
-    if (status === 'done') {
-      return '已完成'
-    }
-    if (status === 'active') {
-      return '进行中'
-    }
-    return '待开始'
-  }
-
-  // 保留原有业务逻辑：步骤说明仅复用现有 workflowGuide / stepHints / stepStatuses 计算结果组织展示。
-  return [
-    {
-      step: 1 as StepIndex,
-      label: '数据源',
-      count: `${store.sources.length} 项`,
-      title: recommendedStep === 1 ? workflowGuide.value.title : '先接入数据源',
-      description:
-        recommendedStep === 1
-          ? workflowGuide.value.description
-          : '新增一个本地 Excel、CSV、飞书或 SVN 来源，后续变量和规则配置都会复用这里的输入。',
-      summary: stepHints.value.source,
-      badge: recommendedStep === 1 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.source),
-      tone: recommendedStep === 1 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.source),
-      status: stepStatuses.value.source,
-      action:
-        recommendedStep === 1 && workflowGuide.value.action === 'execute'
-          ? ('execute' as const)
-          : ('scroll' as const),
-      actionLabel: recommendedStep === 1 ? workflowGuide.value.actionLabel : '查看步骤 1',
-    },
-    {
-      step: 2 as StepIndex,
-      label: '变量池',
-      count: `${store.variables.length} 项`,
-      title: recommendedStep === 2 ? workflowGuide.value.title : '沉淀变量池',
-      description:
-        recommendedStep === 2
-          ? workflowGuide.value.description
-          : '从已接入数据源中补充 Sheet、字段和变量标签，后续规则编排和结果定位都会基于这些变量展开。',
-      summary: stepHints.value.variable,
-      badge: recommendedStep === 2 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.variable),
-      tone: recommendedStep === 2 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.variable),
-      status: stepStatuses.value.variable,
-      action:
-        recommendedStep === 2 && workflowGuide.value.action === 'execute'
-          ? ('execute' as const)
-          : ('scroll' as const),
-      actionLabel: recommendedStep === 2 ? workflowGuide.value.actionLabel : '查看步骤 2',
-    },
-    {
-      step: 3 as StepIndex,
-      label: '规则',
-      count: `${store.orchestrationRuleCount} 条`,
-      title: recommendedStep === 3 ? workflowGuide.value.title : '配置规则',
-      description:
-        recommendedStep === 3
-          ? workflowGuide.value.description
-          : '按规则组组织比较、非空、唯一和组合变量分支校验，完成后就可以进入首次完整执行。',
-      summary: stepHints.value.rule,
-      badge: recommendedStep === 3 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.rule),
-      tone: recommendedStep === 3 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.rule),
-      status: stepStatuses.value.rule,
-      action:
-        recommendedStep === 3 && workflowGuide.value.action === 'execute'
-          ? ('execute' as const)
-          : ('scroll' as const),
-      actionLabel: recommendedStep === 3 ? workflowGuide.value.actionLabel : '查看步骤 3',
-    },
-    {
-      step: 4 as StepIndex,
-      label: '结果',
-      count: `${store.abnormalResults.length} 条`,
-      title: recommendedStep === 4 ? workflowGuide.value.title : '查看结果',
-      description:
-        recommendedStep === 4
-          ? workflowGuide.value.description
-          : '查看扫描统计、失败来源和异常明细；当规则已就绪但尚未执行时，也可以直接从这里发起一次完整校验。',
-      summary: stepHints.value.result,
-      badge: recommendedStep === 4 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.result),
-      tone: recommendedStep === 4 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.result),
-      status: stepStatuses.value.result,
-      action:
-        recommendedStep === 4 && workflowGuide.value.action === 'execute'
-          ? ('execute' as const)
-          : ('scroll' as const),
-      actionLabel: recommendedStep === 4 ? workflowGuide.value.actionLabel : '查看步骤 4',
-    },
-  ]
+  return { step: 4 as StepIndex, action: 'execute' as const }
 })
 
 const activeGuideStep = computed(() => selectedGuideStep.value ?? workflowGuide.value.step)
-const activeGuideDetail = computed(
-  () => stepGuideItems.value.find((item) => item.step === activeGuideStep.value) ?? stepGuideItems.value[0],
-)
+
+const stepperItems = computed(() => [
+  {
+    step: 1 as StepIndex,
+    label: '数据源',
+    description: stepHints.value.source,
+    status: stepStatuses.value.source,
+  },
+  {
+    step: 2 as StepIndex,
+    label: '变量池',
+    description: stepHints.value.variable,
+    status: stepStatuses.value.variable,
+  },
+  {
+    step: 3 as StepIndex,
+    label: '规则',
+    description: stepHints.value.rule,
+    status: stepStatuses.value.rule,
+  },
+  {
+    step: 4 as StepIndex,
+    label: '结果',
+    description: stepHints.value.result,
+    status: stepStatuses.value.result,
+  },
+])
 
 watch(
   () => workflowGuide.value.step,
@@ -373,25 +228,28 @@ async function runExecution(): Promise<void> {
     ElMessage.success('校验完成，结果已刷新。')
   } catch {
     await scrollToStep(4)
-    // 页面级错误已由 store 托管，这里只保留执行入口。
   }
 }
 
 function applyDemoScenario(): void {
+  // 保留原有业务逻辑：样例填充继续走原 store action。
   store.applyDemoScenario()
-  ElMessage.success('联调样例已加载，可直接执行校验。')
+  ElMessage.success('样例已加载，可直接执行校验。')
 }
 
-async function handleGuideAction(): Promise<void> {
-  if (activeGuideDetail.value.action === 'execute') {
-    await runExecution()
-    return
-  }
-
-  await scrollToStep(activeGuideDetail.value.step)
+function openDataSourceCreate(): void {
+  dataSourcePanelRef.value?.openCreateDialog()
 }
 
-async function handleGuideStepClick(step: StepIndex): Promise<void> {
+function openSingleVariableCreate(): void {
+  void variablePoolPanelRef.value?.openSingleCreateTab()
+}
+
+function openCompositeVariableCreate(): void {
+  void variablePoolPanelRef.value?.openCompositeCreateTab()
+}
+
+async function handleStepperClick(step: StepIndex): Promise<void> {
   hasManuallySelectedGuideStep.value = true
   selectedGuideStep.value = step
   await scrollToStep(step)
@@ -407,204 +265,232 @@ async function handleVariableSaved(_tag: string): Promise<void> {
 </script>
 
 <template>
-  <div class="main-board workbench-desktop-app">
-    <header class="workbench-topbar workbench-toolbar-shell">
-      <div class="topbar-brand">
-        <div class="brand-icon">
-          <DataBoard />
-        </div>
-        <div class="brand-copy">
-          <div class="brand-title-row">
-            <strong>配置表校验工作台</strong>
-            <el-tag :type="integrationStatus.type" effect="light" round>
-              {{ integrationStatus.label }}
-            </el-tag>
-          </div>
-          <p>固定外壳，专注在右侧内容区完成接入、配置、执行和复查。</p>
-        </div>
-      </div>
+  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
+    <!-- TopBar：极简，左面包屑+标题，右动作 -->
+    <PageHeader breadcrumb="主菜单 / 工作台" title="配置表校验工作台">
+      <template #actions>
+        <button
+          v-if="store.pageError"
+          type="button"
+          class="ec-btn ec-btn-secondary"
+          @click="store.clearPageError()"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+          清除错误
+        </button>
+        <button
+          type="button"
+          class="ec-btn ec-btn-secondary"
+          @click="applyDemoScenario"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16v16H4z M9 9h6v6H9z" />
+          </svg>
+          载入样例数据
+        </button>
+        <button
+          type="button"
+          class="ec-btn ec-btn-primary"
+          :disabled="store.isExecuting"
+          @click="runExecution"
+        >
+          <svg v-if="!store.isExecuting" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          <svg v-else class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 4a8 8 0 1 1-8 8" />
+          </svg>
+          {{ store.isExecuting ? '执行中…' : '执行校验' }}
+        </button>
+      </template>
+    </PageHeader>
 
-      <div class="workbench-toolbar-tray">
-        <div class="topbar-meta workbench-toolbar-meta">
-          <div class="meta-card">
-            <span>日期</span>
-            <strong>{{ currentDateLabel }}</strong>
-          </div>
-          <div class="meta-card">
-            <span>模式</span>
-            <strong>本地开发</strong>
-          </div>
-          <el-tooltip :content="integrationStatus.helper" placement="bottom">
-            <div class="meta-card meta-card-compact">
-              <span>状态</span>
-              <strong>{{ integrationStatus.label }}</strong>
-            </div>
-          </el-tooltip>
-        </div>
-
-        <div class="overview-actions workbench-toolbar-actions">
-          <el-tooltip content="载入当前联调样例" placement="bottom">
-            <el-button :icon="Operation" plain @click="applyDemoScenario">样例</el-button>
-          </el-tooltip>
-          <el-button v-if="store.pageError" :icon="CircleCheckFilled" plain @click="store.clearPageError()">
-            清错
-          </el-button>
-          <el-button
-            :icon="VideoPlay"
-            type="primary"
-            :loading="store.isExecuting"
-            @click="runExecution"
-          >
-            执行
-          </el-button>
-        </div>
-      </div>
-    </header>
-
-    <div class="workbench-desktop-layout">
-      <section class="workbench-stage-content">
-        <section class="overview-strip workbench-overview-strip">
-          <div class="overview-grid">
-            <!-- // 保留原有业务逻辑：概览卡仍基于 overviewItems 计算结果遍历渲染 -->
-            <article
-              v-for="item in overviewItems"
-              :key="item.label"
-              class="overview-item"
-              :class="`is-${item.tone}`"
-            >
-              <!-- // 保持 4 列不变，只重排卡片内部层级，避免宽屏下内容挤在左上角 -->
-              <div class="overview-item-top">
-                <div class="overview-icon-box" :class="`is-${item.tone}`">
-                  <component :is="item.icon" class="overview-icon" />
-                </div>
-                <span class="overview-item-label">{{ item.label }}</span>
-              </div>
-              <div class="overview-item-value">
-                <strong>{{ item.value }}</strong>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section class="workflow-guide workbench-step-guide-shell" :class="`is-${activeGuideDetail.tone}`">
-          <div class="workbench-step-guide-nav">
-            <!-- // 保留原有业务逻辑：步骤说明导航仍基于 stepGuideItems 计算结果遍历渲染 -->
+    <!-- 主滚动区 -->
+    <div class="flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
+      <!-- Stepper -->
+      <section aria-label="进度" class="rounded-card border border-line bg-card px-6 py-5 shadow-card-1">
+        <div class="flex items-center gap-4">
+          <!-- 保留原有业务逻辑：步骤进度仍基于 stepperItems 计算结果遍历渲染 -->
+          <template v-for="(item, index) in stepperItems" :key="item.step">
             <button
-              v-for="item in stepGuideItems"
-              :key="item.step"
               type="button"
-              class="step-guide-nav-item"
-              :class="[
-                `is-${item.status}`,
-                { 'is-selected': item.step === activeGuideStep },
-              ]"
-              @click="handleGuideStepClick(item.step)"
+              class="flex appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left shadow-none transition"
+              @click="handleStepperClick(item.step)"
             >
-              <span class="step-guide-nav-index">步骤 {{ item.step }}</span>
-              <strong>{{ item.label }}</strong>
-              <small>{{ item.count }}</small>
-            </button>
-          </div>
-
-          <!-- // 单列瀑布：标题/描述置顶，下方水平摆放 meta 与 CTA，避免左右分列打断阅读动线 -->
-          <div class="workbench-step-guide-detail">
-            <div class="workbench-step-guide-copy">
-              <span class="guide-badge">{{ activeGuideDetail.badge }}</span>
-              <strong>{{ activeGuideDetail.title }}</strong>
-              <p>{{ activeGuideDetail.description }}</p>
-            </div>
-
-            <!-- // 步骤说明 + 状态标签靠左，主 CTA 吸附到当前行右端 -->
-            <div class="workbench-step-guide-context">
-              <div class="workbench-step-guide-meta">
-                <div class="step-guide-summary-card">
-                  <span>当前说明</span>
-                  <strong>{{ activeGuideDetail.summary }}</strong>
-                </div>
-                <div class="step-guide-detail-tags">
-                  <el-tag type="info" effect="light" round>{{ activeGuideDetail.label }}</el-tag>
-                  <el-tag v-if="activeGuideDetail.status === 'done'" type="success" effect="light" round>
-                    已就绪
-                  </el-tag>
-                  <el-tag v-else-if="activeGuideDetail.status === 'active'" type="warning" effect="light" round>
-                    当前重点
-                  </el-tag>
-                  <el-tag v-else type="info" effect="light" round>
-                    待继续
-                  </el-tag>
-                </div>
-              </div>
-
-              <div class="guide-actions workbench-step-guide-actions">
-                <el-button
-                  :type="activeGuideDetail.action === 'execute' ? 'primary' : 'default'"
-                  @click="handleGuideAction"
+              <span
+                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-[12px] font-semibold transition"
+                :class="
+                  item.step === activeGuideStep
+                    ? 'bg-accent text-white'
+                    : item.status === 'done'
+                      ? 'bg-success text-white'
+                      : 'bg-canvas text-ink-500 ring-1 ring-line'
+                "
+              >
+                {{ item.step }}
+              </span>
+              <div class="min-w-0">
+                <div
+                  class="text-[14px] font-semibold transition"
+                  :class="item.step === activeGuideStep ? 'text-ink-900' : 'text-ink-700'"
                 >
-                  {{ activeGuideDetail.actionLabel }}
-                </el-button>
+                  {{ item.label }}
+                </div>
+                <div
+                  class="text-[12px] truncate max-w-[220px] transition"
+                  :class="item.step === activeGuideStep ? 'text-accent-ink' : 'text-ink-500'"
+                >
+                  {{ item.description }}
+                </div>
               </div>
+            </button>
+            <div
+              v-if="index < stepperItems.length - 1"
+              class="h-px flex-1 transition"
+              :class="item.status === 'done' ? 'bg-accent' : 'bg-line'"
+            ></div>
+          </template>
+        </div>
+      </section>
+
+      <!-- KPI 4 列：StatPill；不浮起 -->
+      <section aria-label="概览" class="grid grid-cols-4 gap-4">
+        <!-- 保留原有业务逻辑：概览卡仍基于 overviewItems 计算结果遍历渲染 -->
+        <StatPill
+          v-for="item in overviewItems"
+          :key="item.label"
+          :label="item.label"
+          :value="item.value"
+          :status-label="item.value > 0 ? item.readyHint : item.pendingHint"
+          :status-tone="item.value > 0 ? item.readyTone : item.pendingTone"
+        />
+      </section>
+
+      <!-- 4 个步骤工作区 -->
+      <section ref="sourceStepRef" class="rounded-card border border-line bg-card shadow-card-1">
+        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 1 ? 'border-accent' : 'border-transparent'">
+          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
+            <SectionHeader
+              variant="workbench"
+              step="01"
+              title="数据源"
+              description="接入 Excel、CSV、飞书或 SVN 来源"
+              :status-label="getSectionStatusLabel(1)"
+              :status-tone="getSectionStatusTone(1)"
+            />
+            <div class="workbench-section-toolbar__actions shrink-0">
+              <button
+                type="button"
+                class="ec-btn-outline-compact"
+                @click="openDataSourceCreate"
+              >
+                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                新增数据源
+              </button>
+              <button
+                type="button"
+                class="ec-btn-text-collapse"
+                aria-disabled="true"
+              >
+                收起
+                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m18 15-6-6-6 6" />
+                </svg>
+              </button>
             </div>
           </div>
-        </section>
-
-        <div ref="sourceStepRef" class="step-anchor">
-          <SectionBlock
-            step="1"
-            title="数据源"
-            description="接入 Excel、CSV、飞书或 SVN 来源。"
-            :status="stepStatuses.source"
-            :hint="stepHints.source"
-          >
-            <DataSourcePanel @saved="handleSourceSaved" />
-          </SectionBlock>
+          <div class="pt-1">
+            <DataSourcePanel ref="dataSourcePanelRef" toolbar-mode="hidden" @saved="handleSourceSaved" />
+          </div>
         </div>
+      </section>
 
-        <div ref="variableStepRef" class="step-anchor">
-          <SectionBlock
-            step="2"
-            title="变量池"
-            description="沉淀后续规则编排会复用的字段与组合变量。"
-            :status="stepStatuses.variable"
-            :hint="stepHints.variable"
-          >
-            <VariablePoolPanel @saved="handleVariableSaved" />
-          </SectionBlock>
+      <section ref="variableStepRef" class="rounded-card border border-line bg-card shadow-card-1">
+        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 2 ? 'border-accent' : 'border-transparent'">
+          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
+            <SectionHeader
+              variant="workbench"
+              step="02"
+              title="变量池"
+              description="沉淀后续规则编排会复用的字段与组合变量"
+              :status-label="getSectionStatusLabel(2)"
+              :status-tone="getSectionStatusTone(2)"
+            />
+            <div class="workbench-section-toolbar__actions shrink-0">
+              <button
+                type="button"
+                class="ec-btn-outline-compact"
+                :disabled="!store.sources.length"
+                @click="openSingleVariableCreate"
+              >
+                添加单个变量
+              </button>
+              <button
+                type="button"
+                class="ec-btn-outline-compact"
+                :disabled="!store.sources.length"
+                @click="openCompositeVariableCreate"
+              >
+                添加组合变量
+              </button>
+            </div>
+          </div>
+          <div class="pt-1">
+            <VariablePoolPanel ref="variablePoolPanelRef" toolbar-mode="hidden" @saved="handleVariableSaved" />
+          </div>
         </div>
+      </section>
 
-        <div ref="ruleStepRef" class="step-anchor">
-          <SectionBlock
-            step="3"
-            title="规则"
-            description="按组组织比较、非空、唯一和组合变量规则。"
-            :status="stepStatuses.rule"
-            :hint="stepHints.rule"
-          >
+      <section ref="ruleStepRef" class="rounded-card border border-line bg-card shadow-card-1">
+        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 3 ? 'border-accent' : 'border-transparent'">
+          <div class="flex items-center justify-between gap-4 border-b border-line pb-3">
+            <SectionHeader
+              variant="workbench"
+              step="03"
+              title="规则"
+              description="按组组织比较、非空、唯一和组合变量规则"
+              :status-label="getSectionStatusLabel(3)"
+              :status-tone="getSectionStatusTone(3)"
+            />
+          </div>
+          <div class="pt-3">
             <WorkbenchRuleOrchestrationPanel />
-
-            <div class="section-footbar">
-              <el-button
-                :icon="VideoPlay"
-                type="primary"
-                size="large"
-                :loading="store.isExecuting"
+            <div class="mt-6 flex justify-end">
+              <button
+                type="button"
+                class="ec-btn ec-btn-primary"
+                :disabled="store.isExecuting"
                 @click="runExecution"
               >
-                开始校验
-              </el-button>
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                执行校验
+              </button>
             </div>
-          </SectionBlock>
+          </div>
         </div>
+      </section>
 
-        <div ref="resultStepRef" class="step-anchor">
-          <SectionBlock
-            step="4"
-            title="结果"
-            description="查看扫描统计、失败来源和异常明细。"
-            :status="stepStatuses.result"
-            :hint="stepHints.result"
-          >
-            <ResultBoardPanel />
-          </SectionBlock>
+      <section ref="resultStepRef" class="rounded-card border border-line bg-card shadow-card-1">
+        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 4 ? 'border-accent' : 'border-transparent'">
+          <div class="flex items-start justify-between gap-4 border-b border-line pb-4">
+            <SectionHeader
+              variant="workbench"
+              step="04"
+              title="结果"
+              description="查看扫描统计、失败来源和异常明细"
+              :status-label="getSectionStatusLabel(4)"
+              :status-tone="getSectionStatusTone(4)"
+            />
+          </div>
+          <div class="pt-4">
+            <ResultBoardPanel :rule-count="store.orchestrationRuleCount" />
+          </div>
         </div>
       </section>
     </div>

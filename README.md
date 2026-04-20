@@ -1,5 +1,91 @@
 # Excel Check
 
+## 2026-04-20 全站 1:1 参考稿收口（主页面骨架 + 弹窗/Table tokens 对齐）
+
+- 以 `C:/Users/chenzhen/Desktop/htm.html` 和 `C:/Users/chenzhen/Desktop/弹窗样式.html` 为唯一视觉基准，对当前前端继续做了一轮 **1:1 收口**，本轮重点把还残留的“折叠工作流卡 + 非参考稿结果区”彻底切回参考稿式展开工作台。
+- 本轮实际触达：
+  - [`frontend/src/views/MainBoard.vue`](frontend/src/views/MainBoard.vue)：移除 `WorkbenchStepCard` 折叠卡壳层，工作台恢复为参考稿式 **4 个始终展开的模块面板**；保留原 `scrollToStep(step)`、步骤高亮、样例填充、执行校验和所有 store / API 链路不变。
+  - [`frontend/src/components/workbench/ResultBoardPanel.vue`](frontend/src/components/workbench/ResultBoardPanel.vue)：结果区改为参考稿同构结构：4 个统计块（扫描总行数 / 失败数据源 / 异常结果 / 执行耗时）+ 异常明细表格（命中规则 / 定位 / 行号 / 原始值 / 级别 / 说明）。
+  - [`frontend/src/style.css`](frontend/src/style.css)：新增统一的 **Dialog / Table / Form tokens**，收口 `el-dialog`、`workbench-table`、输入框、表头、遮罩和等宽 chip，使工作台页面与 5 个核心弹窗保持同一套参考稿视觉语言。
+- 视觉结果：
+  - 主工作台现在与 `htm.html` 的骨架一致：TopBar、水平 Stepper、4 个 KPI、4 个展开模块、规则区执行按钮、结果区统计卡与异常表格全部为参考稿语言。
+  - 5 个核心弹窗继续沿用上一轮已重写的 `420 / 520 / 720 / 760` 四档宽度与结构，本轮再通过全局 dialog tokens 收紧 header / body / footer / field / table 的一致性。
+  - 固定规则页、登录注册、管理后台、个人设置继续复用同一套共享壳层与全局 tokens，不再混入旧的 Apple / 玻璃风残留。
+- 业务红线全部保持：Pinia store、路由、API 模块、类型协议、事件绑定、执行链路和表单校验逻辑零改动；被触达页面脚本继续保留 `// 保留原有业务逻辑` 注释。
+- 回归（已实测）：
+  - `python -m pytest backend/tests -q` => `67 passed`
+  - `cd frontend && npm run build` => 通过（Vite v8.0.3 / vue-tsc）
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/` / `login` / `fixed-rules` => 全部 `200`
+
+文档更新时间：2026-04-20 17:40
+
+## 2026-04-20 工作台 1:1 复刻设计（步骤 3 修复 + 5 个弹窗重写）
+
+- 修复主工作台步骤 3 排版崩坏：`WorkbenchRuleOrchestrationPanel.vue` 仍在引用上一轮已删除的 `frontend/src/fixed-rules.css` 中的 `rule-binding-board / group-band-card / group-pill / rule-workspace-card / composite-condition-card` 等老 class，导致整段 layout 全失效；本轮按设计稿全量重写为 Tailwind utility，与 `FixedRulesBoard.vue` 同款规则编排区域 1:1 对齐。
+- 把工作台页签的 5 个弹窗按 4 档宽度（420 / 520 / 720 / 760）统一重写：
+  - **新增数据源**（[frontend/src/components/workbench/DataSourcePanel.vue](frontend/src/components/workbench/DataSourcePanel.vue)）：520px、`label-在上控件-在下`、删除 `el-form / el-form-item / dialog-form / dialog-footer` 老外壳，改为 `flex flex-col gap-4 + label.text-[12px].text-ink-500 + el-input/el-select`；保留原飞书 token 显示分支与文件选择按钮全部业务逻辑。
+  - **添加单变量**（[frontend/src/components/workbench/VariablePoolPanel.vue](frontend/src/components/workbench/VariablePoolPanel.vue)）：520px、双列 grid 排布来源 / Sheet / 列名 / 期望类型，全宽变量标签；告警从 `el-alert` 换成同款极简 Banner。
+  - **添加组合变量**（同文件）：720px、左右双栏 `grid-cols-[1fr_280px] gap-6`；左栏关联列多选 + Key 列 + 全宽变量标签；右栏 JSON 映射预览（`<pre> bg-canvas font-mono text-[11px]`，`max-h-[300px]` 内部滚动）。
+  - **新建规则组 / 重命名规则组**（[frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue](frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue)）：从原 `ElMessageBox.prompt` 系统弹窗升级为 420px 自定义 `el-dialog`，新增 `isGroupDialogVisible / groupDialogMode / groupForm / isSubmittingGroup` 4 个 reactive 状态；保留原 `store.createOrchestrationGroup / store.renameOrchestrationGroup` 调用链路。
+  - **新增 / 编辑规则**（同文件）：760px、三段式 `SectionHeader 风格（基本信息 / 校验配置 / 组合分支）`；段 2 在目标为组合变量时整段 `opacity-50 pointer-events-none` 灰显并显示「当前不适用」状态胶囊；段 3 嵌套层次 `bg-subtle 段容器 → bg-card 子段 → border-line 单条条件`，与设计稿 1:1。
+- 业务红线全部保留：Pinia store、API 模块、类型协议、路由守卫、规则执行链路、所有 watch / computed / validate / save / remove 函数零改动；被触达页面 `<script setup>` 顶部继续保留 `// 保留原有业务逻辑` 注释。
+- DataSourcePanel / VariablePoolPanel 是共享组件，本轮新弹窗外形对工作台与 `/fixed-rules` 同步生效（统一设计系统的预期效果，已用固定规则联调兜住）。
+- 回归（已实测）：
+  - `python -m pytest backend/tests -q` => `67 passed`
+  - `cd frontend && npm run build` => 通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告）
+  - `python backend/run.py` 启动；`GET http://127.0.0.1:8000/health` => `200`
+  - `npm run dev -- --host 127.0.0.1 --port 5173` 启动；6 路由实测：`/login` / `/register` / `/` / `/fixed-rules` / `/admin` / `/profile` => 全部 `200`
+  - 主工作台最小样例（`backend/tests/data/minimal_rules.xlsx`，`not_null + unique + cross_table_mapping`）：`code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+  - 固定规则 qa88 真样例（`D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`）：`code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+文档更新时间：2026-04-20 16:55
+
+## 2026-04-20 全站前端视觉统一重构（6 片合并落地，业务零改动）
+
+- 把 6 个页面（共享壳层 / 主工作台 / 固定规则 / 管理后台 / 个人设置 / 登录注册）一次性收口到同一套 Linear 冷静风 + Tailwind v3 + 单 accent 体系，弃用旧的 Apple 玻璃质感样式：
+  - **Phase 0** 新增 `frontend/src/components/shell/` 下 6 个共享展示组件：`PageHeader.vue / SectionHeader.vue / StatPill.vue / StatusDot.vue / EmptyState.vue / DataTable.vue`，全部走 Tailwind utility，零业务依赖。
+  - **Phase 1** 改造 `frontend/src/App.vue`：删除顶部 `app-shell-toolbar`（含「当前空间」label + 角色 Tag + 项目 Tag），左边栏品牌区从渐变 `EC` 圆角改为 `bg-accent` 主色方块 + 24×24 表格 SVG；TopBar 由各页面自己提供。
+  - **Phase 2** 精修 `frontend/src/views/MainBoard.vue`：接入 `PageHeader / StatPill`；KPI 卡去掉 hover 浮起；当前激活步骤改为顶部 2px 主色色带；折叠步骤的 chevron 增加 hover 旋转动效；KPI 与 Stepper 文案全量切换为 utility copy（操作语义优先）。
+  - **Phase 3** 全量重构 `frontend/src/views/FixedRulesBoard.vue`：弃用并删除 `frontend/src/fixed-rules.css`（同时移除 `frontend/src/main.ts` 中的 import）；规则组从横向 pill 改为左侧垂直列表 + 4px 左主色色带；规则列表改为极简 `DataTable`；组合规则编辑器拆为「全局筛选 / 分支筛选 / 分支校验」三段；告警从 `el-alert` 换成 `border + 4px 左色带 + 浅底` 的极简 Banner。
+  - **Phase 4** 标准化 `frontend/src/views/AdminView.vue`：接入 `PageHeader / SectionHeader`；项目列表改垂直列表 + 4px 左色带；成员表格改为极简 HTML 表格；弹窗去 `el-form-item` 走 `label + 控件` 双行布局。
+  - **Phase 5** 把 `frontend/src/views/ProfileView.vue` 改为居中 720px 单列叙事，3 段「账号信息 / 修改密码 / 我的项目」用 `SectionHeader + border-b border-line` 分隔，去掉所有卡片底色与浮起。
+  - **Phase 6** 把 `frontend/src/views/LoginView.vue / RegisterView.vue` 收口为克制方案：删除渐变 / 玻璃 / 装饰光斑；卡片宽度 380px；品牌方块外置；纯 `bg-canvas` 全屏底色。
+  - **Phase 7** 全局收口：把 `frontend/src/style.css` 的 `:root / body` 背景从原橙蓝渐变改为纯 `#f7f8fa`；CSS 变量（兼容旧组件）全部对齐新 token；新增 `prefers-reduced-motion` 兜底；补 Element Plus token 校准（`--el-button-bg-color` 等）。
+- 业务红线：Pinia store、API 模块、类型协议、路由守卫、后端字段、规则执行链路全部零改动；被触达页面 `<script setup>` 顶部继续保留 `// 保留原有业务逻辑` / `// 保持原有逻辑不变` 注释。
+- 回归（已实测）：
+  - `python -m pytest backend/tests -q` => `67 passed`
+  - `cd frontend && npm run build` => 通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告，CSS 体积 419.18 KB / gzip 60.38 KB）
+  - `python backend/run.py` 启动；`GET http://127.0.0.1:8000/health` => `200`
+  - `npm run dev -- --host 127.0.0.1 --port 5173` 启动；6 路由实测：`/login` / `/register` / `/` / `/fixed-rules` / `/admin` / `/profile` => 全部 `200`
+  - 主工作台最小样例（`backend/tests/data/minimal_rules.xlsx` + `not_null + unique + cross_table_mapping`）：`code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+  - 固定规则 qa88 真样例（`D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`）：`code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+文档更新时间：2026-04-20 16:10
+
+## 2026-04-20 主工作台视觉重构（Linear 冷静风 + 引入 Tailwind v3）
+
+- 主工作台 `/` 完成一次结构与视觉的深度重构，整页节奏向「Linear 冷静 + 图书馆目录清楚」的设计哲学对齐：
+  - 引入 `Tailwind v3 + PostCSS + Autoprefixer`，新增 `frontend/tailwind.config.js` 与 `frontend/postcss.config.js`，把项目 design tokens（色板 / 字体 / 阴影 / 圆角 / 缓动）固化到主题中。
+  - 新增字体加载链路：`Inter + Noto Sans SC + JetBrains Mono`（Google Fonts，`display=swap` 异步加载，KPI 大数字使用等宽字体）。
+  - 顶栏（TopBar）改为极简 `space-between`：左侧「主菜单 / 工作台 + 标题」，右侧「加载样例 + 执行校验」（保留 `store.pageError` 时显示「清除错误」按钮）。
+  - 删除原顶栏的「日期 / 模式 / 状态」三胶囊（信息冗余）。
+  - 删除原「先接入数据源」引导卡，统一并入 Stepper（4 步水平进度条），当前步骤是唯一带主色高亮的圆点 + 文字。
+  - KPI 4 列纯白卡：去掉彩色图标盒，只保留「小标题 + 等宽大数字 + 状态胶囊」。
+  - 新增 `frontend/src/components/workbench/WorkbenchStepCard.vue`（仅本页使用），实现「真折叠」：默认仅当前步骤展开 + 1px 主色边 + 略深阴影；其他三步折叠为单行，点击展开。
+  - 跳转锚点 `scrollToStep(step)` 会自动展开目标步骤后再滚动，避免用户跳过去看到空白。
+- 业务红线全部保留：
+  - `useWorkbenchStore` 的 `loadCapabilities / loadFromServer / triggerAutoSave / executeValidation / applyDemoScenario / clearPageError` 调用与计算属性零改动。
+  - `DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel` 子组件的 props 与事件零改动。
+  - `SectionBlock.vue` 不动（继续为 `FixedRulesBoard.vue` 服务），固定规则页本轮零变更。
+- 范围声明：本轮**仅改主工作台 `/`**；`FixedRulesBoard.vue` 与 `fixed-rules.css` 不在本轮范围。
+- 验证：
+  - `cd frontend && npm run build` 通过（vue-tsc + Vite，零 TS 错误，零 Tailwind 警告）。
+  - 后端 `python backend/run.py` 启动后 `GET http://127.0.0.1:8000/health` 返回 `200`。
+  - 前端 `npm run dev -- --host 127.0.0.1 --port 5173` 启动后 `GET http://127.0.0.1:5173/` 返回 `200`。
+
+文档更新时间：2026-04-20 14:35
+
 ## 2026-04-20 主工作台步骤说明模块铺满框体说明（逻辑零改动）
 
 - 本轮继续收口主工作台 `/` 顶部的步骤说明模块：

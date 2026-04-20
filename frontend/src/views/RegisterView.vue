@@ -68,48 +68,46 @@ async function handleRegister(): Promise<void> {
 </script>
 
 <template>
-  <div class="auth-page">
-    <div class="auth-card">
-      <div class="auth-header">
-        <span class="auth-brand">EC</span>
-        <h1>注册 Excel Check</h1>
-        <p>创建您的账户</p>
+  <div class="flex min-h-screen w-screen flex-col items-center justify-center bg-canvas px-6 py-10 font-sans text-ink-700">
+    <!-- 品牌 -->
+    <div class="flex flex-col items-center gap-3 mb-8">
+      <div class="flex h-12 w-12 items-center justify-center rounded-md bg-accent text-white">
+        <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 5h16v14H4z M4 10h16 M9 5v14" />
+        </svg>
+      </div>
+      <div class="text-center">
+        <div class="text-[18px] font-semibold tracking-tight text-ink-900">Excel Check</div>
+        <div class="text-[12px] text-ink-500">配置表校验工作台</div>
+      </div>
+    </div>
+
+    <!-- 注册卡 -->
+    <form
+      class="w-[380px] rounded-card border border-line bg-card p-6 shadow-card-2"
+      @submit.prevent="handleRegister"
+    >
+      <div class="mb-5">
+        <h1 class="text-[15px] font-semibold tracking-tight text-ink-900">注册</h1>
+        <p class="mt-1 text-[12px] text-ink-500">创建账号并加入项目</p>
       </div>
 
-      <el-form class="auth-form" @submit.prevent="handleRegister">
-        <el-form-item>
-          <el-input
-            v-model="username"
-            placeholder="用户名（至少 2 个字符）"
-            size="large"
-            autofocus
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-input
-            v-model="password"
-            type="password"
-            placeholder="密码（至少 4 个字符）"
-            size="large"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-input
-            v-model="confirmPassword"
-            type="password"
-            placeholder="确认密码"
-            size="large"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-select
-            v-model="selectedProjectId"
-            placeholder="选择归属项目"
-            size="large"
-            class="full-width"
-          >
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">用户名</label>
+          <el-input v-model="username" placeholder="至少 2 个字符" autofocus />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">密码</label>
+          <el-input v-model="password" type="password" placeholder="至少 4 个字符" show-password />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">确认密码</label>
+          <el-input v-model="confirmPassword" type="password" placeholder="再次输入密码" show-password />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">归属项目</label>
+          <el-select v-model="selectedProjectId" placeholder="选择归属项目" class="w-full">
             <el-option
               v-for="project in projects"
               :key="project.id"
@@ -117,23 +115,23 @@ async function handleRegister(): Promise<void> {
               :value="project.id"
             />
           </el-select>
-        </el-form-item>
-        <el-button
-          type="primary"
-          size="large"
-          :loading="isLoading"
-          :disabled="!projects.length"
-          class="auth-submit"
-          native-type="submit"
-        >
-          注册
-        </el-button>
-      </el-form>
+        </div>
 
-      <div class="auth-footer">
-        <span>已有账号？</span>
-        <router-link to="/login">返回登录</router-link>
+        <button
+          type="submit"
+          class="ec-btn ec-btn-primary mt-2 w-full"
+          :disabled="isLoading || !projects.length"
+        >
+          {{ isLoading ? '注册中…' : '注册' }}
+        </button>
       </div>
-    </div>
+
+      <div class="mt-5 text-center text-[12px] text-ink-500">
+        已有账号？
+        <router-link to="/login" class="text-accent-ink transition hover:underline">返回登录</router-link>
+      </div>
+    </form>
+
+    <div class="mt-10 text-[12px] text-ink-500">© Excel Check · 2026</div>
   </div>
 </template>

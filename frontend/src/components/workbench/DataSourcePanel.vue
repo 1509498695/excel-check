@@ -13,10 +13,12 @@ const props = withDefaults(
     store?: SourceManagementStoreLike
     sourceIssues?: Record<string, string>
     variant?: 'workbench' | 'fixed-rules'
+    toolbarMode?: 'embedded' | 'hidden'
   }>(),
   {
     sourceIssues: () => ({}),
     variant: 'workbench',
+    toolbarMode: 'embedded',
   },
 )
 
@@ -46,22 +48,12 @@ const draftErrors = reactive({
   pathOrUrl: '',
 })
 
-const supports = computed(() => store.capabilities)
 const localSource = computed(() => draft.type === 'local_excel' || draft.type === 'local_csv')
 const needsToken = computed(() => draft.type === 'feishu')
 const panelCopy = computed(() => ({
-  heading: isFixedRulesVariant.value ? '数据源管理' : '统一管理本地文件、飞书和 SVN 入口',
-  description: isFixedRulesVariant.value
-    ? '本页数据源独立保存。'
-    : '本地 Excel / CSV 会通过系统文件选择框记录真实本地路径，不再复制文件到项目运行目录。',
-  sampleAction: isFixedRulesVariant.value ? '加载样例' : '加载示例数据源',
   emptyText: isFixedRulesVariant.value ? '暂无数据源。' : '还没有录入数据源。',
-  localHelperReady: isFixedRulesVariant.value
-    ? '先选文件，再保存。'
-    : '请先完成系统文件选择，再点击“保存数据源”。选中文件后会把真实本地绝对路径写入当前输入框。',
-  localHelperEmpty: isFixedRulesVariant.value
-    ? '先填标识，再选文件。'
-    : '请先填写数据源标识，再点击“选择文件”。系统文件框会在本机打开，并把真实本地绝对路径写入当前输入框。',
+  localHelperReady: '先填标识，再选文件；本机系统弹窗会返回真实绝对路径',
+  localHelperEmpty: '先填标识，再选文件；本机系统弹窗会返回真实绝对路径',
 }))
 const canPickLocalFile = computed(
   () => localSource.value && !isPicking.value && draft.id.trim().length > 0,
@@ -98,13 +90,6 @@ function openEditDialog(source: DataSource): void {
   draft.token = source.token ?? ''
   clearDraftErrors()
   dialogVisible.value = true
-}
-
-function useSampleSource(): void {
-  store.useSampleSource()
-  emit('saved', 'src_demo')
-  emit('changed')
-  ElMessage.success('示例数据源已填入。')
 }
 
 function removeSource(sourceId: string): void {
@@ -258,27 +243,36 @@ async function chooseLocalFile(): Promise<void> {
     isPicking.value = false
   }
 }
+
+defineExpose({
+  openCreateDialog,
+})
 </script>
 
 <template>
   <div class="panel-stack">
-    <div class="capability-row">
-      <span class="meta-label">当前后端声明支持</span>
-      <div class="capability-list">
-        <el-tag v-for="item in supports" :key="item" effect="plain" round type="info">
-          {{ getSourceTypeLabel(item) }}
-        </el-tag>
-      </div>
-    </div>
-
-    <div class="panel-toolbar">
-      <div class="toolbar-copy">
-        <strong>{{ panelCopy.heading }}</strong>
-        <span>{{ panelCopy.description }}</span>
-      </div>
-      <div class="toolbar-actions">
-        <el-button plain @click="useSampleSource">{{ panelCopy.sampleAction }}</el-button>
-        <el-button type="primary" @click="openCreateDialog">新增数据源</el-button>
+    <div v-if="toolbarMode === 'embedded'" class="workbench-section-toolbar">
+      <div class="workbench-section-toolbar__actions">
+        <button
+          type="button"
+          class="ec-btn-outline-compact"
+          @click="openCreateDialog"
+        >
+          <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          新增数据源
+        </button>
+        <button
+          type="button"
+          class="ec-btn-text-collapse"
+          aria-disabled="true"
+        >
+          收起
+          <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m18 15-6-6-6 6" />
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -316,8 +310,8 @@ async function chooseLocalFile(): Promise<void> {
       <el-table-column label="操作" width="170" align="right">
         <template #default="{ row }">
           <div class="table-actions">
-            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="danger" @click="removeSource(row.id)">删除</el-button>
+            <button type="button" class="ec-action-link" @click="openEditDialog(row)">编辑</button>
+            <button type="button" class="ec-action-link-danger" @click="removeSource(row.id)">删除</button>
           </div>
         </template>
       </el-table-column>
@@ -326,80 +320,110 @@ async function chooseLocalFile(): Promise<void> {
     <el-dialog
       v-model="dialogVisible"
       :title="editingId ? '编辑数据源' : '新增数据源'"
-      width="600px"
+      width="520px"
       destroy-on-close
     >
-      <div class="dialog-form">
-        <el-form label-position="top">
-          <el-form-item label="数据源标识" :error="draftErrors.id">
-            <el-input
-              v-model="draft.id"
-              placeholder="例如：src_items、src_drop_table"
-              maxlength="48"
-              @input="draftErrors.id = ''"
-            />
-          </el-form-item>
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">数据源标识</label>
+          <el-input
+            v-model="draft.id"
+            placeholder="例如：src_items、src_drop_table"
+            maxlength="48"
+            @input="draftErrors.id = ''"
+          />
+          <div
+            v-if="draftErrors.id"
+            class="mt-1 text-[12px] text-danger"
+          >{{ draftErrors.id }}</div>
+          <div
+            v-else
+            class="mt-1 text-[12px] text-ink-500"
+          >唯一标识，仅允许字母、数字与下划线</div>
+        </div>
 
-          <el-form-item label="数据源类型">
-            <el-select
-              :model-value="draft.type"
-              class="full-width"
-              @update:model-value="handleSourceTypeChange"
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">数据源类型</label>
+          <el-select
+            :model-value="draft.type"
+            class="w-full"
+            @update:model-value="handleSourceTypeChange"
+          >
+            <el-option
+              v-for="option in SOURCE_TYPE_OPTIONS"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </div>
+
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">{{ getPathLabel(draft.type) }}</label>
+          <div class="flex items-center gap-2">
+            <el-input
+              v-model="draft.pathOrUrl"
+              class="flex-1"
+              :placeholder="localSource ? '请选择或输入本地文件路径' : '请输入链接或目录路径'"
+              @input="draftErrors.pathOrUrl = ''"
+            />
+            <button
+              v-if="localSource"
+              type="button"
+              class="ec-btn ec-btn-secondary shrink-0"
+              :disabled="!canPickLocalFile"
+              @click="chooseLocalFile"
             >
-              <el-option
-                v-for="option in SOURCE_TYPE_OPTIONS"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-          </el-form-item>
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 4h12l4 4v12H4z M14 4v6h6" />
+              </svg>
+              {{ isPicking ? '文件选择中…' : '选择文件' }}
+            </button>
+          </div>
+          <div
+            v-if="draftErrors.pathOrUrl"
+            class="mt-1 text-[12px] text-danger"
+          >{{ draftErrors.pathOrUrl }}</div>
+          <div
+            v-else-if="localSource"
+            class="mt-1 text-[12px] text-ink-500"
+          >
+            {{
+              draft.id.trim()
+                ? panelCopy.localHelperReady
+                : panelCopy.localHelperEmpty
+            }}
+          </div>
+        </div>
 
-          <el-form-item :label="getPathLabel(draft.type)" :error="draftErrors.pathOrUrl">
-            <div class="field-with-action">
-              <el-input
-                v-model="draft.pathOrUrl"
-                :placeholder="localSource ? '请选择或输入本地文件路径' : '请输入链接或目录路径'"
-                @input="draftErrors.pathOrUrl = ''"
-              />
-              <el-button
-                v-if="localSource"
-                plain
-                :loading="isPicking"
-                :disabled="!canPickLocalFile"
-                class="field-action-button"
-                @click="chooseLocalFile"
-              >
-                {{ isPicking ? '文件选择中' : '选择文件' }}
-              </el-button>
-            </div>
-
-            <span v-if="localSource" class="field-helper">
-              {{
-                draft.id.trim()
-                  ? panelCopy.localHelperReady
-                  : panelCopy.localHelperEmpty
-              }}
-            </span>
-          </el-form-item>
-
-          <el-form-item v-if="needsToken" label="访问令牌">
-            <el-input
-              v-model="draft.token"
-              type="password"
-              show-password
-              placeholder="飞书接入时可预留 token"
-            />
-          </el-form-item>
-        </el-form>
+        <div v-if="needsToken">
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">访问令牌</label>
+          <el-input
+            v-model="draft.token"
+            type="password"
+            show-password
+            placeholder="飞书接入时可预留 token"
+          />
+        </div>
       </div>
 
       <template #footer>
-        <div class="dialog-footer">
-          <el-button plain @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" :disabled="!canSaveSource" @click="saveSource">
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="ec-btn ec-btn-secondary"
+            @click="dialogVisible = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ec-btn ec-btn-primary"
+            :disabled="!canSaveSource"
+            @click="saveSource"
+          >
             保存数据源
-          </el-button>
+          </button>
         </div>
       </template>
     </el-dialog>

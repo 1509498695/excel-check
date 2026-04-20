@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 
 import {
   apiCreateProject,
@@ -16,6 +16,8 @@ import {
 } from '../api/admin'
 import { useAuthStore } from '../store/auth'
 import type { ProjectDetail, ProjectMember } from '../types/auth'
+import PageHeader from '../components/shell/PageHeader.vue'
+import SectionHeader from '../components/shell/SectionHeader.vue'
 
 const DEFAULT_PROJECT_NAME = '默认项目'
 
@@ -298,207 +300,281 @@ function isDefaultProject(project: ProjectDetail): boolean {
 </script>
 
 <template>
-  <div class="admin-page">
-    <header class="admin-header">
-      <div>
-        <h1>管理后台</h1>
-        <p>{{ auth.isSuperAdmin ? '左侧选项目，右侧管理成员与权限。' : '在右侧工作区管理当前项目成员。' }}</p>
-      </div>
-      <el-button
-        v-if="canCreateProject"
-        type="primary"
-        :icon="Plus"
-        @click="openCreateProjectDialog"
-      >
-        创建项目
-      </el-button>
-    </header>
-
-    <div class="admin-layout">
-      <section class="admin-projects" v-loading="isLoadingProjects">
-        <h2>{{ auth.isSuperAdmin ? '项目列表' : '可管理项目' }}</h2>
-        <div v-if="!projects.length" class="admin-empty">暂无可管理项目</div>
-        <!-- // 保留原有业务逻辑：项目列表仍基于 projects 遍历，点击继续走原有选中与加载成员逻辑 -->
-        <div
-          v-for="project in projects"
-          :key="project.id"
-          class="admin-project-card"
-          :class="{ 'is-active': selectedProject?.id === project.id }"
-          @click="selectProject(project)"
+  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
+    <PageHeader breadcrumb="主菜单 / 管理后台" title="管理后台">
+      <template #actions>
+        <button
+          v-if="canCreateProject"
+          type="button"
+          class="ec-btn ec-btn-primary"
+          @click="openCreateProjectDialog"
         >
-          <strong>{{ project.name }}</strong>
-          <div class="admin-project-meta">
-            <span>成员 {{ project.member_count ?? 0 }}</span>
-            <span>{{ formatDate(project.created_at) }}</span>
-          </div>
-          <p v-if="project.description">{{ project.description }}</p>
-          <div class="admin-project-actions">
-            <el-button
-              link
-              type="primary"
-              :icon="Edit"
-              @click.stop="openEditProjectDialog(project)"
-            >
-              编辑项目
-            </el-button>
-            <el-button
-              v-if="auth.isSuperAdmin && !isDefaultProject(project)"
-              link
-              type="danger"
-              :icon="Delete"
-              @click.stop="handleDeleteProject(project)"
-            >
-              删除项目
-            </el-button>
-          </div>
-        </div>
-      </section>
+          <Plus class="h-3.5 w-3.5" />
+          创建项目
+        </button>
+      </template>
+    </PageHeader>
 
-      <section class="admin-members" v-loading="isLoadingMembers">
-        <div v-if="!selectedProject" class="admin-empty">
-          当前没有可管理项目
-        </div>
-        <template v-else>
-          <h2>{{ selectedProject.name }} / 成员</h2>
-          <el-table :data="members" class="workbench-table">
-            <el-table-column prop="username" label="用户名" min-width="120" />
-            <el-table-column label="角色" min-width="120">
-              <template #default="{ row }">
-                <el-tag
-                  :type="row.is_super_admin ? 'danger' : row.role === 'admin' ? 'warning' : 'info'"
-                  effect="light"
-                  round
-                >
-                  {{ row.is_super_admin ? '超级管理员' : row.role === 'admin' ? '项目管理员' : '普通用户' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="归属项目" min-width="140">
-              <template #default="{ row }">
-                {{ row.primary_project_name ?? '-' }}
-              </template>
-            </el-table-column>
-            <el-table-column label="加入时间" min-width="180">
-              <template #default="{ row }">
-                {{ formatDate(row.joined_at) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="380" fixed="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button
-                    v-if="auth.isSuperAdmin && row.user_id !== auth.user?.id"
-                    link
-                    type="warning"
-                    @click="handleResetPassword(row)"
+    <div class="flex-1 overflow-y-auto px-8 py-8">
+      <section class="grid grid-cols-[280px_minmax(0,1fr)] gap-6">
+        <!-- 左侧项目列表 -->
+        <aside
+          v-loading="isLoadingProjects"
+          class="rounded-card border border-line bg-card shadow-card-1"
+        >
+          <div class="border-b border-line px-5 py-4">
+            <div class="text-[14px] font-semibold text-ink-900">
+              {{ auth.isSuperAdmin ? '项目列表' : '可管理项目' }}
+            </div>
+            <div class="mt-1 text-[12px] text-ink-500">{{ projects.length }} 个项目</div>
+          </div>
+
+          <div v-if="!projects.length" class="px-5 py-8 text-center text-[13px] text-ink-500">
+            暂无可管理项目
+          </div>
+
+          <nav class="flex flex-col gap-1 p-3">
+            <!-- // 保留原有业务逻辑：项目列表仍基于 projects 遍历，点击继续走原有选中与加载成员逻辑 -->
+            <div
+              v-for="project in projects"
+              :key="project.id"
+              class="group relative rounded-md text-left text-[13px] transition cursor-pointer"
+              :class="
+                selectedProject?.id === project.id
+                  ? 'bg-accent-soft text-accent-ink before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:bg-accent before:rounded-r'
+                  : 'text-ink-700 hover:bg-canvas'
+              "
+              @click="selectProject(project)"
+            >
+              <div class="flex items-start justify-between gap-2 px-3 pt-2.5">
+                <div class="min-w-0 flex-1">
+                  <div
+                    class="truncate font-medium"
+                    :class="selectedProject?.id === project.id ? 'text-accent-ink' : 'text-ink-900'"
                   >
-                    重置密码
-                  </el-button>
-                  <template v-if="!row.is_super_admin">
-                    <el-button
-                      v-if="row.role !== 'admin'"
-                      link
-                      type="primary"
-                      @click="handleSetRole(row, 'admin')"
-                    >
-                      设为管理员
-                    </el-button>
-                    <el-button
-                      v-else
-                      link
-                      type="primary"
-                      @click="handleSetRole(row, 'user')"
-                    >
-                      设为普通用户
-                    </el-button>
-                    <el-button
-                      v-if="canMoveMemberProject(row)"
-                      link
-                      type="primary"
-                      @click="openMoveProjectDialog(row)"
-                    >
-                      调整归属项目
-                    </el-button>
-                    <el-button
-                      v-if="row.user_id !== auth.user?.id"
-                      link
-                      type="danger"
-                      @click="handleRemoveMember(row)"
-                    >
-                      删除
-                    </el-button>
-                  </template>
-                  <span
-                    v-if="row.is_super_admin && !(auth.isSuperAdmin && row.user_id !== auth.user?.id)"
-                    class="admin-no-action"
+                    {{ project.name }}
+                  </div>
+                  <div
+                    class="mt-0.5 text-[12px]"
+                    :class="selectedProject?.id === project.id ? 'text-accent-ink/80' : 'text-ink-500'"
                   >
-                    -
-                  </span>
+                    成员 {{ project.member_count ?? 0 }} · {{ formatDate(project.created_at) }}
+                  </div>
                 </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
+              </div>
+              <div class="flex items-center gap-3 px-3 pb-2.5 pt-1.5 text-[12px]">
+                <button
+                  type="button"
+                  class="ec-btn-link"
+                  @click.stop="openEditProjectDialog(project)"
+                >
+                  编辑
+                </button>
+                <button
+                  v-if="auth.isSuperAdmin && !isDefaultProject(project)"
+                  type="button"
+                  class="ec-btn-link-danger"
+                  @click.stop="handleDeleteProject(project)"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          </nav>
+        </aside>
+
+        <!-- 右侧成员区 -->
+        <div
+          v-loading="isLoadingMembers"
+          class="rounded-card border border-line bg-card shadow-card-1"
+        >
+          <div
+            v-if="!selectedProject"
+            class="flex flex-col items-center justify-center gap-2 py-20 text-center text-[13px] text-ink-500"
+          >
+            当前没有可管理项目
+          </div>
+
+          <template v-else>
+            <div class="border-b border-line px-6 py-5">
+              <SectionHeader
+                :title="selectedProject.name"
+                :description="selectedProject.description || '无项目描述'"
+              />
+            </div>
+
+            <div class="px-6 py-5">
+              <SectionHeader title="成员" :description="`共 ${members.length} 位成员`" />
+
+              <div class="mt-4 overflow-hidden rounded-field border border-line">
+                <table class="w-full text-[13px]">
+                  <thead class="bg-canvas text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <tr>
+                      <th class="px-4 py-3 w-[180px]">用户名</th>
+                      <th class="px-4 py-3 w-[140px]">角色</th>
+                      <th class="px-4 py-3 w-[160px]">归属项目</th>
+                      <th class="px-4 py-3 w-[180px]">加入时间</th>
+                      <th class="px-4 py-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!members.length">
+                      <td colspan="5" class="px-4 py-12 text-center text-[13px] text-ink-500">
+                        暂无成员
+                      </td>
+                    </tr>
+                    <tr
+                      v-for="row in members"
+                      :key="row.user_id"
+                      class="border-t border-line transition hover:bg-canvas"
+                    >
+                      <td class="px-4 py-3 font-medium text-ink-900 truncate">{{ row.username }}</td>
+                      <td class="px-4 py-3">
+                        <span
+                          class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium"
+                          :class="
+                            row.is_super_admin
+                              ? 'bg-danger-soft text-danger'
+                              : row.role === 'admin'
+                                ? 'bg-warning-soft text-warning'
+                                : 'bg-subtle text-ink-500'
+                          "
+                        >
+                          {{ row.is_super_admin ? '超级管理员' : row.role === 'admin' ? '项目管理员' : '普通用户' }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 truncate text-ink-700">{{ row.primary_project_name ?? '-' }}</td>
+                      <td class="px-4 py-3 font-mono text-[12px] text-ink-500">{{ formatDate(row.joined_at) }}</td>
+                      <td class="px-4 py-3 text-right">
+                        <div class="table-actions">
+                          <button
+                            v-if="auth.isSuperAdmin && row.user_id !== auth.user?.id"
+                            type="button"
+                            class="ec-action-link"
+                            @click="handleResetPassword(row)"
+                          >
+                            重置密码
+                          </button>
+                          <template v-if="!row.is_super_admin">
+                            <button
+                              v-if="row.role !== 'admin'"
+                              type="button"
+                              class="ec-action-link"
+                              @click="handleSetRole(row, 'admin')"
+                            >
+                              设为管理员
+                            </button>
+                            <button
+                              v-else
+                              type="button"
+                              class="ec-action-link"
+                              @click="handleSetRole(row, 'user')"
+                            >
+                              设为普通用户
+                            </button>
+                            <button
+                              v-if="canMoveMemberProject(row)"
+                              type="button"
+                              class="ec-action-link"
+                              @click="openMoveProjectDialog(row)"
+                            >
+                              调整归属
+                            </button>
+                            <button
+                              v-if="row.user_id !== auth.user?.id"
+                              type="button"
+                              class="ec-action-link-danger"
+                              @click="handleRemoveMember(row)"
+                            >
+                              删除
+                            </button>
+                          </template>
+                          <span
+                            v-if="row.is_super_admin && !(auth.isSuperAdmin && row.user_id !== auth.user?.id)"
+                            class="text-ink-500"
+                          >
+                            —
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+        </div>
       </section>
     </div>
 
+    <!-- 项目编辑弹窗 -->
     <el-dialog
       v-model="isProjectDialogVisible"
       :title="projectDialogTitle"
       width="520px"
       destroy-on-close
-      class="project-dialog"
     >
-      <el-form label-position="top" class="dialog-form">
-        <el-form-item label="项目名称" required>
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">项目名称</label>
           <el-input
             v-model="projectForm.name"
             placeholder="请输入项目名称"
             maxlength="128"
             show-word-limit
           />
-        </el-form-item>
-        <el-form-item label="项目描述">
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">项目描述</label>
           <el-input
             v-model="projectForm.description"
             type="textarea"
             :rows="4"
             maxlength="500"
             show-word-limit
-            placeholder="请输入项目描述（可选）"
+            placeholder="可选"
           />
-        </el-form-item>
-      </el-form>
+        </div>
+      </div>
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="closeProjectDialog">取消</el-button>
-          <el-button
-            type="primary"
-            :loading="isSavingProject"
-            :disabled="!canSubmitProject"
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="ec-btn ec-btn-secondary"
+            @click="closeProjectDialog"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ec-btn ec-btn-primary"
+            :disabled="!canSubmitProject || isSavingProject"
             @click="handleSubmitProject"
           >
-            {{ projectDialogMode === 'create' ? '创建项目' : '保存修改' }}
-          </el-button>
+            {{ isSavingProject ? '保存中…' : projectDialogMode === 'create' ? '创建项目' : '保存修改' }}
+          </button>
         </div>
       </template>
     </el-dialog>
 
+    <!-- 调整归属项目弹窗 -->
     <el-dialog
       v-model="isMoveProjectDialogVisible"
       title="调整归属项目"
       width="480px"
       destroy-on-close
     >
-      <el-form label-position="top" class="dialog-form">
-        <el-form-item label="成员">
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">成员</label>
           <el-input :model-value="moveProjectForm.username" disabled />
-        </el-form-item>
-        <el-form-item label="目标归属项目" required>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标归属项目</label>
           <el-select
             v-model="moveProjectForm.targetProjectId"
             placeholder="请选择目标项目"
-            class="full-width"
+            class="w-full"
           >
             <el-option
               v-for="project in moveTargetProjects"
@@ -507,19 +583,25 @@ function isDefaultProject(project: ProjectDetail): boolean {
               :value="project.id"
             />
           </el-select>
-        </el-form-item>
-      </el-form>
+        </div>
+      </div>
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="closeMoveProjectDialog">取消</el-button>
-          <el-button
-            type="primary"
-            :loading="isMovingMemberProject"
-            :disabled="!canSubmitMoveProject"
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="ec-btn ec-btn-secondary"
+            @click="closeMoveProjectDialog"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ec-btn ec-btn-primary"
+            :disabled="!canSubmitMoveProject || isMovingMemberProject"
             @click="handleSubmitMoveProject"
           >
-            保存
-          </el-button>
+            {{ isMovingMemberProject ? '保存中…' : '保存' }}
+          </button>
         </div>
       </template>
     </el-dialog>

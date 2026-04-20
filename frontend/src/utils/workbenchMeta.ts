@@ -1,15 +1,15 @@
 import type { ExpectedType, SourceType } from '../types/workbench'
 
 export const SOURCE_TYPE_OPTIONS: Array<{ label: string; value: SourceType }> = [
-  { label: '本地 Excel', value: 'local_excel' },
-  { label: '本地 CSV', value: 'local_csv' },
+  { label: '本地 Excel (.xlsx / .xls)', value: 'local_excel' },
+  { label: '本地 CSV (.csv)', value: 'local_csv' },
   { label: '飞书表格', value: 'feishu' },
-  { label: 'SVN 配置目录', value: 'svn' },
+  { label: 'SVN 工作副本', value: 'svn' },
 ]
 
 export const EXPECTED_TYPE_OPTIONS: Array<{ label: string; value: ExpectedType }> = [
-  { label: '字符串', value: 'str' },
-  { label: 'JSON', value: 'json' },
+  { label: '字符串 (str)', value: 'str' },
+  { label: 'JSON (json)', value: 'json' },
 ]
 
 /** 供结果区等处的规则类型中文展示；主工作台步骤 3 已改为规则组编排，不再使用模板列表。 */

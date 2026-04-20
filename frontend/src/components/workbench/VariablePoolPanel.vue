@@ -17,9 +17,11 @@ const props = withDefaults(
   defineProps<{
     store?: VariablePoolStoreLike
     variant?: 'workbench' | 'fixed-rules'
+    toolbarMode?: 'embedded' | 'hidden'
   }>(),
   {
     variant: 'workbench',
+    toolbarMode: 'embedded',
   },
 )
 const emit = defineEmits<{ saved: [tag: string]; changed: [] }>()
@@ -73,46 +75,18 @@ const compositeErrors = reactive({
 })
 
 const sourceOptions = computed<DataSource[]>(() => store.sources)
-const singleDialogTitle = computed(() =>
-  singleEditingTag.value ? '编辑单个变量' : '新增单个变量',
-)
 const compositeDialogTitle = computed(() =>
-  compositeEditingTag.value ? '编辑组合变量' : '新增组合变量',
+  compositeEditingTag.value ? '编辑组合变量' : '添加组合变量',
 )
 const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 const panelCopy = computed(() => ({
-  heading: isFixedRulesVariant.value ? '变量池' : '配置变量与后端字段映射',
-  description: isFixedRulesVariant.value
-    ? '维护本页变量。'
-    : '点击上方按钮会在步骤 2 内打开独立子页签。保存后自动关闭当前页签，并回到变量列表。',
-  emptySourceTitle: isFixedRulesVariant.value ? '请先接入数据源' : '请先完成步骤 1 的数据源接入',
-  emptySourceDescription: isFixedRulesVariant.value
-    ? '先保存数据源，再添加变量。'
-    : '先保存至少一个数据源，再在这里添加单个变量或组合变量。',
-  readyTitle: isFixedRulesVariant.value ? '可开始配置变量' : '数据源已就绪，可以开始构建变量池',
-  readyDescription: isFixedRulesVariant.value
-    ? '支持单变量和组合变量。'
-    : '点击上方按钮会打开独立的变量编辑对话框。保存后会自动关闭当前对话框，并把变量写回下方列表和变量池。',
-  poolTitle: isFixedRulesVariant.value ? '变量池已就绪' : '变量池已可复用',
-  poolDescription: isFixedRulesVariant.value
-    ? `已配置 ${store.variables.length} 个变量。`
-    : `当前已配置 ${store.variables.length} 个变量。点击变量标签或“查看详情”可继续核对映射与预览。`,
+  emptyText: '请先添加单个变量或组合变量。',
   sourceTypeError: isFixedRulesVariant.value
     ? '当前固定规则页的字段映射提取先支持本地 Excel。'
     : '当前步骤 2 的字段映射提取先支持本地 Excel。',
   compositeTypeError: isFixedRulesVariant.value
     ? '当前固定规则页的组合变量提取先支持本地 Excel。'
     : '当前步骤 2 的组合变量提取先支持本地 Excel。',
-  poolHeading: isFixedRulesVariant.value ? '当前变量池' : '当前变量池',
-  poolDescriptionSecondary: isFixedRulesVariant.value
-    ? '点击标签查看详情。'
-    : '保存变量后，下方会形成可直接用于规则编排的标签池；点击标签可查看详情。',
-  emptyPool: isFixedRulesVariant.value
-    ? '保存后显示在这里。'
-    : '变量保存后，下方会形成可直接用于规则编排的标签池；点击任意标签可弹出变量详情窗口。',
-  singleDialogDescription: isFixedRulesVariant.value
-    ? '选择来源、Sheet 和列。'
-    : '按来源数据、Sheet 和列名提取一个可复用字段，用于后续静态规则编排。',
 }))
 const singleSource = computed<DataSource | null>(
   () => sourceOptions.value.find((item) => item.id === singleDraft.source_id) ?? null,
@@ -184,30 +158,6 @@ const canSaveComposite = computed(
     !!compositeDraft.key_column?.trim() &&
     compositeDraft.columns?.includes(compositeDraft.key_column ?? ''),
 )
-const variableGuide = computed(() => {
-  if (!store.sources.length) {
-    return {
-      type: 'warning' as const,
-      title: panelCopy.value.emptySourceTitle,
-      description: panelCopy.value.emptySourceDescription,
-    }
-  }
-
-  if (!store.variables.length) {
-    return {
-      type: 'info' as const,
-      title: panelCopy.value.readyTitle,
-      description: panelCopy.value.readyDescription,
-    }
-  }
-
-  return {
-    type: 'success' as const,
-    title: panelCopy.value.poolTitle,
-    description: panelCopy.value.poolDescription,
-  }
-})
-
 function getSingleSuggestion(sourceId: string, sheet: string, column: string): string {
   return `[${sourceId || 'source'}-${sheet || 'sheet'}-${column || 'column'}]`
 }
@@ -672,35 +622,42 @@ function getVariableFieldSummary(variable: VariableTag): string {
     ? `key: ${variable.key_column ?? '-'} / 列: ${(variable.columns ?? []).join('、')}`
     : variable.column ?? '-'
 }
+
+defineExpose({
+  openSingleCreateTab,
+  openCompositeCreateTab,
+})
 </script>
 
 <template>
   <div class="variable-layout">
     <div class="variable-config-panel">
-      <div class="panel-toolbar">
-        <div class="toolbar-copy">
-          <strong>{{ panelCopy.heading }}</strong>
-          <span>{{ panelCopy.description }}</span>
-        </div>
-        <div class="toolbar-actions">
-          <el-button plain :disabled="!store.sources.length" @click="openCompositeCreateTab">添加组合变量</el-button>
-          <el-button type="primary" :disabled="!store.sources.length" @click="openSingleCreateTab">添加单个变量</el-button>
+      <div v-if="toolbarMode === 'embedded'" class="workbench-section-toolbar">
+        <div class="workbench-section-toolbar__actions">
+          <button
+            type="button"
+            class="ec-btn-outline-compact"
+            :disabled="!store.sources.length"
+            @click="openSingleCreateTab"
+          >
+            添加单个变量
+          </button>
+          <button
+            type="button"
+            class="ec-btn-outline-compact"
+            :disabled="!store.sources.length"
+            @click="openCompositeCreateTab"
+          >
+            添加组合变量
+          </button>
         </div>
       </div>
-
-      <el-alert
-        :title="variableGuide.title"
-        :description="variableGuide.description"
-        :type="variableGuide.type"
-        :closable="false"
-        show-icon
-      />
 
       <div class="variable-summary-panel">
         <el-table
           :data="store.variables"
           class="workbench-table"
-          empty-text="请先添加单个变量或组合变量。"
+          :empty-text="panelCopy.emptyText"
         >
           <el-table-column label="变量标签" min-width="180">
             <template #default="{ row }">
@@ -709,12 +666,9 @@ function getVariableFieldSummary(variable: VariableTag): string {
               </button>
             </template>
           </el-table-column>
-          <el-table-column label="变量类型" min-width="130">
-            <template #default="{ row }">{{ getVariableKindLabel(row) }}</template>
-          </el-table-column>
           <el-table-column prop="source_id" label="来源" min-width="120" />
           <el-table-column prop="sheet" label="Sheet" min-width="120" />
-          <el-table-column label="字段结构" min-width="220">
+          <el-table-column label="列名 / 类型" min-width="240">
             <template #default="{ row }">{{ getVariableFieldSummary(row) }}</template>
           </el-table-column>
           <el-table-column label="期望类型" min-width="120">
@@ -723,70 +677,41 @@ function getVariableFieldSummary(variable: VariableTag): string {
           <el-table-column label="操作" width="210" align="right">
             <template #default="{ row }">
               <div class="table-actions">
-                <el-button link type="primary" @click="chooseTag(row.tag)">查看详情</el-button>
-                <el-button link type="primary" @click="openEditTab(row)">编辑</el-button>
-                <el-button link type="danger" @click="removeVariable(row.tag)">删除</el-button>
+                <button type="button" class="ec-action-link" @click="chooseTag(row.tag)">查看详情</button>
+                <button type="button" class="ec-action-link" @click="openEditTab(row)">编辑</button>
+                <button type="button" class="ec-action-link-danger" @click="removeVariable(row.tag)">删除</button>
               </div>
             </template>
           </el-table-column>
         </el-table>
       </div>
     </div>
-
-    <aside class="variable-pool-panel">
-      <div class="pool-heading">
-        <div>
-          <h3>{{ panelCopy.poolHeading }}</h3>
-          <p>{{ panelCopy.poolDescriptionSecondary }}</p>
-        </div>
-        <el-tag v-if="store.activeTag" type="warning" round effect="light">高亮中</el-tag>
-      </div>
-      <div class="tag-pool">
-        <button
-          v-for="variable in store.variables"
-          :key="variable.tag"
-          type="button"
-          class="pool-tag"
-          :class="{ 'is-active': store.activeTag === variable.tag }"
-          @click="chooseTag(variable.tag)"
-        >
-          <span>{{ variable.tag }}</span>
-          <small>{{ getVariableKindLabel(variable) }} / {{ variable.source_id }} / {{ variable.sheet }} / {{ getVariableFieldSummary(variable) }}</small>
-        </button>
-        <div v-if="!store.variables.length" class="empty-pool">{{ panelCopy.emptyPool }}</div>
-      </div>
-    </aside>
   </div>
 
   <el-dialog
     v-model="singleDialogVisible"
-    :title="singleDialogTitle"
-    width="640px"
+    :title="singleEditingTag ? '编辑单个变量' : '添加单个变量'"
+    width="520px"
     destroy-on-close
-    class="variable-editor-dialog"
     @closed="handleSingleDialogClosed"
   >
-    <div class="dialog-form variable-editor-panel">
-      <div class="detail-copy">
-        <strong>单个变量配置</strong>
-        <span>{{ panelCopy.singleDialogDescription }}</span>
+    <div class="flex flex-col gap-4">
+      <div
+        v-if="singleMetadataError"
+        role="alert"
+        class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-4 py-2.5 text-[12px] text-ink-700"
+      >
+        {{ singleMetadataError }}
       </div>
 
-      <el-alert
-        v-if="singleMetadataError"
-        :title="singleMetadataError"
-        type="warning"
-        :closable="false"
-        show-icon
-      />
-
-      <el-form label-position="top">
-        <el-form-item label="来源数据" :error="singleErrors.source_id">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">来源数据</label>
           <el-select
             :model-value="singleDraft.source_id"
-            class="full-width"
+            class="w-full"
             filterable
-            placeholder="请选择来源数据"
+            placeholder="选择来源数据"
             @update:model-value="handleSingleSourceChange"
           >
             <el-option
@@ -796,56 +721,56 @@ function getVariableFieldSummary(variable: VariableTag): string {
               :value="source.id"
             />
           </el-select>
-        </el-form-item>
-        <div class="dual-field">
-          <el-form-item label="Sheet" :error="singleErrors.sheet">
-            <el-select
-              :model-value="singleDraft.sheet"
-              class="full-width"
-              filterable
-              placeholder="请选择 Sheet"
-              :loading="singleMetadataLoading"
-              :disabled="!singleDraft.source_id || !singleSheetOptions.length"
-              @update:model-value="handleSingleSheetChange"
-            >
-              <el-option
-                v-for="sheet in singleSheetOptions"
-                :key="sheet.name"
-                :label="sheet.name"
-                :value="sheet.name"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="列名" :error="singleErrors.column">
-            <el-select
-              :model-value="singleDraft.column"
-              class="full-width"
-              filterable
-              placeholder="请选择列名"
-              :disabled="!singleDraft.sheet || !singleColumnOptions.length"
-              @update:model-value="handleSingleColumnChange"
-            >
-              <el-option
-                v-for="column in singleColumnOptions"
-                :key="column"
-                :label="column"
-                :value="column"
-              />
-            </el-select>
-          </el-form-item>
+          <div v-if="singleErrors.source_id" class="mt-1 text-[12px] text-danger">{{ singleErrors.source_id }}</div>
         </div>
-        <el-form-item label="变量标签" :error="singleErrors.tag">
-          <el-input
-            :model-value="singleDraft.tag"
-            placeholder="[source-sheet-column]"
-            @input="handleSingleTagInput"
-          />
-        </el-form-item>
-        <el-form-item label="期望类型" :error="singleErrors.expected_type">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">Sheet</label>
+          <el-select
+            :model-value="singleDraft.sheet"
+            class="w-full"
+            filterable
+            placeholder="选择 Sheet"
+            :loading="singleMetadataLoading"
+            :disabled="!singleDraft.source_id || !singleSheetOptions.length"
+            @update:model-value="handleSingleSheetChange"
+          >
+            <el-option
+              v-for="sheet in singleSheetOptions"
+              :key="sheet.name"
+              :label="sheet.name"
+              :value="sheet.name"
+            />
+          </el-select>
+          <div v-if="singleErrors.sheet" class="mt-1 text-[12px] text-danger">{{ singleErrors.sheet }}</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">列名</label>
+          <el-select
+            :model-value="singleDraft.column"
+            class="w-full"
+            filterable
+            placeholder="选择列名"
+            :disabled="!singleDraft.sheet || !singleColumnOptions.length"
+            @update:model-value="handleSingleColumnChange"
+          >
+            <el-option
+              v-for="column in singleColumnOptions"
+              :key="column"
+              :label="column"
+              :value="column"
+            />
+          </el-select>
+          <div v-if="singleErrors.column" class="mt-1 text-[12px] text-danger">{{ singleErrors.column }}</div>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">期望类型</label>
           <el-select
             v-model="singleDraft.expected_type"
-            class="full-width"
-            placeholder="请选择期望类型"
+            class="w-full"
+            placeholder="选择期望类型"
           >
             <el-option
               v-for="option in EXPECTED_TYPE_OPTIONS"
@@ -854,16 +779,45 @@ function getVariableFieldSummary(variable: VariableTag): string {
               :value="option.value"
             />
           </el-select>
-        </el-form-item>
-      </el-form>
+          <div v-if="singleErrors.expected_type" class="mt-1 text-[12px] text-danger">{{ singleErrors.expected_type }}</div>
+        </div>
+      </div>
+
+      <div>
+        <label class="mb-1.5 block text-[12px] font-medium text-ink-500">变量标签</label>
+        <el-input
+          :model-value="singleDraft.tag"
+          placeholder="[source-sheet-column]"
+          @input="handleSingleTagInput"
+        />
+        <div
+          v-if="singleErrors.tag"
+          class="mt-1 text-[12px] text-danger"
+        >{{ singleErrors.tag }}</div>
+        <div
+          v-else
+          class="mt-1 text-[12px] text-ink-500"
+        >默认按 <span class="font-mono">[来源-Sheet-列名]</span> 自动生成；改后不再覆盖</div>
+      </div>
     </div>
 
     <template #footer>
-      <div class="dialog-footer">
-        <el-button plain @click="closeSingleEditorTab">取消</el-button>
-        <el-button type="primary" :disabled="!canSaveSingle" @click="saveSingleVariable">
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="ec-btn ec-btn-secondary"
+          @click="closeSingleEditorTab"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="ec-btn ec-btn-primary"
+          :disabled="!canSaveSingle"
+          @click="saveSingleVariable"
+        >
           保存变量
-        </el-button>
+        </button>
       </div>
     </template>
   </el-dialog>
@@ -871,86 +825,93 @@ function getVariableFieldSummary(variable: VariableTag): string {
   <el-dialog
     v-model="compositeDialogVisible"
     :title="compositeDialogTitle"
-    width="760px"
+    width="720px"
     destroy-on-close
-    class="variable-editor-dialog"
     @closed="handleCompositeDialogClosed"
   >
-    <div class="dialog-form variable-editor-panel">
-      <div class="detail-copy">
-        <strong>组合变量配置</strong>
-        <span>选择列并指定 Key。</span>
-      </div>
+      <div class="mb-4 text-[12px] text-ink-500">同一个数据源、同一 Sheet、至少 2 列；指定 1 列作为 Key</div>
+      <div class="grid grid-cols-[1fr_280px] gap-6">
+      <!-- 左侧：表单 -->
+      <div class="flex flex-col gap-4">
+        <div
+          v-if="compositeMetadataError"
+          role="alert"
+          class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-4 py-2.5 text-[12px] text-ink-700"
+        >
+          {{ compositeMetadataError }}
+        </div>
 
-      <el-alert
-        v-if="compositeMetadataError"
-        :title="compositeMetadataError"
-        type="warning"
-        :closable="false"
-        show-icon
-      />
-
-      <el-form label-position="top">
-        <el-form-item label="来源数据" :error="compositeErrors.source_id">
-          <el-select
-            :model-value="compositeDraft.source_id"
-            class="full-width"
-            filterable
-            placeholder="请选择来源数据"
-            @update:model-value="handleCompositeSourceChange"
-          >
-            <el-option
-              v-for="source in sourceOptions"
-              :key="source.id"
-              :label="source.id"
-              :value="source.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Sheet" :error="compositeErrors.sheet">
-          <el-select
-            :model-value="compositeDraft.sheet"
-            class="full-width"
-            filterable
-            placeholder="请选择 Sheet"
-            :loading="compositeMetadataLoading"
-            :disabled="!compositeDraft.source_id || !compositeSheetOptions.length"
-            @update:model-value="handleCompositeSheetChange"
-          >
-            <el-option
-              v-for="sheet in compositeSheetOptions"
-              :key="sheet.name"
-              :label="sheet.name"
-              :value="sheet.name"
-            />
-          </el-select>
-        </el-form-item>
-        <div class="dual-field">
-          <el-form-item label="关联列" :error="compositeErrors.columns">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">来源数据</label>
             <el-select
-              :model-value="compositeDraft.columns"
-              multiple
+              :model-value="compositeDraft.source_id"
+              class="w-full"
               filterable
-              collapse-tags
-              collapse-tags-tooltip
-              class="full-width"
-              placeholder="至少选择 2 列"
-              :disabled="!compositeDraft.sheet || !compositeColumnOptions.length"
-              @update:model-value="handleCompositeColumnsChange"
+              placeholder="选择来源数据"
+              @update:model-value="handleCompositeSourceChange"
             >
               <el-option
-                v-for="column in compositeColumnOptions"
-                :key="column"
-                :label="column"
-                :value="column"
+                v-for="source in sourceOptions"
+                :key="source.id"
+                :label="source.id"
+                :value="source.id"
               />
             </el-select>
-          </el-form-item>
-          <el-form-item label="Key 列" :error="compositeErrors.key_column">
+            <div v-if="compositeErrors.source_id" class="mt-1 text-[12px] text-danger">{{ compositeErrors.source_id }}</div>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">Sheet</label>
+            <el-select
+              :model-value="compositeDraft.sheet"
+              class="w-full"
+              filterable
+              placeholder="选择 Sheet"
+              :loading="compositeMetadataLoading"
+              :disabled="!compositeDraft.source_id || !compositeSheetOptions.length"
+              @update:model-value="handleCompositeSheetChange"
+            >
+              <el-option
+                v-for="sheet in compositeSheetOptions"
+                :key="sheet.name"
+                :label="sheet.name"
+                :value="sheet.name"
+              />
+            </el-select>
+            <div v-if="compositeErrors.sheet" class="mt-1 text-[12px] text-danger">{{ compositeErrors.sheet }}</div>
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">关联列（至少 2 列）</label>
+          <el-select
+            :model-value="compositeDraft.columns"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            class="w-full"
+            placeholder="至少选择 2 列"
+            :disabled="!compositeDraft.sheet || !compositeColumnOptions.length"
+            @update:model-value="handleCompositeColumnsChange"
+          >
+            <el-option
+              v-for="column in compositeColumnOptions"
+              :key="column"
+              :label="column"
+              :value="column"
+            />
+          </el-select>
+          <div v-if="compositeErrors.columns" class="mt-1 text-[12px] text-danger">{{ compositeErrors.columns }}</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">Key 列（从已选列指定）</label>
             <el-select
               :model-value="compositeDraft.key_column"
-              class="full-width"
-              placeholder="请选择作为主键的 Key 列"
+              class="w-full"
+              placeholder="选择主键 Key 列"
               :disabled="!compositeKeyOptions.length"
               @update:model-value="handleCompositeKeyChange"
             >
@@ -961,61 +922,81 @@ function getVariableFieldSummary(variable: VariableTag): string {
                 :value="column"
               />
             </el-select>
-          </el-form-item>
+            <div v-if="compositeErrors.key_column" class="mt-1 text-[12px] text-danger">{{ compositeErrors.key_column }}</div>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">期望类型</label>
+            <el-input model-value="JSON (固定)" disabled />
+          </div>
         </div>
-        <el-form-item label="变量标签" :error="compositeErrors.tag">
+
+        <div>
+          <label class="mb-1.5 block text-[12px] font-medium text-ink-500">变量标签</label>
           <el-input
             :model-value="compositeDraft.tag"
             placeholder="[source-sheet-key-mapping]"
             @input="handleCompositeTagInput"
           />
-        </el-form-item>
-        <el-form-item label="期望类型">
-          <el-input model-value="json" disabled />
-        </el-form-item>
-      </el-form>
-
-      <div class="dialog-footer composite-dialog-actions">
-        <el-button plain @click="closeCompositeEditorTab">取消</el-button>
-        <el-button type="primary" :disabled="!canSaveComposite" @click="saveCompositeVariable">
-          保存变量
-        </el-button>
+          <div v-if="compositeErrors.tag" class="mt-1 text-[12px] text-danger">{{ compositeErrors.tag }}</div>
+        </div>
       </div>
 
-      <div class="composite-preview-panel">
-        <div class="detail-copy">
-          <strong>JSON 预览</strong>
-          <span>预览当前 JSON 结构。</span>
-        </div>
-        <el-alert
+      <!-- 右侧：JSON 预览 -->
+      <div class="flex flex-col gap-2 min-w-0">
+        <div class="text-[12px] font-medium text-ink-500">JSON 映射预览</div>
+
+        <div
           v-if="compositePreviewError"
-          :title="compositePreviewError"
-          type="warning"
-          :closable="false"
-          show-icon
-        />
-        <div v-else-if="compositePreviewLoading" class="empty-pool">
-          正在生成预览。
-        </div>
-        <div v-else-if="!compositePreview" class="empty-pool">
-          选择来源、Sheet、关联列和 Key 列后显示。
-        </div>
-        <div v-else class="json-preview-shell">
-          <div class="preview-summary">
-            <span>预览统计</span>
-            <strong>
-              {{ compositePreview!.total_rows }} 行 /
-              {{ Object.keys(compositePreview!.mapping).length }} 个 key
-            </strong>
-            <small>
-              Key：{{ compositePreview!.key_column }}
-            </small>
-          </div>
-          <pre class="json-preview-block">{{ formatJsonPreview(compositePreview!.mapping) }}</pre>
+          role="alert"
+          class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-3 py-2 text-[12px] text-ink-700"
+        >
+          {{ compositePreviewError }}
         </div>
 
+        <div
+          v-else-if="compositePreviewLoading"
+          class="flex-1 rounded-field border border-line bg-canvas px-3 py-6 text-center text-[12px] text-ink-500"
+        >
+          正在生成预览…
+        </div>
+
+        <div
+          v-else-if="!compositePreview"
+          class="flex-1 rounded-field border border-line bg-canvas px-3 py-6 text-center text-[12px] text-ink-500"
+        >
+          选择来源、Sheet、关联列和 Key 列后显示
+        </div>
+
+        <template v-else>
+          <div class="rounded-field border border-line bg-card px-3 py-2 text-[12px] text-ink-500">
+            <div>共 <strong class="font-mono text-ink-900">{{ compositePreview.total_rows }}</strong> 行 / <strong class="font-mono text-ink-900">{{ Object.keys(compositePreview.mapping).length }}</strong> 个 key</div>
+            <div class="mt-0.5">Key 列：<span class="font-mono text-ink-700">{{ compositePreview.key_column }}</span></div>
+          </div>
+          <pre class="flex-1 rounded-field border border-line bg-canvas px-3 py-2 font-mono text-[11px] leading-[1.5] text-ink-700 whitespace-pre-wrap break-all overflow-auto max-h-[300px]">{{ formatJsonPreview(compositePreview.mapping) }}</pre>
+          <div class="text-[11px] text-ink-500">外层 key 取 Key 列每行值，内层对象保留其余列</div>
+        </template>
       </div>
     </div>
+
+    <template #footer>
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="ec-btn ec-btn-secondary"
+          @click="closeCompositeEditorTab"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="ec-btn ec-btn-primary"
+          :disabled="!canSaveComposite"
+          @click="saveCompositeVariable"
+        >
+          保存变量
+        </button>
+      </div>
+    </template>
   </el-dialog>
 
   <el-dialog

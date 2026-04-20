@@ -1,5 +1,91 @@
 # Excel Check Frontend
 
+## 2026-04-20 全站 1:1 参考稿收口（主页面骨架 + 弹窗/Table tokens 对齐）
+
+- 以桌面参考稿 `C:/Users/chenzhen/Desktop/htm.html` 和 `C:/Users/chenzhen/Desktop/弹窗样式.html` 为唯一视觉基准，对当前前端继续做了一轮 **1:1 收口**。
+- 本轮实际触达：
+  - `src/views/MainBoard.vue`：移除 `WorkbenchStepCard` 折叠式工作流卡，主工作台切回参考稿式 4 个展开模块；每块统一为 `顶部 2px 激活色带 + 左侧编号 badge + 标题 + 状态胶囊 + 副说明 + 正文`。
+  - `src/components/workbench/ResultBoardPanel.vue`：结果区改为参考稿式 4 个统计块（扫描总行数 / 失败数据源 / 异常结果 / 执行耗时）+ 异常明细表（命中规则 / 定位 / 行号 / 原始值 / 级别 / 说明）。
+  - `src/style.css`：新增统一的 `Dialog / Table / Form tokens`，收口 `el-dialog`、`workbench-table`、输入框、表头、遮罩、等宽 chip 和操作列对齐方式，使工作台与 5 个核心弹窗保持 1:1 同套视觉语言。
+- 业务红线保持：不改 Pinia store、路由、API、类型协议、事件绑定和执行链路；被触达页面脚本继续保留 `// 保留原有业务逻辑` 注释。
+- 验证：
+  - `npm run build`：通过（vue-tsc + Vite v8.0.3）
+  - `python -m pytest backend/tests -q`：`67 passed`
+  - `http://127.0.0.1:8000/health`：`200`
+  - `http://127.0.0.1:5173/` / `login` / `fixed-rules`：全部 `200`
+
+文档更新时间：2026-04-20 17:40
+
+## 2026-04-20 工作台 1:1 复刻设计（步骤 3 修复 + 5 个弹窗重写）
+
+- 修复主工作台步骤 3「规则」展开后的排版崩坏；上一轮 Phase 3 删除了 `src/fixed-rules.css`，但子组件 `WorkbenchRuleOrchestrationPanel.vue` 仍在引用其中的 `rule-binding-board / group-band-card / group-pill / rule-workspace-card / composite-condition-card` 等 class，导致 layout 全失效。本轮按设计稿全量重写为 Tailwind utility，与 `src/views/FixedRulesBoard.vue` 同款规则编排区 1:1 对齐。
+- 工作台页签 5 个弹窗按 4 档宽度（420 / 520 / 720 / 760）统一重写：
+  - **新增数据源**（`src/components/workbench/DataSourcePanel.vue`）：520px、双列 grid、label-在上控件-在下；保留飞书 token 分支与文件选择按钮所有业务逻辑。
+  - **添加单个变量**（`src/components/workbench/VariablePoolPanel.vue`）：520px、双列 grid 排布来源 / Sheet / 列名 / 期望类型 + 全宽变量标签。
+  - **添加组合变量**（同上）：720px、`grid-cols-[1fr_280px]` 左右双栏，右栏 JSON 映射预览（`<pre> bg-canvas font-mono text-[11px]`，`max-h-[300px]` 内部滚动）。
+  - **新建规则组 / 重命名规则组**（`src/components/workbench/WorkbenchRuleOrchestrationPanel.vue`）：从原 `ElMessageBox.prompt` 升级为 420px 自定义 `el-dialog`，新增 4 个 reactive 状态。
+  - **新增 / 编辑规则**（同上）：760px、三段式 SectionHeader 风格（基本信息 / 校验配置 / 组合分支），段 2 在目标为组合变量时整段 `opacity-50 pointer-events-none` 灰显并显示「当前不适用」状态胶囊；段 3 嵌套层次 `bg-subtle 段容器 → bg-card 子段 → border-line 单条条件`。
+- 业务行为零改动：不动 Pinia store、API、类型协议、路由守卫；所有 watch / computed / validate / save / remove 函数沿用；被触达页面 `<script setup>` 顶部继续保留 `// 保留原有业务逻辑` 注释。
+- 共享组件 DataSourcePanel / VariablePoolPanel 的弹窗改动同步影响 `/fixed-rules`（统一设计系统的预期效果，已用固定规则联调兜住）。
+- 验证：
+  - `npm run build`：通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告，CSS 419.68KB / gzip 60.48KB）
+  - 本地服务：`http://127.0.0.1:8000/health` -> `200`，6 路由 `/login / /register / / / /fixed-rules / /admin / /profile` 全部 `200`
+  - 主工作台最小样例 `POST /api/v1/engine/execute`：`Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+  - 固定规则 qa88 真样例 `POST /api/v1/fixed-rules/execute`：`Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+文档更新时间：2026-04-20 16:55
+
+## 2026-04-20 全站前端视觉统一重构（6 片合并落地，业务零改动）
+
+- 把 6 个页面（共享壳层 / 主工作台 / 固定规则 / 管理后台 / 个人设置 / 登录注册）一次性收口到同一套 Linear 冷静风 + Tailwind v3 + 单 accent (#2563eb) 体系，弃用旧的 Apple 玻璃质感样式。
+- 新增 `src/components/shell/` 下 6 个共享展示组件，零业务依赖：
+  - `PageHeader.vue`：面包屑 + h1 标题 + 右侧 actions 槽
+  - `SectionHeader.vue`：h2 + 1 句副文案 + 右侧 actions 槽
+  - `StatPill.vue`：caption + 等宽大数字 + StatusDot
+  - `StatusDot.vue`：5 色（pending / active / done / warn / error）状态胶囊
+  - `EmptyState.vue`：圆形浅底 icon + 标题 + 副文案 + CTA 槽
+  - `DataTable.vue`：极简表头表格（canvas 底 + 12px uppercase 表头）
+- 触达文件清单：
+  - `src/App.vue`：删除顶部 toolbar 角色 / 项目 Tag；左边栏品牌升级为主色方块 + 表格 SVG；TopBar 改由各页面提供。
+  - `src/views/MainBoard.vue`、`src/components/workbench/WorkbenchStepCard.vue`：接入 `PageHeader / StatPill`；KPI 卡去 hover 浮起；当前激活步骤改顶 2px 主色色带；折叠步骤 chevron 加 hover 旋转动效；KPI 与 Stepper 文案 utility 化。
+  - `src/views/FixedRulesBoard.vue`：全量重构；规则组改左侧垂直列表；规则列表改极简 HTML 表格；组合规则编辑器拆为三段；告警改极简 Banner。
+  - `src/fixed-rules.css`：**已删除**；`src/main.ts` 中的 `import './fixed-rules.css'` 已移除。
+  - `src/views/AdminView.vue`：项目列表改垂直列表 + 4px 左色带；成员表格改极简 HTML 表格；弹窗极简化。
+  - `src/views/ProfileView.vue`：改为居中 720px 单列叙事，3 段用 `SectionHeader + 分隔线` 分隔，去卡片化。
+  - `src/views/LoginView.vue`、`src/views/RegisterView.vue`：删除渐变 / 玻璃 / 装饰光斑；卡片 380px；品牌方块外置。
+  - `src/style.css`：`:root / body` 背景改为纯 `#f7f8fa`；CSS 变量对齐新 token；新增 `prefers-reduced-motion` 兜底；补 Element Plus token 校准段。
+- 业务行为零改动：不动 Pinia store、API 模块、类型协议、路由守卫；被触达页面 `<script setup>` 顶部继续保留 `// 保留原有业务逻辑` / `// 保持原有逻辑不变` 注释。
+- 验证：
+  - `npm run build`：通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告，CSS 体积 419.18KB / gzip 60.38KB）
+  - 本地服务：`http://127.0.0.1:8000/health` -> `200`，6 个路由 `/login / /register / / / /fixed-rules / /admin / /profile` 全部 `200`
+  - 主工作台最小样例 `POST /api/v1/engine/execute`：`Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`
+  - 固定规则 qa88 真样例 `POST /api/v1/fixed-rules/execute`：`Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`
+
+文档更新时间：2026-04-20 16:10
+
+## 2026-04-20 主工作台视觉重构（Linear 冷静风 + 引入 Tailwind v3）
+
+- 引入 `Tailwind v3 + PostCSS + Autoprefixer`：
+  - 新增 `tailwind.config.js`：把项目 design tokens（色板 / 字体 / 阴影 / 圆角 / 缓动）固化。
+  - 新增 `postcss.config.js`。
+  - `corePlugins.preflight = false`：关闭浏览器重置以兼容 Element Plus 与既有 4000+ 行 CSS。
+- 加载字体：`index.html` 顶部新增 Google Fonts 链接，引入 `Inter + Noto Sans SC + JetBrains Mono`（`display=swap` 异步）。`src/style.css` `:root` 字体栈把 `Inter / Noto Sans SC` 提到最前。
+- 主工作台 `src/views/MainBoard.vue` 视觉与结构重写：
+  - 顶栏 `space-between`：左侧面包屑 + 标题，右侧「加载样例 + 执行校验 + 清除错误（条件出现）」。
+  - 删除原顶栏「日期 / 模式 / 状态」三胶囊。
+  - 删除「先接入数据源」引导卡，信息合并到 Stepper（4 步水平进度条）。
+  - KPI 4 列纯白卡：caption + 等宽大数字 + 状态胶囊。
+  - 4 个步骤区改用新增的 `src/components/workbench/WorkbenchStepCard.vue`：默认仅当前步骤展开（1px 主色边 + 略深阴影），其他三步折叠为单行可点击展开 / 收起。
+- 滚动锚点 `scrollToStep(step)` 现在会先把目标步骤展开再滚动，避免跳过去看到空白。
+- 业务红线：`useWorkbenchStore` 调用与计算属性、`DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel` 子组件的 props 与事件全部零改动。
+- `SectionBlock.vue` 不动（仍由 `src/views/FixedRulesBoard.vue` 复用）；固定规则页与 `src/fixed-rules.css` 本轮零变更。
+- 清理 `src/style.css` 中仅服务 MainBoard 的废弃 class：`workbench-toolbar-tray/-meta/-actions`、`workbench-step-guide-*`、`step-guide-summary-card`、`step-guide-detail-tags`、`overview-item-top/-label/-value` 及移动端响应式对应引用。
+- 验证：
+  - `npm run build`：通过（vue-tsc + Vite v8.0.3，零 TS 错误，零 Tailwind 警告）。
+  - 本地服务：`http://127.0.0.1:8000/health` → `200`、`http://127.0.0.1:5173/` → `200`。
+
+文档更新时间：2026-04-20 14:35
+
 ## 2026-04-20 主工作台步骤说明模块铺满框体说明
 
 - 本轮继续调整主工作台 `src/style.css` 中的步骤说明模块布局：

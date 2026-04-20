@@ -1,85 +1,47 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CircleCheckFilled } from '@element-plus/icons-vue'
 
+import DataTable from '../shell/DataTable.vue'
+import EmptyState from '../shell/EmptyState.vue'
 import { useWorkbenchStore } from '../../store/workbench'
+import type { AbnormalResult, ExecutionMeta } from '../../types/workbench'
 import { getRuleTitle } from '../../utils/workbenchMeta'
 
-const store = useWorkbenchStore()
+type ResultBoardStoreLike = {
+  pageError: string
+  isExecuting: boolean
+  executionMeta: ExecutionMeta | null
+  abnormalResults: AbnormalResult[]
+}
+
+const props = defineProps<{
+  store?: ResultBoardStoreLike
+  ruleCount: number
+}>()
+
+const defaultStore = useWorkbenchStore()
+const store = computed<ResultBoardStoreLike>(() => props.store ?? defaultStore)
 
 const resultStats = computed(() => {
-  const total = store.abnormalResults.length
-  const errors = store.abnormalResults.filter((item) => item.level === 'error').length
-  const warnings = store.abnormalResults.filter((item) => item.level === 'warning').length
-  const scanned = store.executionMeta?.total_rows_scanned ?? 0
-  const failedSources = store.executionMeta?.failed_sources.length ?? 0
-  const passRate = scanned > 0 ? Math.max(0, Math.round(((scanned - total) / scanned) * 100)) : 100
+  const total = store.value.abnormalResults.length
+  const scanned = store.value.executionMeta?.total_rows_scanned ?? 0
+  const failedSources = store.value.executionMeta?.failed_sources.length ?? 0
+  const durationMs = store.value.executionMeta?.execution_time_ms ?? 0
 
   return {
     total,
-    errors,
-    warnings,
     scanned,
     failedSources,
-    passRate,
+    durationMs,
   }
 })
 
-const resultSummary = computed(() => {
-  if (!store.executionMeta) {
-    return '配置完成后点击“立即执行校验”，结果会在这里展示。'
-  }
-
-  return `本轮共执行 ${store.orchestrationRuleCount} 条规则，已扫描 ${resultStats.value.scanned} 行数据。`
-})
-
-const resultState = computed(() => {
-  if (store.isExecuting) {
-    return {
-      type: 'info' as const,
-      title: '正在执行校验',
-      description: '系统正在读取数据源、执行规则并刷新结果看板，请稍候。',
-    }
-  }
-
-  if (store.pageError) {
-    return {
-      type: 'error' as const,
-      title: '本轮执行未完成',
-      description: store.pageError,
-    }
-  }
-
-  if (!store.orchestrationRuleCount) {
-    return {
-      type: 'info' as const,
-      title: '还没有可执行的规则',
-      description: '先完成步骤 1 到步骤 3，再在这里查看扫描统计、失败数据源和异常明细。',
-    }
-  }
-
-  if (!store.executionMeta) {
-    return {
-      type: 'info' as const,
-      title: '结果看板已就绪，等待执行',
-      description: '点击“立即执行校验”后，这里会展示扫描统计、失败数据源和异常明细。',
-    }
-  }
-
-  if (!store.abnormalResults.length) {
-    return {
-      type: 'success' as const,
-      title: '本轮校验已完成，未发现异常',
-      description: `已扫描 ${resultStats.value.scanned} 行数据，可继续切换数据源或补充规则。`,
-    }
-  }
-
-  return {
-    type: 'warning' as const,
-    title: '本轮校验已完成，已返回异常明细',
-    description: `已扫描 ${resultStats.value.scanned} 行数据，共返回 ${resultStats.value.total} 条异常结果。`,
-  }
-})
+const summaryCards = computed(() => [
+  { label: '扫描总行数', value: resultStats.value.scanned },
+  { label: '失败数据源', value: resultStats.value.failedSources },
+  { label: '异常结果', value: resultStats.value.total },
+  { label: '执行耗时', value: `${resultStats.value.durationMs}ms` },
+])
 
 function getLevelType(level: string): 'danger' | 'warning' | 'success' | 'info' {
   if (level === 'error') {
@@ -108,112 +70,116 @@ function displayRawValue(value: unknown): string {
 </script>
 
 <template>
-  <div class="result-layout">
-    <el-alert
-      :title="resultState.title"
-      :description="resultState.description"
-      :type="resultState.type"
-      :closable="false"
-      show-icon
-    />
-
-    <div class="result-kpi-bar">
-      <div class="result-kpi-main">
-        <div class="result-kpi-icon">
-          <CircleCheckFilled />
-        </div>
-        <div>
-          <strong>校验结果总览</strong>
-          <p>{{ resultSummary }}</p>
-        </div>
-      </div>
-
-      <div class="result-kpi-progress">
-        <div class="progress-caption">
-          <span>通过率</span>
-          <strong>{{ resultStats.passRate }}%</strong>
-        </div>
-        <el-progress :percentage="resultStats.passRate" :show-text="false" :stroke-width="8" color="#22c55e" />
-      </div>
-
-      <div class="toolbar-actions">
-        <el-button class="result-export-button" plain :disabled="!store.executionMeta">导出 Excel 报告</el-button>
-      </div>
-    </div>
-
-    <div class="result-summary">
-      <div class="summary-tile">
-        <span>扫描总行数</span>
-        <strong>{{ resultStats.scanned }}</strong>
-      </div>
-      <div class="summary-tile">
-        <span>异常总数</span>
-        <strong>{{ resultStats.total }}</strong>
-      </div>
-      <div class="summary-tile">
-        <span>错误 / 警告</span>
-        <strong>{{ resultStats.errors }} / {{ resultStats.warnings }}</strong>
-      </div>
-      <div class="summary-tile">
-        <span>失败数据源</span>
-        <strong>{{ resultStats.failedSources }}</strong>
-      </div>
-    </div>
-
-    <el-alert
+  <div class="flex flex-col gap-5">
+    <div
       v-if="store.pageError"
-      :title="store.pageError"
-      type="error"
-      :closable="false"
-      show-icon
-      class="result-alert"
-    />
-
-    <el-alert
-      v-if="store.executionMeta?.failed_sources.length"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="result-alert"
+      role="alert"
+      class="rounded-card border border-line border-l-4 border-l-danger bg-danger-soft/50 px-4 py-3 text-[13px] text-ink-700"
     >
-      <template #title>
-        这些数据源本次加载失败，但其他 source 已继续执行：
-        {{ store.executionMeta.failed_sources.join('、') }}
-      </template>
-    </el-alert>
-
-    <div class="panel-toolbar result-toolbar">
-      <div class="toolbar-copy">
-        <strong>异常结果明细</strong>
-        <span>结果字段与后端返回结构一一对应，可直接用于联调定位与后续导出。</span>
-      </div>
+      {{ store.pageError }}
     </div>
 
-    <el-table
-      :data="store.abnormalResults"
-      class="workbench-table"
-      empty-text="执行完成后，异常结果会在这里展示。"
+    <div
+      v-if="store.executionMeta?.failed_sources.length"
+      role="alert"
+      class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-4 py-3 text-[13px] text-ink-700"
     >
-      <el-table-column label="级别" width="110">
-        <template #default="{ row }">
-          <el-tag :type="getLevelType(row.level)" effect="light" round>
-            {{ row.level }}
-          </el-tag>
+      失败数据源：{{ store.executionMeta.failed_sources.join('、') }}
+    </div>
+
+    <div
+      v-if="!ruleCount"
+      class="rounded-card border border-dashed border-line bg-subtle/60 px-6 py-10 text-center"
+    >
+      <div class="text-[15px] font-semibold text-ink-900">结果面板已就绪</div>
+      <p class="mt-2 text-[13px] text-ink-500">先完成数据源、变量池和规则配置，再执行一次校验。</p>
+    </div>
+
+    <template v-else>
+      <div class="grid grid-cols-4 gap-4">
+        <article
+          v-for="card in summaryCards"
+          :key="card.label"
+          class="rounded-field bg-subtle px-5 py-4"
+        >
+          <div class="text-[12px] font-medium text-ink-500">{{ card.label }}</div>
+          <div class="mt-3 font-mono text-[16px] font-semibold leading-none text-ink-900">
+            {{ card.value }}
+          </div>
+        </article>
+      </div>
+
+      <slot name="extra" />
+
+      <DataTable aria-label="执行结果表">
+        <template #head>
+          <tr>
+            <th class="w-[18%]">命中规则</th>
+            <th class="w-[20%]">定位</th>
+            <th class="w-[80px]">行号</th>
+            <th class="w-[120px]">原始值</th>
+            <th class="w-[120px]">级别</th>
+            <th>说明</th>
+          </tr>
         </template>
-      </el-table-column>
-      <el-table-column label="规则类型" min-width="170">
-        <template #default="{ row }">
-          {{ getRuleTitle(row.rule_name) }}
+        <template #body>
+          <tr v-if="store.isExecuting">
+            <td colspan="6" class="bg-card">
+              <EmptyState title="正在执行校验" description="结果刷新中，请稍候。">
+                <template #icon>
+                  <svg class="h-4 w-4 animate-spin text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 4a8 8 0 1 1-8 8" />
+                  </svg>
+                </template>
+              </EmptyState>
+            </td>
+          </tr>
+          <tr v-else-if="!store.executionMeta">
+            <td colspan="6" class="bg-card">
+              <EmptyState title="等待执行结果" description="执行完成后，异常结果会在这里展示。" />
+            </td>
+          </tr>
+          <tr v-else-if="!store.abnormalResults.length">
+            <td colspan="6" class="bg-card">
+              <EmptyState title="本轮未发现异常结果" description="扫描统计已完成，当前没有命中异常数据。">
+                <template #icon>
+                  <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </template>
+              </EmptyState>
+            </td>
+          </tr>
+          <template v-else>
+            <tr
+              v-for="row in store.abnormalResults"
+              :key="`${row.rule_name}-${row.location}-${row.row_index}-${String(row.raw_value)}`"
+              class="bg-card text-ink-700"
+            >
+              <td class="align-top font-medium text-ink-900">
+                {{ getRuleTitle(row.rule_name) }}
+              </td>
+              <td class="align-top font-mono text-[12px] text-ink-700">
+                {{ row.location }}
+              </td>
+              <td class="align-top font-mono text-[12px] text-ink-700">
+                {{ row.row_index }}
+              </td>
+              <td class="align-top font-mono text-[12px] text-ink-700">
+                {{ displayRawValue(row.raw_value) }}
+              </td>
+              <td class="align-top">
+                <el-tag :type="getLevelType(row.level)" effect="light" round>
+                  {{ row.level }}
+                </el-tag>
+              </td>
+              <td class="align-top text-[13px] text-ink-700">
+                {{ row.message }}
+              </td>
+            </tr>
+          </template>
         </template>
-      </el-table-column>
-      <el-table-column prop="location" label="字段定位" min-width="220" />
-      <el-table-column prop="row_index" label="行号" width="90" />
-      <el-table-column label="触发值" min-width="150">
-        <template #default="{ row }">
-          <span class="mono-inline">{{ displayRawValue(row.raw_value) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="message" label="说明" min-width="220" />
-    </el-table>
+      </DataTable>
+    </template>
   </div>
 </template>
