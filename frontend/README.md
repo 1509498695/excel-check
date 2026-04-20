@@ -1,5 +1,26 @@
 # Excel Check Frontend
 
+## 2026-04-20 全站 Apple Design 视觉重构说明
+
+- 本轮修改范围覆盖：
+  - 共享壳层 `src/App.vue`
+  - 工作台 `src/views/MainBoard.vue`
+  - 固定规则页 `src/views/FixedRulesBoard.vue`
+  - 登录 / 注册 / 管理后台 / 个人设置页面
+  - 全局样式 `src/style.css` 与固定规则样式 `src/fixed-rules.css`
+- **业务行为零改动**：
+  - 不修改 Pinia store、API 模块、类型协议、路由守卫、认证逻辑、项目切换逻辑、规则执行链路。
+  - 被触达页面的 `<script setup>` 仅补充 `// 保持原有逻辑不变` 注释，用于明确这轮只做视图层改造。
+- 视觉改造要点：
+  - 全局 token 切换为 Apple 风格的字体、背景、玻璃材质、阴影、圆角与动效。
+  - 统一覆盖 Element Plus 的按钮、输入框、下拉、表格、弹窗、Tag、Alert、Progress 与下拉菜单样式。
+  - 工作台与固定规则页强化 Hero、概览卡、步骤卡、规则组导航、结果卡和弹窗的层次。
+  - 认证页、管理后台和个人设置同步升级为玻璃卡片与细腻微交互。
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/login` / `register` / `/`：返回 `200`
+  - 新起 Vite 实例因端口冲突自动切到 `http://127.0.0.1:5174/`，上述页面同样返回 `200`
+
 ## 2026-04-20 引擎执行 Phase 2 物理分层说明（前端 0 改动）
 
 - 本轮**未修改任何前端代码、组件、状态、路由或样式**；仅在后端把规则引擎从单层文件结构搬迁到 `domain / infrastructure / handlers` 三层目录。

@@ -8,6 +8,7 @@ import { useAuthStore } from '../store/auth'
 import { useFixedRulesStore } from '../store/fixedRules'
 import { useWorkbenchStore } from '../store/workbench'
 
+// 保持原有逻辑不变：密码修改与项目切换行为维持原实现。
 const auth = useAuthStore()
 const router = useRouter()
 

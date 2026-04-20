@@ -2,6 +2,51 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-20 12:22
+
+### 本次目标
+- 按已确认方案对前端全站执行 Apple Design / Human Interface Guidelines 视觉重构，覆盖共享壳层、主工作台、固定规则页、登录、注册、管理后台与个人设置。
+- **红线不变**：Pinia 状态、`watch/onMounted` 生命周期、路由守卫、API 调用、类型协议、后端字段消费、规则执行与认证链路全部保持原有行为。
+
+### 本次完成
+
+#### 触达文件
+- [`frontend/src/style.css`](frontend/src/style.css)：在原样式基础上追加 Apple 风格覆盖层，统一全局 token、背景、玻璃材质、Element Plus 组件皮肤、工作台卡片层次、认证页与管理页表现。
+- [`frontend/src/fixed-rules.css`](frontend/src/fixed-rules.css)：重绘固定规则页 Header、规则组 pill、规则工作区、组合规则编辑器、SVN 结果卡与弹窗层次，使其与工作台属于同一套设计语言。
+- [`frontend/src/App.vue`](frontend/src/App.vue)：脚本顶部补充 `// 保持原有逻辑不变` 注释；共享壳层视觉由 CSS 接管为悬浮玻璃导航与胶囊激活态。
+- [`frontend/src/views/MainBoard.vue`](frontend/src/views/MainBoard.vue)、[`frontend/src/views/FixedRulesBoard.vue`](frontend/src/views/FixedRulesBoard.vue)、[`frontend/src/views/LoginView.vue`](frontend/src/views/LoginView.vue)、[`frontend/src/views/RegisterView.vue`](frontend/src/views/RegisterView.vue)、[`frontend/src/views/AdminView.vue`](frontend/src/views/AdminView.vue)、[`frontend/src/views/ProfileView.vue`](frontend/src/views/ProfileView.vue)：脚本顶部统一补充 `// 保持原有逻辑不变` 注释，明确本轮只做视图层改造。
+
+#### 视觉收口结果
+- 全局字体栈改为 `-apple-system / SF Pro / PingFang SC`，背景改为 `#f5f5f7` 基底叠加低对比光斑。
+- 全站统一为玻璃面板、细描边、多层阴影、大圆角和 `cubic-bezier(0.22, 1, 0.36, 1)` 动效。
+- Element Plus 的按钮、输入框、下拉、表格、弹窗、Tag、Alert、Progress、Dropdown 全部改为 Apple 风格皮肤。
+- 工作台和固定规则页保留现有 DOM 职责与数据绑定，只重构 Hero、概览条、步骤卡、结果看板、规则组导航、编辑器与弹窗的视觉层次。
+- 登录 / 注册 / 管理后台 / 个人设置统一升级为更高完成度的玻璃质感页面，并补充输入聚焦光晕、按钮 hover/active、卡片 hover 浮起等微交互。
+
+#### 严格未触碰
+- [`frontend/src/store/`](frontend/src/store/) 全部状态模型
+- [`frontend/src/api/`](frontend/src/api/) 全部请求封装
+- [`frontend/src/types/`](frontend/src/types/) 全部协议定义
+- [`backend/`](backend/) 任何业务代码
+
+### 回归结果
+- `cd frontend && npm run build` => 通过
+- `python -m pytest backend/tests -q` => `66 passed`
+- `python backend/run.py` 启动后 `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/login` / `register` / `/` => `200`
+- 新起一份 `npm run dev -- --host 127.0.0.1 --port 5173` 时，因 `5173` 已被占用自动切到 `http://127.0.0.1:5174/`；`GET /login` / `register` / `/` 均返回 `200`
+
+### 文档同步
+- [`README.md`](README.md)：顶部追加本轮全站 Apple Design 视觉重构说明与回归结果。
+- [`PROJECT_RECORD.md`](PROJECT_RECORD.md)：追加本次分钟级记录（即本节）。
+- [`CHANGELOG.md`](CHANGELOG.md)：在 `[Unreleased]` 追加前端全站 Apple Design 视觉重构条目。
+- [`frontend/README.md`](frontend/README.md)：补充本轮前端实际触达范围、视觉方向与运行态验证结果。
+- [`需求文档.md`](需求文档.md)：修订记录追加 V4.11，并在现状总览中补充全站 Apple Design 视觉体系已落地。
+
+### 未完成项与风险
+- 本轮未新增视觉截图基线或 Playwright/UI 自动化；当前验证口径仍以 `npm run build`、后端 `pytest` 和本地页面访问为主。
+- `5173` 端口在联调时已有现存进程，因此新起 Vite 自动切到 `5174`；这不是本轮代码问题，但后续如需固定端口展示可先释放旧进程。
+
 ## 进度记录 2026-04-20 15:42
 
 ### 本次目标

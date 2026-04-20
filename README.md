@@ -1,5 +1,24 @@
 # Excel Check
 
+## 2026-04-20 前端全站 Apple Design 视觉重构说明（逻辑零改动）
+
+- 本轮聚焦 `frontend/` 视图层：共享壳层、`/` 工作台、`/fixed-rules`、`/login`、`/register`、`/admin`、`/profile` 全部切换为 Apple Design / Human Interface Guidelines 风格。
+- **严格不改业务契约**：
+  - Pinia state、`watch/onMounted` 生命周期、路由守卫、API 请求、类型定义、后端字段结构全部保持原状。
+  - 仅调整模板结构中的表现层细节、全局 CSS token、Element Plus 视觉皮肤与微交互反馈。
+  - 被触达页面的 `<script setup>` 已显式补充 `// 保持原有逻辑不变` 注释。
+- 本轮视觉收口重点：
+  - 全局 token 改为 `-apple-system / SF Pro` 风格字体、`#f5f5f7` 背景、玻璃面板、细描边、多层弥散阴影、大圆角和统一的 `cubic-bezier(0.22, 1, 0.36, 1)` 动效。
+  - `App.vue` 顶部壳层升级为半透明悬浮导航、胶囊激活态和玻璃用户菜单。
+  - 工作台与固定规则页的 Hero、概览条、步骤卡、规则工作区、结果看板、弹窗与表格层次全部做 Apple 风格重绘。
+  - 登录 / 注册 / 管理后台 / 个人设置同步升级为玻璃感面板与更细腻的聚焦、悬浮、按压反馈。
+- 本轮回归：
+  - `cd frontend && npm run build` => 通过（产物 `dist/assets/index-D-oxs6bz.css` / `index-CJxMZs2n.js` 等已更新）
+  - `python -m pytest backend/tests -q` => `66 passed`
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/login` / `register` / `/` => `200`
+  - 新起 Vite 开发服务因 `5173` 被占用自动切到 `http://127.0.0.1:5174/`，`/login` / `register` / `/` 同样返回 `200`
+
 ## 2026-04-20 引擎执行 Phase 2 物理分层说明（行为零变更）
 
 - 仅做文件位置迁移与 import 路径调整，**任何函数体、字段名、Pydantic 模型、ValueError 文案、`level` 取值 0 改动**。

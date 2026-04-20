@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 
 import { useAuthStore } from '../store/auth'
 
+// 保持原有逻辑不变：登录校验、鉴权调用与跳转链路保持现状。
 const router = useRouter()
 const auth = useAuthStore()
 

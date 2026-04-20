@@ -1,8 +1,20 @@
 # 更新日志
 
-文档更新时间：2026-04-20 15:42
+文档更新时间：2026-04-20 12:22
 
 ## [Unreleased]
+
+- **前端全站 Apple Design 视觉重构**：
+  - 共享壳层、主工作台、固定规则页、登录、注册、管理后台、个人设置统一切换为 Apple HIG 风格的玻璃材质、细描边、多层阴影、大圆角与平滑动效。
+  - `frontend/src/style.css` 重建全局视觉 token，并统一覆盖 Element Plus 的按钮、输入框、下拉、表格、弹窗、Tag、Alert、Progress 与下拉菜单。
+  - `frontend/src/fixed-rules.css` 单独补充固定规则页的 Header、规则组 pill、规则工作区、组合规则编辑器、SVN 结果区与弹窗层次。
+  - `frontend/src/App.vue`、`MainBoard.vue`、`FixedRulesBoard.vue`、`LoginView.vue`、`RegisterView.vue`、`AdminView.vue`、`ProfileView.vue` 的脚本顶部显式补充 `// 保持原有逻辑不变` 注释，确认本轮不改状态、接口和业务逻辑。
+  - 回归：
+    - `cd frontend && npm run build` => 通过
+    - `python -m pytest backend/tests -q` => `66 passed`
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/login` / `register` / `/` => `200`
+    - 新起 Vite 实例自动切到 `http://127.0.0.1:5174/`，`/login` / `register` / `/` => `200`
 
 - **规则引擎物理分层完成，行为零变更（PR-3 Phase 2）**：
   - `backend/app/rules/` 完成三层化：[backend/app/rules/domain/](backend/app/rules/domain/)（`value.py / result.py / operators.py`）、[backend/app/rules/infrastructure/](backend/app/rules/infrastructure/)（`tag_extractor.py`）、[backend/app/rules/handlers/](backend/app/rules/handlers/)（`basics.py / cross.py / fixed.py`）。

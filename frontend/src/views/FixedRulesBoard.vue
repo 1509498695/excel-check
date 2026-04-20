@@ -32,6 +32,7 @@ type ConditionMode = 'filter' | 'assertion'
 
 const KEY_FIELD = '__key__'
 
+// 保持原有逻辑不变：固定规则页的配置加载、规则编辑、执行与 SVN 联动均不做业务修改。
 const store = useFixedRulesStore()
 
 const isBootstrapping = ref(true)

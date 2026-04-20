@@ -7,6 +7,7 @@ import { apiListProjectsPublic } from '../api/auth'
 import { useAuthStore } from '../store/auth'
 import type { ProjectPublic } from '../types/auth'
 
+// 保持原有逻辑不变：注册校验、项目列表加载与成功后的登录态处理不做改动。
 const router = useRouter()
 const auth = useAuthStore()
 

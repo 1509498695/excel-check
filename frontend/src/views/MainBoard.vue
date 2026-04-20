@@ -19,6 +19,7 @@ import SectionBlock from '../components/workbench/SectionBlock.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import { useWorkbenchStore } from '../store/workbench'
 
+// 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
 
 onMounted(async () => {

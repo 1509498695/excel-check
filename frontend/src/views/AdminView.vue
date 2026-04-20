@@ -19,6 +19,7 @@ import type { ProjectDetail, ProjectMember } from '../types/auth'
 
 const DEFAULT_PROJECT_NAME = '默认项目'
 
+// 保持原有逻辑不变：项目管理、成员治理与弹窗交互仅做视觉重构，不改权限与接口调用。
 const auth = useAuthStore()
 const projects = ref<ProjectDetail[]>([])
 const selectedProject = ref<ProjectDetail | null>(null)

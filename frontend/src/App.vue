@@ -8,6 +8,7 @@ import { useAuthStore } from './store/auth'
 import { useFixedRulesStore } from './store/fixedRules'
 import { useWorkbenchStore } from './store/workbench'
 
+// 保持原有逻辑不变：仅做共享壳层的视觉重构，不调整认证、项目切换或路由跳转行为。
 const auth = useAuthStore()
 const router = useRouter()
 

@@ -428,3 +428,244 @@
     display: none;
   }
 }
+
+/* ===== 2026-04-20 Apple Design Refresh Overrides ===== */
+
+.rule-binding-board {
+  gap: 20px;
+}
+
+.rule-binding-header,
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card,
+.rule-empty-state,
+.svn-result-item,
+.composite-rule-section,
+.composite-branch-card,
+.composite-condition-card,
+.rule-dialog-hint,
+.group-pill {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.44);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.64)),
+    radial-gradient(circle at top left, rgba(90, 200, 250, 0.08), transparent 42%);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.rule-binding-header::before,
+.group-band-card::before,
+.rule-workspace-card::before,
+.rule-result-card::before,
+.group-pill::before,
+.composite-rule-section::before,
+.composite-branch-card::before,
+.composite-condition-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 42%);
+}
+
+.rule-binding-header,
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card {
+  border-radius: 28px;
+}
+
+.rule-binding-header {
+  gap: 28px;
+  padding: 30px;
+  background:
+    radial-gradient(circle at top left, rgba(90, 200, 250, 0.16), transparent 34%),
+    radial-gradient(circle at top right, rgba(10, 132, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.66));
+}
+
+.rule-binding-header-main h1 {
+  font-size: clamp(1.9rem, 2.8vw, 2.4rem);
+}
+
+.rule-binding-actions,
+.group-band-actions {
+  gap: 12px;
+}
+
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card {
+  padding: 24px 24px 26px;
+}
+
+.group-band-head strong,
+.rule-workspace-copy strong {
+  font-size: 1.04rem;
+  letter-spacing: -0.03em;
+}
+
+.group-band-head p,
+.rule-workspace-copy p,
+.rule-dialog-hint span,
+.composite-rule-section-head p,
+.composite-condition-head p,
+.composite-rule-empty,
+.composite-rule-subhead p,
+.svn-result-item span,
+.svn-result-item small {
+  color: var(--text-soft);
+}
+
+.group-pill-row {
+  gap: 14px;
+}
+
+.group-pill {
+  overflow: hidden;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 24px;
+}
+
+.group-pill:hover {
+  transform: translateY(-2px);
+  border-color: rgba(10, 132, 255, 0.18);
+  box-shadow:
+    0 24px 48px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.group-pill.is-active {
+  border-color: rgba(10, 132, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(10, 132, 255, 0.14), rgba(255, 255, 255, 0.68)),
+    radial-gradient(circle at top left, rgba(90, 200, 250, 0.14), transparent 44%);
+  box-shadow:
+    0 24px 54px rgba(10, 132, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.group-pill-badge,
+.group-pill-tag {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.group-pill-badge {
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--accent-strong);
+}
+
+.group-pill-tag {
+  background: rgba(110, 110, 115, 0.12);
+  color: var(--text-soft);
+}
+
+.group-pill-tag.is-danger {
+  background: rgba(255, 69, 58, 0.12);
+  color: #cc3228;
+}
+
+.rule-table-shell {
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.rule-empty-state {
+  border-style: solid;
+  border-radius: 24px;
+}
+
+.svn-result-list {
+  gap: 14px;
+}
+
+.svn-result-item {
+  border-radius: 22px;
+  padding: 16px 18px;
+}
+
+.svn-result-item.is-error {
+  border-color: rgba(255, 69, 58, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 69, 58, 0.08), rgba(255, 255, 255, 0.7)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.62));
+}
+
+.rule-dialog-grid {
+  gap: 18px;
+}
+
+.rule-dialog-hint {
+  border-radius: 22px;
+  padding: 14px 16px;
+}
+
+.composite-rule-builder {
+  gap: 20px;
+}
+
+.composite-rule-section,
+.composite-branch-card,
+.composite-condition-card {
+  border-radius: 24px;
+}
+
+.composite-rule-section {
+  padding: 18px;
+}
+
+.composite-branch-card {
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.composite-condition-card {
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.composite-condition-card.is-nested {
+  background:
+    linear-gradient(180deg, rgba(10, 132, 255, 0.08), rgba(255, 255, 255, 0.64)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.64));
+}
+
+.composite-condition-grid {
+  gap: 16px 18px;
+}
+
+@media (max-width: 1180px) {
+  .rule-binding-header,
+  .group-band-card,
+  .rule-workspace-card,
+  .rule-result-card {
+    border-radius: 26px;
+  }
+}
+
+@media (max-width: 768px) {
+  .rule-binding-header,
+  .group-band-card,
+  .rule-workspace-card,
+  .rule-result-card,
+  .group-pill,
+  .svn-result-item,
+  .composite-rule-section,
+  .composite-branch-card,
+  .composite-condition-card {
+    border-radius: 22px;
+  }
+
+  .rule-binding-header,
+  .group-band-card,
+  .rule-workspace-card,
+  .rule-result-card {
+    padding: 18px;
+  }
+}
