@@ -1,8 +1,46 @@
 # 更新日志
 
-文档更新时间：2026-04-17 19:33
+文档更新时间：2026-04-20 15:42
 
 ## [Unreleased]
+
+- **规则引擎物理分层完成，行为零变更（PR-3 Phase 2）**：
+  - `backend/app/rules/` 完成三层化：[backend/app/rules/domain/](backend/app/rules/domain/)（`value.py / result.py / operators.py`）、[backend/app/rules/infrastructure/](backend/app/rules/infrastructure/)（`tag_extractor.py`）、[backend/app/rules/handlers/](backend/app/rules/handlers/)（`basics.py / cross.py / fixed.py`）。
+  - `handlers/__init__.py` 副作用 import `basics / cross / fixed` 触发 `@register_rule` 完成 5 个 `rule_type` 注册。
+  - [backend/app/rules/engine_core.py](backend/app/rules/engine_core.py) 仅 2 处 import 调整：`TagExtractor` 改从 `infrastructure.tag_extractor` 导入；底部副作用 import 改走 `handlers` 包；其余函数体、`RuleSpec / RuleExecutionContext / register_rule / execute_rules` 全部不动。
+  - 7 个旧路径文件（`_value.py / _result.py / _operators.py / _tag_extractor.py / rule_basics.py / rule_cross.py / rule_fixed.py`）全部改写为薄壳 shim，仅 `from <new path> import *`，向后兼容一个发布周期。
+  - **行为零变更**：任何函数体、字段名、Pydantic 模型、ValueError 文案、`level` 取值、对外 HTTP 接口、`abnormal_results` 6 字段集、4 份基线快照（S1/S2/S3/S4）、所有现有测试均 0 diff；schemas / formatter / `fixed_rules/` / loaders / 前端业务代码 / 现有测试一律未触碰。
+  - 回归：
+    - `python -m pytest backend/tests -q` => `66 passed`（含 4 份快照 0 diff）
+    - `cd frontend && npm run build` => 通过（产物名称与字节体积与 PR-2 完成态一致）
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `POST /api/v1/engine/execute` 主工作台最小样例 => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`（与 PR-2 完成态字节级一致）
+    - `POST /api/v1/fixed-rules/execute` qa88 真样例 => `Execution Completed / total_rows_scanned = 3987 / failed_sources = [] / abnormal_results = 0`（与 PR-2 完成态字节级一致）
+
+- **执行引擎 Phase 1 重构（PR-2，黑盒不变）**：
+  - 新增 4 个私有 helper 模块统一规则层共性：[backend/app/rules/_value.py](backend/app/rules/_value.py)、[backend/app/rules/_result.py](backend/app/rules/_result.py)、[backend/app/rules/_operators.py](backend/app/rules/_operators.py)、[backend/app/rules/_tag_extractor.py](backend/app/rules/_tag_extractor.py)。
+  - [backend/app/rules/engine_core.py](backend/app/rules/engine_core.py) 升级 `RULE_REGISTRY` 为 `dict[str, RuleSpec]`，`RuleSpec` 同时持有 `handler` 与 `dependent_tags`；`register_rule(rule_type, *, dependent_tags=...)` 唯一签名（一次性切换，无兼容层）。
+  - [backend/app/rules/rule_basics.py](backend/app/rules/rule_basics.py) / [rule_cross.py](backend/app/rules/rule_cross.py) / [rule_fixed.py](backend/app/rules/rule_fixed.py) 改用新 helper；`composite_condition_check` 注册 `dependent_tags=by_target_tag`，与其它 `rule_type` 行为对齐。
+  - [backend/app/api/execute_api.py](backend/app/api/execute_api.py) `_extract_rule_tags` 改为直接复用注册表，删除 30 行 if/elif 长链；`_ensure_rule_supported` 文案逐字保留。
+  - **黑盒契约 0 变化**：HTTP 入参出参、`TaskTree / ValidationRule.params` 字段语义、`abnormal_results` 6 字段集合、所有 ValueError detail 文案逐字保留；`regex / feishu / svn` 占位能力不动；schemas / formatter / `fixed_rules/` / loaders / 前端业务代码 / 现有测试均未触碰。
+  - **唯一行为正向修正（已显式披露）**：`composite_condition_check` 之前未被 `_extract_rule_tags` 覆盖，依赖失败 source 时会被错误地交给 handler 并退化成 400 `references unknown tag`；本轮纳入 `dependent_tags` 后会被 `_filter_executable_rules` 一致跳过，整次请求继续 200。当前 4 份基线快照均不含「composite + 失败 source」组合，因此 S1/S2/S3/S4 全部保持 0 diff，无需 `UPDATE_ENGINE_SNAPSHOT=1` 刷新。
+  - 回归：
+    - `python -m pytest backend/tests -q` => `66 passed`（含 4 份快照 0 diff）
+    - `cd frontend && npm run build` => 通过
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `POST /api/v1/engine/execute` 主工作台最小样例 => `Execution Completed / total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+    - `POST /api/v1/fixed-rules/execute` qa88 真样例 => `Execution Completed / total_rows_scanned = 3987 / failed_sources = [] / abnormal_results = 0`
+
+- **新增引擎执行黑盒快照测试 baseline（PR-1）**：
+  - 新增 [backend/tests/test_engine_snapshot.py](backend/tests/test_engine_snapshot.py) 与 4 份基线快照 [backend/tests/snapshots/engine/S1.json](backend/tests/snapshots/engine/S1.json) / [S2.json](backend/tests/snapshots/engine/S2.json) / [S3.json](backend/tests/snapshots/engine/S3.json) / [S4.json](backend/tests/snapshots/engine/S4.json)。
+  - 通过 `POST /api/v1/engine/execute` 直接构造 payload，覆盖：S1 主工作台 `not_null + unique + cross_table_mapping`、S2 `fixed_value_compare` 的 `eq/ne/gt/lt` 各 1 条、S3 `composite_condition_check` 同时覆盖 `global_filters + branch.filters + eq/not_null/unique/duplicate_required` 4 类 assertion、S4 失败 source 降级。
+  - 写 / 读快照前统一把 `meta.execution_time_ms` 归零；序列化口径 `json.dumps(..., sort_keys=True, ensure_ascii=False, indent=2)` + LF。
+  - 通过环境变量 `UPDATE_ENGINE_SNAPSHOT=1` 切换写入模式；默认运行走断言模式。
+  - 新增干净测试数据集 [backend/tests/data/snapshot_engine.xlsx](backend/tests/data/snapshot_engine.xlsx)（双 sheet：`values` 供 S2、`items` 供 S3）。
+  - 本轮**严格未改动 `backend/app/` 下任何 .py、未改动现有测试与 conftest、未改动前端**。
+  - 回归：
+    - `python -m pytest backend/tests/test_engine_snapshot.py -q -s` => `4 passed`
+    - `python -m pytest backend/tests -q` => `66 passed`
 
 - **管理后台归属项目与项目管理员开放**：
   - 用户模型新增 `primary_project_id`，登录与 `/api/v1/auth/me` 的默认项目选择改为优先使用主归属项目，不再依赖 `roles[0]` 顺序。

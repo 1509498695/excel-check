@@ -221,32 +221,9 @@ def _ensure_rule_supported(rule: ValidationRule) -> None:
 
 
 def _extract_rule_tags(rule: ValidationRule) -> list[str]:
-    """从规则参数中提取其依赖的变量标签。"""
-    if rule.rule_type in {"not_null", "unique"}:
-        target_tags = rule.params.get("target_tags")
-        if not isinstance(target_tags, list) or not target_tags:
-            raise ValueError(
-                f"Rule '{rule.rule_type}' requires non-empty params.target_tags."
-            )
-        if not all(isinstance(tag, str) and tag for tag in target_tags):
-            raise ValueError(
-                f"Rule '{rule.rule_type}' requires params.target_tags to be a string list."
-            )
-        return target_tags
+    """从规则参数中提取其依赖的变量标签。
 
-    if rule.rule_type == "cross_table_mapping":
-        dict_tag = rule.params.get("dict_tag")
-        target_tag = rule.params.get("target_tag")
-        if not isinstance(dict_tag, str) or not dict_tag:
-            raise ValueError("Rule 'cross_table_mapping' requires params.dict_tag.")
-        if not isinstance(target_tag, str) or not target_tag:
-            raise ValueError("Rule 'cross_table_mapping' requires params.target_tag.")
-        return [dict_tag, target_tag]
-
-    if rule.rule_type == "fixed_value_compare":
-        target_tag = rule.params.get("target_tag")
-        if not isinstance(target_tag, str) or not target_tag:
-            raise ValueError("Rule 'fixed_value_compare' requires params.target_tag.")
-        return [target_tag]
-
-    return []
+    直接复用注册表里登记好的 ``dependent_tags`` 提取器，避免在本文件维护
+    和 ``rule_*`` 模块内 handler 真实依赖之间漂移的 if/elif 长链。
+    """
+    return RULE_REGISTRY[rule.rule_type].dependent_tags(rule)

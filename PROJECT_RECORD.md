@@ -2,6 +2,180 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-20 15:42
+
+### 本次目标
+- 执行 PR-3 Phase 2 物理分层：把 PR-2 已固化的 4 个私有 helper 与 3 个 handler 模块按 `domain / infrastructure / handlers` 三层目录搬迁；调整 import 路径；旧路径保留薄壳 shim 一个发布周期；`engine_core` 副作用 import 改走 `handlers` 包。
+- **行为零变更**：任何函数体、字段名、Pydantic 模型、ValueError 文案、`level` 取值、对外接口 0 改动；66 个现有测试与 4 份基线快照均 0 diff；前端业务代码不动。
+
+### 本次完成
+
+#### 新增（10 个文件）
+- [`backend/app/rules/domain/__init__.py`](backend/app/rules/domain/__init__.py)：仅 docstring
+- [`backend/app/rules/domain/value.py`](backend/app/rules/domain/value.py)：从 `_value.py` 整体迁入；行为 1:1 等价
+- [`backend/app/rules/domain/result.py`](backend/app/rules/domain/result.py)：从 `_result.py` 整体迁入；内部 `unwrap_scalar` 引用改走 `domain.value`
+- [`backend/app/rules/domain/operators.py`](backend/app/rules/domain/operators.py)：从 `_operators.py` 整体迁入；内部 `is_empty_value / normalize_fixed_text / to_number` 引用改走 `domain.value`
+- [`backend/app/rules/infrastructure/__init__.py`](backend/app/rules/infrastructure/__init__.py)：仅 docstring
+- [`backend/app/rules/infrastructure/tag_extractor.py`](backend/app/rules/infrastructure/tag_extractor.py)：从 `_tag_extractor.py` 整体迁入；零 import 调整
+- [`backend/app/rules/handlers/__init__.py`](backend/app/rules/handlers/__init__.py)：副作用 import `basics / cross / fixed`，触发 `@register_rule`
+- [`backend/app/rules/handlers/basics.py`](backend/app/rules/handlers/basics.py)：从 `rule_basics.py` 整体迁入；4 处 import 改为 `domain.* / infrastructure.*`
+- [`backend/app/rules/handlers/cross.py`](backend/app/rules/handlers/cross.py)：从 `rule_cross.py` 整体迁入；4 处 import 改为新路径
+- [`backend/app/rules/handlers/fixed.py`](backend/app/rules/handlers/fixed.py)：从 `rule_fixed.py` 整体迁入；5 处 import 改为新路径
+
+#### 改造（1 个文件）
+- [`backend/app/rules/engine_core.py`](backend/app/rules/engine_core.py)：仅 2 处 import 调整
+  - 顶部 `from backend.app.rules._tag_extractor import TagExtractor` → `from backend.app.rules.infrastructure.tag_extractor import TagExtractor`
+  - 底部 `from backend.app.rules import rule_basics, rule_cross, rule_fixed  # noqa` → `from backend.app.rules import handlers  # noqa: E402,F401`
+  - 函数体、`RuleSpec / RuleExecutionContext / register_rule / execute_rules` 全部不动
+
+#### 旧路径全部改写为薄壳 shim（7 个文件，向后兼容一个发布周期）
+- [`backend/app/rules/_value.py`](backend/app/rules/_value.py) → `from backend.app.rules.domain.value import *`
+- [`backend/app/rules/_result.py`](backend/app/rules/_result.py) → `from backend.app.rules.domain.result import *`
+- [`backend/app/rules/_operators.py`](backend/app/rules/_operators.py) → `from backend.app.rules.domain.operators import *`
+- [`backend/app/rules/_tag_extractor.py`](backend/app/rules/_tag_extractor.py) → `from backend.app.rules.infrastructure.tag_extractor import *`
+- [`backend/app/rules/rule_basics.py`](backend/app/rules/rule_basics.py) → `from backend.app.rules.handlers.basics import *`
+- [`backend/app/rules/rule_cross.py`](backend/app/rules/rule_cross.py) → `from backend.app.rules.handlers.cross import *`
+- [`backend/app/rules/rule_fixed.py`](backend/app/rules/rule_fixed.py) → `from backend.app.rules.handlers.fixed import *`
+
+#### 严格未触碰
+- [`backend/app/api/`](backend/app/api/) 全部
+- [`backend/app/fixed_rules/`](backend/app/fixed_rules/) 全部
+- [`backend/app/loaders/`](backend/app/loaders/) 全部
+- [`backend/app/utils/`](backend/app/utils/) 全部
+- [`backend/tests/`](backend/tests/) 全部
+- [`frontend/`](frontend/) 业务代码全部
+
+### 回归结果
+- `python -m pytest backend/tests -q` => `66 passed`，PR-1 4 份基线快照 0 diff
+- `python -m pytest backend/tests/test_engine_snapshot.py -q -s` => `4 passed`，4 个 case 摘要与 PR-2 完成态完全一致
+- `cd frontend && npm run build` => 通过（vite 1.06s，产物 `auth-BsKMUGWj.js / index-CHyr57kN.js / AdminView-CQ5P-f4g.js / ProfileView-Bln0sz_V.js / RegisterView-BnbIKZmR.js / LoginView-CoTbk_B9.js / index-19MGR9tm.css / index.html` 名称与字节体积与 PR-2 一致）
+- 后端启动 `python backend/run.py` => `GET http://127.0.0.1:8000/health` 返回 `200 / {"code":200,"msg":"ok","data":{"status":"healthy","service":"excel-check-backend"}}`
+  - 注：首次启动撞到 8000 端口被旧进程残留占用，释放后第二次启动一次通过；模块加载与注册流程在第一次启动日志里就已显示 `Application startup complete.`，与本轮重构无关
+- 主工作台最小样例 `POST /api/v1/engine/execute` + `minimal_rules.xlsx`：`code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`，与 PR-2 完成态字节级一致
+- 固定规则 qa88 真样例 `POST /api/v1/fixed-rules/execute` + `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`：`code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`，与 PR-2 完成态字节级一致
+
+### 加载顺序（重构后）
+1. `execute_api` 顶部 `import engine_core`
+2. `engine_core` 顶部 `import infrastructure.tag_extractor`（零内部依赖，安全加载）
+3. `engine_core` 定义 `RuleSpec / RULE_REGISTRY / register_rule / execute_rules`
+4. `engine_core` 底部 `from backend.app.rules import handlers`
+5. `handlers/__init__.py` 触发 `import basics / cross / fixed`
+6. 三个 handler 模块在 import 时执行 `@register_rule` 装饰器，把 5 个 `rule_type` 写入 `RULE_REGISTRY`
+
+### 文档同步
+- [`README.md`](README.md)：顶部追加 2026-04-20 Phase 2 物理分层条目（含三层目录、shim 策略、回归数据）
+- [`PROJECT_RECORD.md`](PROJECT_RECORD.md)：追加本次分钟级记录（即本节）
+- [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` 区追加阶段性变更条目
+- [`frontend/README.md`](frontend/README.md)：写明前端 0 改动、`npm run build` 已重新验证
+- [`需求文档.md`](需求文档.md)：0.1 修订记录追加 V4.10；0.2 现状总览补充新目录结构说明
+
+### 未完成项与风险
+- 不创建 `_registry.py` / `domain/set_assertions.py` / `infrastructure/context_query.py`：PR-3 spec 明确「可选」与「如已在 PR-2 抽出则一并迁入」；本仓库未抽出这三类，未来若有需要再单独 PR 处理
+- 旧路径 7 个 shim 应在下一个发布周期统一删除；外部如有引用旧路径请尽快迁移到新路径
+- 本轮按红线明确不动 `backend/app/api / fixed_rules / loaders / utils` 与现有任何测试，如未来需要把 fixed_rules 注入形态切到新 helper 是另一轮 PR 的范围
+
+## 进度记录 2026-04-20 14:18
+
+### 本次目标
+- 执行 PR-2 Phase 1 引擎重构：抽出共性逻辑、把 `RULE_REGISTRY` 升级为 `RuleSpec(handler + dependent_tags)`、`execute_api._extract_rule_tags` 改走注册表，删除 if/elif 长链。
+- **黑盒契约 0 变化**：HTTP 接口、字段语义、`abnormal_results` 6 字段集、所有 ValueError 文案逐字保留；4 份基线快照 0 diff；现有测试一律不修改。
+
+### 本次完成
+
+#### 新增私有 helper 模块（4 个）
+- [`backend/app/rules/_value.py`](backend/app/rules/_value.py)：`normalize_text / is_empty_value / normalize_fixed_text / to_number / unwrap_scalar / get_variable_frame / get_business_column_name`，1:1 等价原 `rule_basics` 与 `rule_fixed` 中的同名私有 helper，含中文 `规则 '<rt>' 仅支持单个变量...` 与英文 `Rule '<rt>' references unknown tag '<tag>'.` 异常文案。
+- [`backend/app/rules/_result.py`](backend/app/rules/_result.py)：`AbnormalResult` 值对象 + `to_dict()`；`build_basic_result` 等价原 `_build_abnormal_result`，`build_fixed_result` 等价原 `_build_fixed_rule_result`，`raw_value` 自动通过 `unwrap_scalar` 降级。
+- [`backend/app/rules/_operators.py`](backend/app/rules/_operators.py)：常量 `COMPARE_OPERATORS / SET_STYLE_OPERATORS`、值对象 `CompareAssertionResult(failed, incomparable)`；`matches_compare_filter / evaluate_compare_assertion / matches_not_null_filter / is_not_null_violation` 同时覆盖筛选与断言两套语义。
+- [`backend/app/rules/_tag_extractor.py`](backend/app/rules/_tag_extractor.py)：5 种 `rule_type` 的依赖 tag 提取器 `by_target_tags / by_dict_and_target_tag / by_target_tag / no_tags`，文案与原 `execute_api._extract_rule_tags` 完全一致。
+
+#### 改造文件（5 个）
+- [`backend/app/rules/engine_core.py`](backend/app/rules/engine_core.py)：新增 `RuleSpec(handler, dependent_tags)`，`RULE_REGISTRY` 类型升级为 `dict[str, RuleSpec]`；`register_rule(rule_type, *, dependent_tags)` 唯一签名（一次性切换，无兼容层）；`execute_rules` 取出 `RuleSpec.handler` 调用，未命中规则文案保持 `f"Unsupported rule_type: '{rule.rule_type}'."`；末尾副作用 import 保留。
+- [`backend/app/rules/rule_basics.py`](backend/app/rules/rule_basics.py)：删除所有原私有 helper，全部改用 `_value / _result / _tag_extractor` 中的对应 API；`@register_rule` 全部改为新签名（`not_null / unique` 用 `by_target_tags`，`regex` 用 `no_tags`）；handler 内循环结构、字段顺序、`level` 取值、message 文案逐字保留。
+- [`backend/app/rules/rule_cross.py`](backend/app/rules/rule_cross.py)：完全脱离 `rule_basics` 私有符号；`check_cross_table_mapping` 改用 `by_dict_and_target_tag(rule)` 解包 `[dict_tag, target_tag]`，与 `dependent_tags` 复用同一份代码与文案；`@register_rule("cross_table_mapping", dependent_tags=by_dict_and_target_tag)`。
+- [`backend/app/rules/rule_fixed.py`](backend/app/rules/rule_fixed.py)：`COMPARE_OPERATORS / SET_STYLE_OPERATORS` 改从 `_operators` 导入；`_normalize_fixed_text / _to_number / _build_fixed_rule_result / _matches_compare_filter` 删除并切到新 helper；`_evaluate_row_assertion` 内部 not_null 走 `is_not_null_violation`、eq/ne/gt/lt 走 `evaluate_compare_assertion` 并按 `incomparable / failed` 走原有两条报错路径，message 文案逐字保留；`@register_rule("fixed_value_compare", dependent_tags=by_target_tag)` 与 `@register_rule("composite_condition_check", dependent_tags=by_target_tag)`。
+- [`backend/app/api/execute_api.py`](backend/app/api/execute_api.py)：`_extract_rule_tags(rule)` 重写为 `return RULE_REGISTRY[rule.rule_type].dependent_tags(rule)`，删除 30 行 if/elif 长链；`_ensure_rule_supported` 文案逐字保留。
+
+#### 严格未触碰
+- [`backend/app/api/schemas.py`](backend/app/api/schemas.py) / [`backend/app/api/fixed_rules_schemas.py`](backend/app/api/fixed_rules_schemas.py) / [`backend/app/utils/formatter.py`](backend/app/utils/formatter.py)
+- [`backend/app/fixed_rules/`](backend/app/fixed_rules/) 全部 / [`backend/app/api/fixed_rules_api.py`](backend/app/api/fixed_rules_api.py)
+- [`backend/app/loaders/`](backend/app/loaders/) 全部
+- [`frontend/`](frontend/) 业务代码全部
+- [`backend/tests/`](backend/tests/) 现有任何测试与 conftest
+
+### 行为变更披露（合规要求，必须显式记录）
+- **唯一行为正向修正**：`composite_condition_check` 之前在 [`backend/app/api/execute_api.py`](backend/app/api/execute_api.py) 的 `_extract_rule_tags` 中漏处理（参见 [`docs/refactor/engine-rules-baseline.md`](docs/refactor/engine-rules-baseline.md) §3 重点段），导致依赖失败 source 时该规则不会被 `_filter_executable_rules` 跳过、而是被传给 handler，handler 在 `loaded_variables` 中找不到 tag → 抛 `Rule 'composite_condition_check' references unknown tag '<tag>'.` → 整次请求退化成 400。
+- 本轮把 `composite_condition_check` 注册为 `dependent_tags=by_target_tag` 后，依赖失败 source 时该规则会与其他 `rule_type` 一致被跳过：`failed_sources` 仅记录失败的 source、整次请求继续 200，仅这一条 composite 规则缺席，其余规则继续正常执行。
+- **不影响 4 份基线快照**：S1/S2/S3/S4 当前都不包含「composite + 失败 source」组合，全部保持 0 diff，本轮**未**触发 `UPDATE_ENGINE_SNAPSHOT=1`。
+
+### 回归结果
+- `python -m pytest backend/tests -q` => `66 passed`
+- `python -m pytest backend/tests/test_engine_snapshot.py -q -s` => `4 passed`，4 份快照摘要与 PR-1 完全一致：
+  - `S1 code=200 msg='Execution Completed' total_rows_scanned=8 failed_sources=[] abnormal_results=5`
+  - `S2 code=200 msg='Execution Completed' total_rows_scanned=5 failed_sources=[] abnormal_results=9`
+  - `S3 code=200 msg='Execution Completed' total_rows_scanned=6 failed_sources=[] abnormal_results=7`
+  - `S4 code=200 msg='Execution Completed' total_rows_scanned=5 failed_sources=['src_bad'] abnormal_results=2`
+- `cd frontend && npm run build` => 通过（vite 构建 2.93s，仅产出 chunk-size warning，无任何前端代码改动）
+- 后端启动 `python backend/run.py` => `GET http://127.0.0.1:8000/health` 返回 `200 / {"code":200,"msg":"ok","data":{"status":"healthy","service":"excel-check-backend"}}`
+- 主工作台最小样例联调（`POST /api/v1/engine/execute` + `minimal_rules.xlsx`）：`code=200 / msg=Execution Completed / total_rows_scanned=8 / failed_sources=[] / abnormal_results=5`，与 README 历史基线一致。
+- 固定规则 qa88 真样例联调（`POST /api/v1/fixed-rules/execute` + `D:\projact_samo\GameDatas\datas_qa88\items.xls -> items -> INT_ID > 0`）：`code=200 / msg=Execution Completed / total_rows_scanned=3987 / failed_sources=[] / abnormal_results=0`。
+  - 与历史基线 `total_rows_scanned=3917` 的差异是真实数据自然增长（用户本地 svn 工作副本已被刷新），`abnormal_results = 0` 与历史一致；行为口径无任何漂移。
+
+### 文档同步
+- [`README.md`](README.md)：顶部追加 2026-04-20 Phase 1 重构条目（含 4 个新文件、RuleSpec 升级、composite 行为修正披露、回归数据）。
+- [`PROJECT_RECORD.md`](PROJECT_RECORD.md)：追加本次分钟级记录（即本节）。
+- [`CHANGELOG.md`](CHANGELOG.md)：在 `[Unreleased]` 区追加阶段性变更条目。
+- [`frontend/README.md`](frontend/README.md)：写明前端 0 改动 + 已重新跑 `npm run build`。
+- [`需求文档.md`](需求文档.md)：0.1 修订记录追加 V4.9，0.2 现状总览补充一段 RuleSpec 注册模型说明。
+
+### 未完成项与风险
+- 本轮按红线明确不创建 `domain/ infrastructure/ handlers/` 等子目录；这些是 Phase 2 物理移动的范围。
+- 本轮按红线不动任何 schemas、loader、`fixed_rules/`、前端业务代码。
+- composite 行为修正后，未来任何「composite + 失败 source」的快照都需要新增（PR-1 baseline §3 已建议加入但本轮按对话结论留待 PR-2 之后专门补充）；当前 4 份快照不受影响。
+
+## 进度记录 2026-04-20 11:42
+
+### 本次目标
+- 引入 PR-1 引擎执行黑盒快照基线测试，作为后续 PR-2 物理移动 / 拆分阶段的安全网。
+- **本轮严格不动任何业务代码**：`backend/app/` 下的 `.py` 全部保持不变，现有测试、conftest、API 协议、前端实现一律不动。
+
+### 本次完成
+- 新增 [`backend/tests/test_engine_snapshot.py`](backend/tests/test_engine_snapshot.py)：
+  - 直接打 `POST /api/v1/engine/execute`，对外响应做字节级快照。
+  - 写快照与读快照前都把 `meta.execution_time_ms` 强制归零，规避毫秒级抖动。
+  - 序列化口径统一：`json.dumps(..., sort_keys=True, ensure_ascii=False, indent=2)` + 强制 `LF` 行尾。
+  - 通过环境变量 `UPDATE_ENGINE_SNAPSHOT=1` 切换写入模式；默认走断言模式。
+  - 终端打印每个 case 的 `code / msg / total_rows_scanned / failed_sources / abnormal_results 数量`。
+- 新增 4 份基线快照（[`backend/tests/snapshots/engine/`](backend/tests/snapshots/engine/)）：
+  - `S1.json`：主工作台基线 `not_null + unique + cross_table_mapping`，`abnormal_results = 5`。
+  - `S2.json`：固定规则单值比较 `fixed_value_compare` 的 `eq / ne / gt / lt` 各 1 条，`abnormal_results = 9`。
+  - `S3.json`：固定规则组合分支 `composite_condition_check`，同时覆盖 `global_filters + branch.filters` 与 `eq / not_null / unique / duplicate_required` 4 类 assertion，`abnormal_results = 7`。
+  - `S4.json`：失败 source 降级，`failed_sources == ["src_bad"]`、`abnormal_results = 2`，依赖失败 source 的规则被 `_filter_executable_rules` 跳过，其余规则继续执行。
+- 新增干净测试数据集 [`backend/tests/data/snapshot_engine.xlsx`](backend/tests/data/snapshot_engine.xlsx)：
+  - `values` sheet：`ID` 列为整数序列 `[1, 2, 2, 3, 5]`，专供 S2 使用，避开 `minimal_rules.xlsx` 中 NaN/空白单元格在 FastAPI JSON 序列化阶段的非确定性。
+  - `items` sheet：`INT_ID / INT_Faction / INT_Group` 三列，专供 S3 组合变量使用。
+- 同步更新 [`README.md`](README.md)、[`frontend/README.md`](frontend/README.md)、[`CHANGELOG.md`](CHANGELOG.md)、[需求文档.md](需求文档.md) 的顶部说明与修订表。
+
+### 回归结果
+- `python -m pytest backend/tests/test_engine_snapshot.py -q -s`（默认断言模式）→ `4 passed`
+- `python -m pytest backend/tests -q` → `66 passed`（原 62 通过 + 新增 4 通过）
+- 终端摘要打印：
+  - `S1`：`code=200 msg='Execution Completed' total_rows_scanned=8 failed_sources=[] abnormal_results=5`
+  - `S2`：`code=200 msg='Execution Completed' total_rows_scanned=5 failed_sources=[] abnormal_results=9`
+  - `S3`：`code=200 msg='Execution Completed' total_rows_scanned=6 failed_sources=[] abnormal_results=7`
+  - `S4`：`code=200 msg='Execution Completed' total_rows_scanned=5 failed_sources=['src_bad'] abnormal_results=2`
+
+### 文档同步
+- [PROJECT_RECORD.md](PROJECT_RECORD.md)：追加本次分钟级进度记录（即本节）。
+- [CHANGELOG.md](CHANGELOG.md)：在 `[Unreleased]` 区追加「新增引擎执行黑盒快照测试 baseline（S1/S2/S3/S4）」。
+- [README.md](README.md)：顶部追加 2026-04-20 简短说明，明确本轮仅新增测试基线、不改业务。
+- [frontend/README.md](frontend/README.md)：顶部追加同日简短说明，明确前端无任何改动。
+- [需求文档.md](需求文档.md)：0.1 修订记录追加 V4.8 一行。
+
+### 未完成项与风险
+- 本轮不专门覆盖 [backend/app/api/execute_api.py](backend/app/api/execute_api.py) 中 `_extract_rule_tags` 对 `composite_condition_check` 的漏判（与 [docs/refactor/engine-rules-baseline.md](docs/refactor/engine-rules-baseline.md) 一致），该 case 留待 PR-2 修复时一并补充。
+- baseline 快照已与当前实现完全一致；PR-2 阶段如需主动变更响应外形，应在评审通过后用 `UPDATE_ENGINE_SNAPSHOT=1` 显式刷新基线。
+- 本轮按红线要求未触发 frontend 任何命令；前端构建结果不在本次回归口径内。
+
 ## 进度记录 2026-04-17 19:33
 
 ### 本次目标

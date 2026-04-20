@@ -1,0 +1,53 @@
+{
+  "code": 200,
+  "data": {
+    "abnormal_results": [
+      {
+        "level": "error",
+        "location": "[items-id] -> ID",
+        "message": "该字段不能为空。",
+        "raw_value": null,
+        "row_index": 5,
+        "rule_name": "not_null"
+      },
+      {
+        "level": "error",
+        "location": "[items-id] -> ID",
+        "message": "该字段不能为空。",
+        "raw_value": "   ",
+        "row_index": 6,
+        "rule_name": "not_null"
+      },
+      {
+        "level": "warning",
+        "location": "[items-id] -> ID",
+        "message": "该值存在重复项。",
+        "raw_value": 2,
+        "row_index": 3,
+        "rule_name": "unique"
+      },
+      {
+        "level": "warning",
+        "location": "[items-id] -> ID",
+        "message": "该值存在重复项。",
+        "raw_value": 2,
+        "row_index": 4,
+        "rule_name": "unique"
+      },
+      {
+        "level": "error",
+        "location": "[drops-ref] -> RefID",
+        "message": "在基础字典中未命中该映射值。",
+        "raw_value": 9,
+        "row_index": 4,
+        "rule_name": "cross_table_mapping"
+      }
+    ]
+  },
+  "meta": {
+    "execution_time_ms": 0,
+    "failed_sources": [],
+    "total_rows_scanned": 8
+  },
+  "msg": "Execution Completed"
+}

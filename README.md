@@ -1,5 +1,52 @@
 # Excel Check
 
+## 2026-04-20 引擎执行 Phase 2 物理分层说明（行为零变更）
+
+- 仅做文件位置迁移与 import 路径调整，**任何函数体、字段名、Pydantic 模型、ValueError 文案、`level` 取值 0 改动**。
+- `backend/app/rules/` 完成三层化：
+  - [`backend/app/rules/domain/`](backend/app/rules/domain/)：值规范化（`value.py`）、统一异常结果（`result.py`）、operator 判定（`operators.py`）
+  - [`backend/app/rules/infrastructure/`](backend/app/rules/infrastructure/)：依赖 tag 提取器（`tag_extractor.py`）
+  - [`backend/app/rules/handlers/`](backend/app/rules/handlers/)：5 个 `rule_type` 的 handler（`basics.py / cross.py / fixed.py`）；包 `__init__.py` 副作用 import 触发 `@register_rule` 注册
+- `engine_core.py` 仅 2 处变化：顶部 `TagExtractor` 改从 `infrastructure.tag_extractor` 导入；底部副作用 import 从老 3 模块改为统一的 `handlers` 包。
+- 旧路径保留薄壳 shim 一个发布周期（`_value.py / _result.py / _operators.py / _tag_extractor.py / rule_basics.py / rule_cross.py / rule_fixed.py`），均仅 `from <new path> import *`，外部代码无需立即迁移。
+- 本轮回归：
+  - `python -m pytest backend/tests -q` => `66 passed`，PR-1 4 份基线快照 0 diff
+  - `cd frontend && npm run build` => 通过，产物字节级与 PR-2 一致
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `POST /api/v1/engine/execute` 主工作台最小样例 => `total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`（与 PR-2 完成态完全一致）
+  - `POST /api/v1/fixed-rules/execute` qa88 真样例 => `total_rows_scanned = 3987 / failed_sources = [] / abnormal_results = 0`（与 PR-2 完成态完全一致）
+
+## 2026-04-20 引擎执行 Phase 1 重构说明（黑盒不变）
+
+- 内部结构升级：抽取 4 个私有 helper 模块统一规则层共性逻辑：
+  - [`backend/app/rules/_value.py`](backend/app/rules/_value.py)：值规范化、空判断、numpy 标量降级、变量切片读取
+  - [`backend/app/rules/_result.py`](backend/app/rules/_result.py)：`AbnormalResult` 值对象 + 6 字段 dict 构造器
+  - [`backend/app/rules/_operators.py`](backend/app/rules/_operators.py)：`eq / ne / gt / lt / not_null` 在筛选与断言两套语义下的统一判定
+  - [`backend/app/rules/_tag_extractor.py`](backend/app/rules/_tag_extractor.py)：5 种 `rule_type` 的依赖 tag 提取器
+- `RULE_REGISTRY` 升级为 `dict[str, RuleSpec]`（`handler` + `dependent_tags`）；`register_rule(rule_type, *, dependent_tags=...)` 唯一签名。
+- `backend/app/api/execute_api.py` 中 `_extract_rule_tags` 改为直接调用 `RULE_REGISTRY[rule_type].dependent_tags(rule)`，删除 if/elif 长链。
+- **黑盒契约 0 变化**：HTTP 接口入参出参、`TaskTree / ValidationRule.params` 字段语义、`abnormal_results` 6 字段集合、所有 ValueError detail 文案逐字保留；`regex / feishu / svn` 占位能力不动；schemas / formatter / `fixed_rules/` / loaders / 前端业务代码 / 现有测试一律未触碰。
+- **唯一行为正向修正（已显式披露）**：`composite_condition_check` 之前未被 `_extract_rule_tags` 覆盖，依赖失败 source 时会被错误地交给 handler 并退化成 400 `references unknown tag`；本轮把它纳入 `dependent_tags=by_target_tag`，与其他 `rule_type` 一致被 `_filter_executable_rules` 跳过，整次请求继续 200。当前 4 份基线快照均不含「composite + 失败 source」组合，因此 S1/S2/S3/S4 全部保持 0 diff，无需刷新。
+- 本轮回归：
+  - `python -m pytest backend/tests -q` => `66 passed`（含 4 份快照 0 diff）
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `POST /api/v1/engine/execute` 主工作台最小样例 => `total_rows_scanned = 8 / failed_sources = [] / abnormal_results = 5`
+  - `POST /api/v1/fixed-rules/execute` qa88 真样例（`items.xls -> items -> INT_ID > 0`） => `total_rows_scanned = 3987 / failed_sources = [] / abnormal_results = 0`
+
+## 2026-04-20 引擎执行黑盒快照基线说明
+
+- 仅新增后端测试基线，**不改任何业务代码、API 协议、前端实现或数据结构**。
+- 新增 [`backend/tests/test_engine_snapshot.py`](backend/tests/test_engine_snapshot.py)，对统一执行接口 `POST /api/v1/engine/execute` 落 4 份字节级快照：
+  - `S1`：主工作台基线（`not_null` + `unique` + `cross_table_mapping`，复用 `minimal_rules.xlsx`）
+  - `S2`：固定规则单值比较（`fixed_value_compare` 的 `eq / ne / gt / lt` 各 1 条）
+  - `S3`：固定规则组合分支（`composite_condition_check` 同时覆盖 `global_filters + branch.filters` 与 `eq / not_null / unique / duplicate_required` 4 类 assertion）
+  - `S4`：失败 source 降级（依赖失败 source 的规则被跳过，其余规则继续执行）
+- 快照落盘到 [`backend/tests/snapshots/engine/`](backend/tests/snapshots/engine/)，并新增干净测试数据集 [`backend/tests/data/snapshot_engine.xlsx`](backend/tests/data/snapshot_engine.xlsx)（含 `values / items` 两个 sheet）。
+- 默认运行进入断言模式；首次落盘或评审通过后刷新基线时使用：
+  - PowerShell：`$env:UPDATE_ENGINE_SNAPSHOT="1"; python -m pytest backend/tests/test_engine_snapshot.py -q`
+- 本轮回归：`python -m pytest backend/tests -q` → `66 passed`。
+
 ## 2026-04-17 管理后台归属项目与项目管理员开放说明
 
 - 用户表新增 `primary_project_id`，用于表达稳定的主归属项目；普通用户注册后默认把注册项目写入主归属项目。

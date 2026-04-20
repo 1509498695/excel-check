@@ -1,0 +1,31 @@
+{
+  "code": 200,
+  "data": {
+    "abnormal_results": [
+      {
+        "level": "error",
+        "location": "[items-id] -> ID",
+        "message": "该字段不能为空。",
+        "raw_value": null,
+        "row_index": 5,
+        "rule_name": "not_null"
+      },
+      {
+        "level": "error",
+        "location": "[items-id] -> ID",
+        "message": "该字段不能为空。",
+        "raw_value": "   ",
+        "row_index": 6,
+        "rule_name": "not_null"
+      }
+    ]
+  },
+  "meta": {
+    "execution_time_ms": 0,
+    "failed_sources": [
+      "src_bad"
+    ],
+    "total_rows_scanned": 5
+  },
+  "msg": "Execution Completed"
+}

@@ -1,5 +1,25 @@
 # Excel Check Frontend
 
+## 2026-04-20 引擎执行 Phase 2 物理分层说明（前端 0 改动）
+
+- 本轮**未修改任何前端代码、组件、状态、路由或样式**；仅在后端把规则引擎从单层文件结构搬迁到 `domain / infrastructure / handlers` 三层目录。
+- 已重新执行 `npm run build`，构建通过；产物名称与字节体积均与 PR-2 完成态一致（`auth-BsKMUGWj.js / index-CHyr57kN.js / AdminView-CQ5P-f4g.js / ProfileView-Bln0sz_V.js / RegisterView-BnbIKZmR.js / LoginView-CoTbk_B9.js / index-19MGR9tm.css`）。
+- 前端运行命令、登录方式、主工作台与固定规则页的交互口径全部保持不变。
+
+## 2026-04-20 引擎执行 Phase 1 重构说明（前端 0 改动）
+
+- 本轮**未修改任何前端代码、组件、状态、路由或样式**；仅在后端引擎规则层做内部物理结构升级。
+- 已重新执行 `cd frontend && npm run build`，构建通过；产物体积、`auth-*.js` / `index-*.js` 等切分维持原状。
+- 前端运行命令、登录方式、主工作台与固定规则页的交互口径全部保持不变。
+
+## 2026-04-20 引擎执行黑盒快照基线说明
+
+- 本轮**未修改任何前端代码、组件、状态、路由或样式**，仅在后端引入引擎执行黑盒快照基线测试，作为后续重构的安全网。
+- 前端运行方式与上一版完全一致：
+  - 启动：`npm run dev -- --host 127.0.0.1 --port 5173`
+  - 构建：`npm run build`
+- 默认访问地址、登录方式、主工作台与固定规则页的交互均无变化。
+
 ## 2026-04-17 管理后台归属项目与项目管理员开放
 
 - `src/router/index.ts` 中 `/admin` 的路由守卫已从“仅超级管理员”调整为“当前项目上下文为项目管理员或超级管理员”可进入。
