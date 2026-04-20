@@ -231,12 +231,6 @@ async function runExecution(): Promise<void> {
   }
 }
 
-function applyDemoScenario(): void {
-  // 保留原有业务逻辑：样例填充继续走原 store action。
-  store.applyDemoScenario()
-  ElMessage.success('样例已加载，可直接执行校验。')
-}
-
 function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
 }
@@ -279,30 +273,6 @@ async function handleVariableSaved(_tag: string): Promise<void> {
             <path d="M5 13l4 4L19 7" />
           </svg>
           清除错误
-        </button>
-        <button
-          type="button"
-          class="ec-btn ec-btn-secondary"
-          @click="applyDemoScenario"
-        >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 4h16v16H4z M9 9h6v6H9z" />
-          </svg>
-          载入样例数据
-        </button>
-        <button
-          type="button"
-          class="ec-btn ec-btn-primary"
-          :disabled="store.isExecuting"
-          @click="runExecution"
-        >
-          <svg v-if="!store.isExecuting" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-          <svg v-else class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 4a8 8 0 1 1-8 8" />
-          </svg>
-          {{ store.isExecuting ? '执行中…' : '执行校验' }}
         </button>
       </template>
     </PageHeader>
