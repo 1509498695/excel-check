@@ -33,6 +33,7 @@ async function handleChangePassword(): Promise<void> {
 
   isChanging.value = true
   try {
+    // 保留原有业务逻辑：密码修改继续走原有认证接口。
     await apiChangePassword(oldPassword.value, newPassword.value)
     ElMessage.success('密码修改成功')
     oldPassword.value = ''
@@ -47,6 +48,7 @@ async function handleChangePassword(): Promise<void> {
 
 async function handleSwitchProject(projectId: number): Promise<void> {
   try {
+    // 保留原有业务逻辑：项目切换与相关 store 重载保持原链路不变。
     await auth.switchProject(projectId)
     const workbench = useWorkbenchStore()
     const fixedRules = useFixedRulesStore()
@@ -67,92 +69,116 @@ async function handleSwitchProject(projectId: number): Promise<void> {
   <div class="profile-page">
     <header class="profile-header">
       <h1>个人设置</h1>
-      <p>管理您的账户信息</p>
+      <p>左侧看账户摘要，右侧处理切换与安全设置。</p>
     </header>
 
-    <div class="profile-layout">
-      <section class="profile-section">
-        <h2>账户信息</h2>
-        <div class="profile-info">
-          <div class="profile-field">
-            <span>用户名</span>
+    <div class="profile-layout profile-desktop-layout">
+      <aside class="profile-summary-panel">
+        <section class="profile-section profile-section-hero">
+          <div class="profile-hero-avatar">
+            {{ auth.user?.username?.charAt(0)?.toUpperCase() ?? 'U' }}
+          </div>
+          <div class="profile-hero-copy">
             <strong>{{ auth.user?.username ?? '-' }}</strong>
-          </div>
-          <div class="profile-field">
-            <span>角色</span>
-            <strong>
+            <span>
               {{ auth.isSuperAdmin ? '超级管理员' : auth.currentRole === 'admin' ? '项目管理员' : '普通用户' }}
-            </strong>
+            </span>
           </div>
-          <div class="profile-field">
-            <span>当前项目</span>
-            <strong>{{ auth.currentProjectName || '未选择' }}</strong>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="profile-section" v-if="auth.userProjects.length > 1">
-        <h2>切换项目</h2>
-        <div class="project-switch-list">
-          <div
-            v-for="project in auth.userProjects"
-            :key="project.project_id"
-            class="project-switch-item"
-            :class="{ 'is-current': project.project_id === auth.currentProjectId }"
-          >
-            <div>
-              <strong>{{ project.project_name }}</strong>
-              <span>{{ project.role === 'admin' ? '管理员' : '普通用户' }}</span>
+        <section class="profile-section">
+          <h2>账户摘要</h2>
+          <div class="profile-info">
+            <div class="profile-field">
+              <span>用户名</span>
+              <strong>{{ auth.user?.username ?? '-' }}</strong>
             </div>
-            <el-button
-              v-if="project.project_id !== auth.currentProjectId"
-              type="primary"
-              plain
-              size="small"
-              @click="handleSwitchProject(project.project_id)"
-            >
-              切换
-            </el-button>
-            <el-tag v-else type="success" effect="light" round>当前</el-tag>
+            <div class="profile-field">
+              <span>角色</span>
+              <strong>
+                {{ auth.isSuperAdmin ? '超级管理员' : auth.currentRole === 'admin' ? '项目管理员' : '普通用户' }}
+              </strong>
+            </div>
+            <div class="profile-field">
+              <span>当前项目</span>
+              <strong>{{ auth.currentProjectName || '未选择' }}</strong>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </aside>
 
-      <section class="profile-section">
-        <h2>修改密码</h2>
-        <el-form class="profile-form" @submit.prevent="handleChangePassword">
-          <el-form-item>
-            <el-input
-              v-model="oldPassword"
-              type="password"
-              placeholder="原密码"
-              show-password
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-input
-              v-model="newPassword"
-              type="password"
-              placeholder="新密码（至少 4 个字符）"
-              show-password
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-input
-              v-model="confirmPassword"
-              type="password"
-              placeholder="确认新密码"
-              show-password
-            />
-          </el-form-item>
-          <el-button
-            type="primary"
-            :loading="isChanging"
-            native-type="submit"
-          >
-            修改密码
-          </el-button>
-        </el-form>
+      <section class="profile-workspace-panel">
+        <h2>账户信息</h2>
+        <section class="profile-section" v-if="auth.userProjects.length > 1">
+          <div class="profile-section-head">
+            <h2>切换项目</h2>
+            <el-tag type="info" effect="light" round>{{ auth.userProjects.length }} 个项目</el-tag>
+          </div>
+          <div class="project-switch-list">
+            <!-- // 保留原有业务逻辑：项目列表仍基于 auth.userProjects 遍历并继续调用原切换逻辑 -->
+            <div
+              v-for="project in auth.userProjects"
+              :key="project.project_id"
+              class="project-switch-item"
+              :class="{ 'is-current': project.project_id === auth.currentProjectId }"
+            >
+              <div>
+                <strong>{{ project.project_name }}</strong>
+                <span>{{ project.role === 'admin' ? '管理员' : '普通用户' }}</span>
+              </div>
+              <el-button
+                v-if="project.project_id !== auth.currentProjectId"
+                type="primary"
+                plain
+                size="small"
+                @click="handleSwitchProject(project.project_id)"
+              >
+                切换
+              </el-button>
+              <el-tag v-else type="success" effect="light" round>当前</el-tag>
+            </div>
+          </div>
+        </section>
+
+        <section class="profile-section">
+          <div class="profile-section-head">
+            <h2>修改密码</h2>
+            <el-tag type="warning" effect="light" round>安全设置</el-tag>
+          </div>
+          <el-form class="profile-form" @submit.prevent="handleChangePassword">
+            <el-form-item>
+              <el-input
+                v-model="oldPassword"
+                type="password"
+                placeholder="原密码"
+                show-password
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-input
+                v-model="newPassword"
+                type="password"
+                placeholder="新密码（至少 4 个字符）"
+                show-password
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-input
+                v-model="confirmPassword"
+                type="password"
+                placeholder="确认新密码"
+                show-password
+              />
+            </el-form-item>
+            <el-button
+              type="primary"
+              :loading="isChanging"
+              native-type="submit"
+            >
+              修改密码
+            </el-button>
+          </el-form>
+        </section>
       </section>
     </div>
   </div>

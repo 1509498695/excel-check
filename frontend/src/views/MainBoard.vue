@@ -21,8 +21,11 @@ import { useWorkbenchStore } from '../store/workbench'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
+const selectedGuideStep = ref<StepIndex | null>(null)
+const hasManuallySelectedGuideStep = ref(false)
 
 onMounted(async () => {
+  // 保留原有业务逻辑：工作台初始化仍并行读取能力与服务端配置。
   await Promise.all([store.loadCapabilities(), store.loadFromServer()])
 })
 
@@ -224,6 +227,123 @@ const workflowGuide = computed(() => {
   }
 })
 
+const stepGuideItems = computed(() => {
+  const recommendedStep = workflowGuide.value.step
+  const getToneByStatus = (status: SectionStatus) => {
+    if (status === 'done') {
+      return 'success' as const
+    }
+    if (status === 'active') {
+      return 'brand' as const
+    }
+    return 'info' as const
+  }
+  const getBadgeByStatus = (status: SectionStatus) => {
+    if (status === 'done') {
+      return '已完成'
+    }
+    if (status === 'active') {
+      return '进行中'
+    }
+    return '待开始'
+  }
+
+  // 保留原有业务逻辑：步骤说明仅复用现有 workflowGuide / stepHints / stepStatuses 计算结果组织展示。
+  return [
+    {
+      step: 1 as StepIndex,
+      label: '数据源',
+      count: `${store.sources.length} 项`,
+      title: recommendedStep === 1 ? workflowGuide.value.title : '先接入数据源',
+      description:
+        recommendedStep === 1
+          ? workflowGuide.value.description
+          : '新增一个本地 Excel、CSV、飞书或 SVN 来源，后续变量和规则配置都会复用这里的输入。',
+      summary: stepHints.value.source,
+      badge: recommendedStep === 1 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.source),
+      tone: recommendedStep === 1 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.source),
+      status: stepStatuses.value.source,
+      action:
+        recommendedStep === 1 && workflowGuide.value.action === 'execute'
+          ? ('execute' as const)
+          : ('scroll' as const),
+      actionLabel: recommendedStep === 1 ? workflowGuide.value.actionLabel : '查看步骤 1',
+    },
+    {
+      step: 2 as StepIndex,
+      label: '变量池',
+      count: `${store.variables.length} 项`,
+      title: recommendedStep === 2 ? workflowGuide.value.title : '沉淀变量池',
+      description:
+        recommendedStep === 2
+          ? workflowGuide.value.description
+          : '从已接入数据源中补充 Sheet、字段和变量标签，后续规则编排和结果定位都会基于这些变量展开。',
+      summary: stepHints.value.variable,
+      badge: recommendedStep === 2 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.variable),
+      tone: recommendedStep === 2 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.variable),
+      status: stepStatuses.value.variable,
+      action:
+        recommendedStep === 2 && workflowGuide.value.action === 'execute'
+          ? ('execute' as const)
+          : ('scroll' as const),
+      actionLabel: recommendedStep === 2 ? workflowGuide.value.actionLabel : '查看步骤 2',
+    },
+    {
+      step: 3 as StepIndex,
+      label: '规则',
+      count: `${store.orchestrationRuleCount} 条`,
+      title: recommendedStep === 3 ? workflowGuide.value.title : '配置规则',
+      description:
+        recommendedStep === 3
+          ? workflowGuide.value.description
+          : '按规则组组织比较、非空、唯一和组合变量分支校验，完成后就可以进入首次完整执行。',
+      summary: stepHints.value.rule,
+      badge: recommendedStep === 3 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.rule),
+      tone: recommendedStep === 3 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.rule),
+      status: stepStatuses.value.rule,
+      action:
+        recommendedStep === 3 && workflowGuide.value.action === 'execute'
+          ? ('execute' as const)
+          : ('scroll' as const),
+      actionLabel: recommendedStep === 3 ? workflowGuide.value.actionLabel : '查看步骤 3',
+    },
+    {
+      step: 4 as StepIndex,
+      label: '结果',
+      count: `${store.abnormalResults.length} 条`,
+      title: recommendedStep === 4 ? workflowGuide.value.title : '查看结果',
+      description:
+        recommendedStep === 4
+          ? workflowGuide.value.description
+          : '查看扫描统计、失败来源和异常明细；当规则已就绪但尚未执行时，也可以直接从这里发起一次完整校验。',
+      summary: stepHints.value.result,
+      badge: recommendedStep === 4 ? workflowGuide.value.badge : getBadgeByStatus(stepStatuses.value.result),
+      tone: recommendedStep === 4 ? workflowGuide.value.tone : getToneByStatus(stepStatuses.value.result),
+      status: stepStatuses.value.result,
+      action:
+        recommendedStep === 4 && workflowGuide.value.action === 'execute'
+          ? ('execute' as const)
+          : ('scroll' as const),
+      actionLabel: recommendedStep === 4 ? workflowGuide.value.actionLabel : '查看步骤 4',
+    },
+  ]
+})
+
+const activeGuideStep = computed(() => selectedGuideStep.value ?? workflowGuide.value.step)
+const activeGuideDetail = computed(
+  () => stepGuideItems.value.find((item) => item.step === activeGuideStep.value) ?? stepGuideItems.value[0],
+)
+
+watch(
+  () => workflowGuide.value.step,
+  (step) => {
+    if (!hasManuallySelectedGuideStep.value) {
+      selectedGuideStep.value = step
+    }
+  },
+  { immediate: true },
+)
+
 function getStepRef(step: StepIndex): HTMLElement | null {
   if (step === 1) {
     return sourceStepRef.value
@@ -247,6 +367,7 @@ async function scrollToStep(step: StepIndex): Promise<void> {
 
 async function runExecution(): Promise<void> {
   try {
+    // 保留原有业务逻辑：执行入口仍调用原有校验接口并沿用原结果刷新流程。
     await store.executeValidation()
     await scrollToStep(4)
     ElMessage.success('校验完成，结果已刷新。')
@@ -262,12 +383,18 @@ function applyDemoScenario(): void {
 }
 
 async function handleGuideAction(): Promise<void> {
-  if (workflowGuide.value.action === 'execute') {
+  if (activeGuideDetail.value.action === 'execute') {
     await runExecution()
     return
   }
 
-  await scrollToStep(workflowGuide.value.step)
+  await scrollToStep(activeGuideDetail.value.step)
+}
+
+async function handleGuideStepClick(step: StepIndex): Promise<void> {
+  hasManuallySelectedGuideStep.value = true
+  selectedGuideStep.value = step
+  await scrollToStep(step)
 }
 
 async function handleSourceSaved(_sourceId: string): Promise<void> {
@@ -280,8 +407,8 @@ async function handleVariableSaved(_tag: string): Promise<void> {
 </script>
 
 <template>
-  <div class="main-board">
-    <header class="workbench-topbar">
+  <div class="main-board workbench-desktop-app">
+    <header class="workbench-topbar workbench-toolbar-shell">
       <div class="topbar-brand">
         <div class="brand-icon">
           <DataBoard />
@@ -293,131 +420,193 @@ async function handleVariableSaved(_tag: string): Promise<void> {
               {{ integrationStatus.label }}
             </el-tag>
           </div>
-          <p>围绕数据源、变量、规则和结果看板完成一轮本地校验，适合快速联调与日常巡检。</p>
+          <p>固定外壳，专注在右侧内容区完成接入、配置、执行和复查。</p>
         </div>
       </div>
 
-      <div class="topbar-meta">
-        <div class="meta-card">
-          <span>日期</span>
-          <strong>{{ currentDateLabel }}</strong>
+      <div class="workbench-toolbar-tray">
+        <div class="topbar-meta workbench-toolbar-meta">
+          <div class="meta-card">
+            <span>日期</span>
+            <strong>{{ currentDateLabel }}</strong>
+          </div>
+          <div class="meta-card">
+            <span>模式</span>
+            <strong>本地开发</strong>
+          </div>
+          <el-tooltip :content="integrationStatus.helper" placement="bottom">
+            <div class="meta-card meta-card-compact">
+              <span>状态</span>
+              <strong>{{ integrationStatus.label }}</strong>
+            </div>
+          </el-tooltip>
         </div>
-        <div class="meta-card">
-          <span>运行模式</span>
-          <strong>本地开发</strong>
-        </div>
-        <div class="meta-card">
-          <span>当前状态</span>
-          <strong>{{ integrationStatus.helper }}</strong>
+
+        <div class="overview-actions workbench-toolbar-actions">
+          <el-tooltip content="载入当前联调样例" placement="bottom">
+            <el-button :icon="Operation" plain @click="applyDemoScenario">样例</el-button>
+          </el-tooltip>
+          <el-button v-if="store.pageError" :icon="CircleCheckFilled" plain @click="store.clearPageError()">
+            清错
+          </el-button>
+          <el-button
+            :icon="VideoPlay"
+            type="primary"
+            :loading="store.isExecuting"
+            @click="runExecution"
+          >
+            执行
+          </el-button>
         </div>
       </div>
     </header>
 
-    <section class="overview-strip">
-      <div class="overview-grid">
-        <article
-          v-for="item in overviewItems"
-          :key="item.label"
-          class="overview-item"
-          :class="`is-${item.tone}`"
-        >
-          <div class="overview-icon-box" :class="`is-${item.tone}`">
-            <component :is="item.icon" class="overview-icon" />
+    <div class="workbench-desktop-layout">
+      <section class="workbench-stage-content">
+        <section class="overview-strip workbench-overview-strip">
+          <div class="overview-grid">
+            <!-- // 保留原有业务逻辑：概览卡仍基于 overviewItems 计算结果遍历渲染 -->
+            <article
+              v-for="item in overviewItems"
+              :key="item.label"
+              class="overview-item"
+              :class="`is-${item.tone}`"
+            >
+              <!-- // 保持 4 列不变，只重排卡片内部层级，避免宽屏下内容挤在左上角 -->
+              <div class="overview-item-top">
+                <div class="overview-icon-box" :class="`is-${item.tone}`">
+                  <component :is="item.icon" class="overview-icon" />
+                </div>
+                <span class="overview-item-label">{{ item.label }}</span>
+              </div>
+              <div class="overview-item-value">
+                <strong>{{ item.value }}</strong>
+              </div>
+            </article>
           </div>
-          <div>
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
+        </section>
+
+        <section class="workflow-guide workbench-step-guide-shell" :class="`is-${activeGuideDetail.tone}`">
+          <div class="workbench-step-guide-nav">
+            <!-- // 保留原有业务逻辑：步骤说明导航仍基于 stepGuideItems 计算结果遍历渲染 -->
+            <button
+              v-for="item in stepGuideItems"
+              :key="item.step"
+              type="button"
+              class="step-guide-nav-item"
+              :class="[
+                `is-${item.status}`,
+                { 'is-selected': item.step === activeGuideStep },
+              ]"
+              @click="handleGuideStepClick(item.step)"
+            >
+              <span class="step-guide-nav-index">步骤 {{ item.step }}</span>
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.count }}</small>
+            </button>
           </div>
-        </article>
-      </div>
 
-      <div class="overview-actions">
-        <el-button :icon="Operation" plain @click="applyDemoScenario">加载样例</el-button>
-        <el-button v-if="store.pageError" :icon="CircleCheckFilled" plain @click="store.clearPageError()">
-          清除错误
-        </el-button>
-        <el-button
-          :icon="VideoPlay"
-          type="primary"
-          :loading="store.isExecuting"
-          @click="runExecution"
-        >
-          开始校验
-        </el-button>
-      </div>
-    </section>
+          <!-- // 单列瀑布：标题/描述置顶，下方水平摆放 meta 与 CTA，避免左右分列打断阅读动线 -->
+          <div class="workbench-step-guide-detail">
+            <div class="workbench-step-guide-copy">
+              <span class="guide-badge">{{ activeGuideDetail.badge }}</span>
+              <strong>{{ activeGuideDetail.title }}</strong>
+              <p>{{ activeGuideDetail.description }}</p>
+            </div>
 
-    <section class="workflow-guide" :class="`is-${workflowGuide.tone}`">
-      <div class="guide-copy">
-        <span class="guide-badge">{{ workflowGuide.badge }}</span>
-        <strong>{{ workflowGuide.title }}</strong>
-        <p>{{ workflowGuide.description }}</p>
-      </div>
-      <div class="guide-actions">
-        <el-button :type="workflowGuide.action === 'execute' ? 'primary' : 'default'" @click="handleGuideAction">
-          {{ workflowGuide.actionLabel }}
-        </el-button>
-      </div>
-    </section>
+            <!-- // 步骤说明 + 状态标签靠左，主 CTA 吸附到当前行右端 -->
+            <div class="workbench-step-guide-context">
+              <div class="workbench-step-guide-meta">
+                <div class="step-guide-summary-card">
+                  <span>当前说明</span>
+                  <strong>{{ activeGuideDetail.summary }}</strong>
+                </div>
+                <div class="step-guide-detail-tags">
+                  <el-tag type="info" effect="light" round>{{ activeGuideDetail.label }}</el-tag>
+                  <el-tag v-if="activeGuideDetail.status === 'done'" type="success" effect="light" round>
+                    已就绪
+                  </el-tag>
+                  <el-tag v-else-if="activeGuideDetail.status === 'active'" type="warning" effect="light" round>
+                    当前重点
+                  </el-tag>
+                  <el-tag v-else type="info" effect="light" round>
+                    待继续
+                  </el-tag>
+                </div>
+              </div>
 
-    <div ref="sourceStepRef" class="step-anchor">
-      <SectionBlock
-        step="1"
-        title="数据源接入管理"
-        description="录入并维护 Excel、CSV、飞书与 SVN 来源，为变量抽取和规则执行提供稳定输入。"
-        :status="stepStatuses.source"
-        :hint="stepHints.source"
-      >
-        <DataSourcePanel @saved="handleSourceSaved" />
-      </SectionBlock>
-    </div>
+              <div class="guide-actions workbench-step-guide-actions">
+                <el-button
+                  :type="activeGuideDetail.action === 'execute' ? 'primary' : 'default'"
+                  @click="handleGuideAction"
+                >
+                  {{ activeGuideDetail.actionLabel }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </section>
 
-    <div ref="variableStepRef" class="step-anchor">
-      <SectionBlock
-        step="2"
-        title="变量池构建"
-        description="从 source、sheet 与字段中沉淀可复用变量，作为规则编排的统一输入。"
-        :status="stepStatuses.variable"
-        :hint="stepHints.variable"
-      >
-        <VariablePoolPanel @saved="handleVariableSaved" />
-      </SectionBlock>
-    </div>
-
-    <div ref="ruleStepRef" class="step-anchor">
-      <SectionBlock
-        step="3"
-        title="规则编排"
-        description="按规则组管理校验规则，与「固定规则检查」页数据相互独立。"
-        :status="stepStatuses.rule"
-        :hint="stepHints.rule"
-      >
-        <WorkbenchRuleOrchestrationPanel />
-
-        <div class="section-footbar">
-          <el-button
-            :icon="VideoPlay"
-            type="primary"
-            size="large"
-            :loading="store.isExecuting"
-            @click="runExecution"
+        <div ref="sourceStepRef" class="step-anchor">
+          <SectionBlock
+            step="1"
+            title="数据源"
+            description="接入 Excel、CSV、飞书或 SVN 来源。"
+            :status="stepStatuses.source"
+            :hint="stepHints.source"
           >
-            开始校验
-          </el-button>
+            <DataSourcePanel @saved="handleSourceSaved" />
+          </SectionBlock>
         </div>
-      </SectionBlock>
-    </div>
 
-    <div ref="resultStepRef" class="step-anchor">
-      <SectionBlock
-        step="4"
-        title="校验结果看板"
-        description="集中查看扫描统计、失败来源与异常明细，便于定位问题并快速复查。"
-        :status="stepStatuses.result"
-        :hint="stepHints.result"
-      >
-        <ResultBoardPanel />
-      </SectionBlock>
+        <div ref="variableStepRef" class="step-anchor">
+          <SectionBlock
+            step="2"
+            title="变量池"
+            description="沉淀后续规则编排会复用的字段与组合变量。"
+            :status="stepStatuses.variable"
+            :hint="stepHints.variable"
+          >
+            <VariablePoolPanel @saved="handleVariableSaved" />
+          </SectionBlock>
+        </div>
+
+        <div ref="ruleStepRef" class="step-anchor">
+          <SectionBlock
+            step="3"
+            title="规则"
+            description="按组组织比较、非空、唯一和组合变量规则。"
+            :status="stepStatuses.rule"
+            :hint="stepHints.rule"
+          >
+            <WorkbenchRuleOrchestrationPanel />
+
+            <div class="section-footbar">
+              <el-button
+                :icon="VideoPlay"
+                type="primary"
+                size="large"
+                :loading="store.isExecuting"
+                @click="runExecution"
+              >
+                开始校验
+              </el-button>
+            </div>
+          </SectionBlock>
+        </div>
+
+        <div ref="resultStepRef" class="step-anchor">
+          <SectionBlock
+            step="4"
+            title="结果"
+            description="查看扫描统计、失败来源和异常明细。"
+            :status="stepStatuses.result"
+            :hint="stepHints.result"
+          >
+            <ResultBoardPanel />
+          </SectionBlock>
+        </div>
+      </section>
     </div>
   </div>
 </template>

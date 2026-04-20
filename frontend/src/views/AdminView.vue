@@ -42,6 +42,7 @@ const moveProjectForm = reactive({
 })
 
 onMounted(async () => {
+  // 保留原有业务逻辑：页面进入后仍先加载项目列表，再按原规则加载成员。
   await loadProjects()
 })
 
@@ -59,6 +60,7 @@ const canSubmitMoveProject = computed(() => moveProjectForm.targetProjectId !== 
 async function loadProjects(): Promise<void> {
   isLoadingProjects.value = true
   try {
+    // 保留原有业务逻辑：项目列表继续通过原有 admin API 获取。
     const response = await apiListProjects()
     projects.value = response.data
 
@@ -87,6 +89,7 @@ async function loadMembers(project: ProjectDetail): Promise<void> {
   selectedProject.value = project
   isLoadingMembers.value = true
   try {
+    // 保留原有业务逻辑：成员列表继续消费原有项目成员接口。
     const response = await apiListProjectMembers(project.id)
     members.value = response.data
   } catch (error) {
@@ -299,7 +302,7 @@ function isDefaultProject(project: ProjectDetail): boolean {
     <header class="admin-header">
       <div>
         <h1>管理后台</h1>
-        <p>{{ auth.isSuperAdmin ? '全局项目与成员管理' : '可管理项目与成员权限控制' }}</p>
+        <p>{{ auth.isSuperAdmin ? '左侧选项目，右侧管理成员与权限。' : '在右侧工作区管理当前项目成员。' }}</p>
       </div>
       <el-button
         v-if="canCreateProject"
@@ -315,6 +318,7 @@ function isDefaultProject(project: ProjectDetail): boolean {
       <section class="admin-projects" v-loading="isLoadingProjects">
         <h2>{{ auth.isSuperAdmin ? '项目列表' : '可管理项目' }}</h2>
         <div v-if="!projects.length" class="admin-empty">暂无可管理项目</div>
+        <!-- // 保留原有业务逻辑：项目列表仍基于 projects 遍历，点击继续走原有选中与加载成员逻辑 -->
         <div
           v-for="project in projects"
           :key="project.id"
@@ -355,7 +359,7 @@ function isDefaultProject(project: ProjectDetail): boolean {
           当前没有可管理项目
         </div>
         <template v-else>
-          <h2>{{ selectedProject.name }} - 成员列表</h2>
+          <h2>{{ selectedProject.name }} / 成员</h2>
           <el-table :data="members" class="workbench-table">
             <el-table-column prop="username" label="用户名" min-width="120" />
             <el-table-column label="角色" min-width="120">

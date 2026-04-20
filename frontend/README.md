@@ -1,5 +1,99 @@
 # Excel Check Frontend
 
+## 2026-04-20 主工作台步骤说明模块铺满框体说明
+
+- 本轮继续调整主工作台 `src/style.css` 中的步骤说明模块布局：
+  - 顶部横排步骤按钮改为占满整个模块宽度
+  - 下方详情区改为全宽显示，不再限制为中间固定窄卡
+  - 桌面端详情区采用 `左主信息 + 右辅助信息` 双列布局，移动端回退单列
+- 业务逻辑保持不变：
+  - 继续复用 `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`
+  - 点击步骤仍会滚动到对应工作区
+  - 步骤 4 在可执行状态下仍复用原 `runExecution`
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/` / `login`：返回 `200`
+
+## 2026-04-20 默认管理员登录稳定性说明
+
+- 本轮前端代码未做登录表单逻辑调整，修复点在后端默认管理员自修复链路。
+- 当前登录页 `/login` 对默认管理员 `admin / 123456` 的依赖口径已收口为：
+  - 后端启动时自动补齐默认项目与默认管理员
+  - 若运行时默认管理员意外缺失，`POST /api/v1/auth/login` 会在该账号首次失败时触发一次受控自修复并重试
+- 真实验证：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/login`：返回 `200`
+  - `POST http://127.0.0.1:8000/api/v1/auth/login` 使用 `admin / 123456`：返回 `200`
+
+## 2026-04-20 工作台顶部排版对齐示意图说明
+
+- 本轮继续调整主工作台顶部区域，使版式更接近示意图：
+  - 概览卡在上
+  - 步骤说明模块在下
+  - 说明模块内部为“上方横排步骤条 + 下方居中详情卡”
+- 业务逻辑保持不变：
+  - 继续复用 `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`
+  - 点击步骤仍会滚动到对应工作区
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/` / `login`：返回 `200`
+
+## 2026-04-20 工作台步骤按钮顶部横排说明
+
+- 本轮继续调整主工作台 `src/views/MainBoard.vue` 的说明模块布局：
+  - 步骤按钮改为放在说明模块顶部横排展示
+  - 左侧旧步骤列移除，页面只保留一套步骤导航
+  - 下方继续显示当前步骤的详情、摘要和操作按钮
+- 业务逻辑保持不变：
+  - 继续复用 `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`
+  - 点击步骤后仍会滚动到对应工作区
+  - 步骤 4 在可执行状态下仍复用原 `runExecution`
+- 样式落点：
+  - `src/style.css` 将 `workbench-step-guide-shell` 改为纵向布局
+  - `workbench-step-guide-nav` 改为顶部横排步骤条
+  - `workbench-desktop-layout` 改为单列内容区
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/` / `login` / `register` / `fixed-rules` / `profile`：返回 `200`
+
+## 2026-04-20 工作台“下一步说明”区重构说明
+
+- 本轮只调整主工作台 `src/views/MainBoard.vue` 的说明区布局，不改 store、API、路由和执行逻辑。
+- 调整结果：
+  - 原左侧侧栏底部的 `workflowGuide` 卡片迁移到 hero 下方
+  - 新说明区采用 `左侧步骤导航 + 右侧详情栏` 双栏结构
+  - 点击步骤后会同步切换右侧详情，并继续滚动到对应工作区
+- 说明区的数据口径继续复用现有：
+  - `workflowGuide`
+  - `stepHints`
+  - `stepStatuses`
+- 样式落点：
+  - `src/style.css` 新增 `workbench-step-guide-*` 样式
+  - 原左侧步骤导航与新说明区共享选中态视觉
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `profile`：返回 `200`
+
+## 2026-04-20 桌面级全屏应用 UI 重构说明
+
+- 本轮把前端认证后壳层正式收口为 **桌面级全屏应用**：
+  - 左侧固定边栏承载 `工作台 / 固定规则 / 管理后台 / 个人设置`
+  - 右侧为独立滚动的主内容区，浏览器页面本身不再承担业务滚动
+  - `/`、`/fixed-rules`、`/admin`、`/profile`、`/login`、`/register` 全部适配到这套布局语义
+- **业务行为零改动**：
+  - 不修改 Pinia store、API 模块、类型协议、路由守卫、鉴权逻辑、规则执行链路和项目切换链路
+  - 仅调整模板结构、布局容器、Tooltip/Popover 收纳与 CSS
+  - 被触达页面继续保留 `// 保留原有业务逻辑` / `// 保持原有逻辑不变` 注释
+- 本轮主要落点：
+  - `src/App.vue`：固定左边栏 + 顶部轻量状态工具条
+  - `src/views/MainBoard.vue`：左侧四步流程导航 + 右侧工作区
+  - `src/views/FixedRulesBoard.vue`：上方配置区 + 左侧规则组 + 右侧编辑/结果区
+  - `src/views/AdminView.vue`、`ProfileView.vue`：更稳定的桌面工作台布局
+  - `src/style.css`、`src/fixed-rules.css`：补齐全屏布局、独立滚动区和桌面级响应式收口
+- 本轮回归：
+  - `npm run build`：通过
+  - `http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `admin` / `profile`：返回 `200`
+
 ## 2026-04-20 全站 Apple Design 视觉重构说明
 
 - 本轮修改范围覆盖：

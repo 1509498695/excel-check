@@ -371,22 +371,14 @@ a {
 }
 
 .overview-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
   margin: 18px 0 22px;
-  padding: 18px 20px;
-  border: 1px solid rgba(228, 236, 245, 0.94);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(251, 252, 254, 0.92)),
-    rgba(255, 255, 255, 0.92);
-  box-shadow: var(--shadow-panel);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .overview-grid {
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
@@ -394,13 +386,20 @@ a {
 
 .overview-item {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
   min-width: 0;
-  padding: 15px 16px;
+  min-height: 120px;
+  padding: 18px 18px 20px;
   border: 1px solid rgba(228, 236, 245, 0.98);
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(249, 252, 255, 0.94));
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.95)),
+    rgba(255, 255, 255, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 10px 24px rgba(15, 23, 42, 0.04);
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -428,7 +427,14 @@ a {
 .pool-tag:hover {
   transform: translateY(-2px);
   border-color: rgba(240, 106, 31, 0.2);
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+}
+
+.overview-item-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .overview-icon-box {
@@ -486,12 +492,22 @@ a {
   line-height: 1.4;
 }
 
+.overview-item-label {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.overview-item-value {
+  padding-top: 18px;
+}
+
 .overview-item strong {
   display: block;
-  margin-top: 4px;
-  font-size: 1.46rem;
+  margin-top: 0;
+  font-size: clamp(1.9rem, 2.2vw, 2.35rem);
   font-weight: 700;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.05em;
+  line-height: 1;
 }
 
 .overview-icon {
@@ -509,7 +525,7 @@ a {
 .workflow-guide {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 20px;
   margin: 0 0 18px;
   padding: 18px 20px;
@@ -3414,5 +3430,755 @@ a,
   .profile-page {
     width: min(100%, calc(100vw - 24px));
     padding-inline: 0;
+  }
+}
+
+/* ===== 2026-04-20 Desktop Full-screen Workspace Overrides ===== */
+
+html,
+body,
+#app {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+body {
+  overflow: hidden;
+}
+
+#app {
+  width: 100vw;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  width: 100vw;
+  height: 100vh;
+  padding: 18px;
+}
+
+.app-shell-sidebar,
+.app-shell-toolbar,
+.workbench-topbar,
+.overview-strip,
+.section-block,
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card,
+.admin-projects,
+.admin-members,
+.profile-section,
+.profile-workspace-panel,
+.profile-summary-panel,
+.auth-card {
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.62)),
+    radial-gradient(circle at top left, rgba(90, 200, 250, 0.08), transparent 44%);
+  box-shadow:
+    0 22px 60px rgba(15, 23, 42, 0.08),
+    0 8px 24px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.app-shell-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px;
+  border-radius: 28px;
+}
+
+.app-shell-brand {
+  gap: 14px;
+  padding: 6px 2px 20px;
+}
+
+.app-shell-brand-mark {
+  width: 42px;
+  height: 42px;
+}
+
+.app-shell-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell-link {
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.app-shell-link-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.app-shell-link.is-active {
+  border-color: rgba(10, 132, 255, 0.16);
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.16), rgba(255, 255, 255, 0.58));
+  box-shadow:
+    0 16px 30px rgba(10, 132, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.app-shell-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.app-shell-project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.app-shell-project-card span,
+.app-shell-toolbar-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-shell-project-card strong,
+.app-shell-toolbar-copy strong {
+  letter-spacing: -0.03em;
+}
+
+.app-shell-project-card small {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.app-shell-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.app-shell-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 24px;
+}
+
+.app-shell-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-shell-toolbar-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* // 主内容区底色改为极浅灰，让纯白卡片形成柔和对比，呼应 Vercel / Stripe 桌面风格 */
+.app-shell-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 24px 4px;
+  background: rgba(247, 248, 250, 0.6);
+  border-radius: 22px;
+}
+
+.app-shell-page::-webkit-scrollbar,
+.fixed-group-pill-column::-webkit-scrollbar {
+  width: 10px;
+}
+
+.app-shell-page::-webkit-scrollbar-thumb,
+.fixed-group-pill-column::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.main-board,
+.fixed-rules-board,
+.admin-page,
+.profile-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workbench-desktop-app,
+.fixed-rules-desktop-app,
+.admin-page,
+.profile-page {
+  min-height: 100%;
+}
+
+.workbench-toolbar-shell,
+.fixed-rules-toolbar-shell {
+  margin-bottom: 18px;
+}
+
+/* // 顶部 header 改回 space-between：标题/描述/状态贴左，按钮吸附到右侧边缘，消除右侧大空白 */
+.workbench-toolbar-shell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  margin: 0 0 24px;
+  padding: 22px 26px;
+}
+
+/* // tray 改横向胶囊：3 个状态块 + 操作按钮在同一行，自然贴齐右端 */
+.workbench-toolbar-tray {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+}
+
+/* // 把原 grid 三列状态块改成横向胶囊，避免占用过宽 */
+.workbench-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
+  grid-template-columns: none;
+}
+
+.workbench-toolbar-meta .meta-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.96);
+  border-color: rgba(226, 232, 240, 0.92);
+  box-shadow: none;
+}
+
+.workbench-toolbar-meta .meta-card span {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.workbench-toolbar-meta .meta-card strong {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.meta-card-compact strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.workbench-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.workbench-step-guide-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  width: 100%;
+  padding: 18px 20px 20px;
+}
+
+.workbench-step-guide-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+}
+
+.step-guide-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: auto;
+  min-width: 0;
+  min-height: 86px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.44);
+  color: var(--text-main);
+  text-align: left;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.step-guide-nav-item:hover,
+.step-guide-nav-item.is-selected {
+  border-color: rgba(10, 132, 255, 0.18);
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.12), rgba(255, 255, 255, 0.58));
+  box-shadow:
+    0 16px 34px rgba(10, 132, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.step-guide-nav-item strong {
+  font-size: 0.92rem;
+  letter-spacing: -0.03em;
+}
+
+.step-guide-nav-item small,
+.step-guide-nav-index {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.step-guide-nav-index {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* // 单列瀑布：标题/描述与下方信息行垂直堆叠，让满宽空间留给下方表格 */
+.workbench-step-guide-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 22px 24px;
+  border: 1px solid rgba(228, 236, 245, 0.88);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 4px 12px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.workbench-step-guide-copy {
+  min-width: 0;
+}
+
+.workbench-step-guide-copy strong {
+  display: block;
+  margin-top: 10px;
+  font-size: clamp(1.6rem, 2.2vw, 2.1rem);
+  letter-spacing: -0.05em;
+}
+
+.workbench-step-guide-copy p {
+  max-width: 760px;
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  font-size: 0.94rem;
+  line-height: 1.7;
+}
+
+/* // 信息 + CTA 同行：meta 靠左，按钮吸附右端 */
+.workbench-step-guide-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.workbench-step-guide-meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-width: 0;
+}
+
+.step-guide-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.step-guide-summary-card span {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.step-guide-summary-card strong {
+  color: var(--text-main);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.step-guide-detail-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+.workbench-step-guide-actions {
+  margin: 0;
+  justify-content: flex-end;
+}
+
+/* // 主内容区改为满宽，让 SectionBlock 内部的表格获得最大横向舒展空间 */
+.workbench-desktop-layout {
+  display: block;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* // 单列瀑布堆叠，卡片之间保持 24px 充足呼吸 */
+.workbench-stage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  width: 100%;
+}
+
+.workbench-overview-strip {
+  margin: 0;
+  padding: 0;
+}
+
+.overview-grid {
+  gap: 14px;
+}
+
+.overview-item {
+  min-height: 128px;
+  border-radius: 22px;
+}
+
+/* // 桌面下统一卡片：纯白底 + 极淡边框 + 柔和阴影，去掉早期的彩色玻璃质感 */
+.workbench-topbar,
+.workflow-guide,
+.section-block,
+.overview-item {
+  background: #ffffff;
+  border: 1px solid rgba(228, 232, 240, 0.92);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.workbench-topbar::before,
+.workflow-guide::before,
+.section-block::before,
+.overview-strip::before {
+  display: none;
+}
+
+.section-block {
+  margin-top: 0;
+  width: 100%;
+  padding: 24px 26px 28px;
+  border-radius: 24px;
+}
+
+.section-block:hover,
+.workbench-topbar:hover,
+.workflow-guide:hover {
+  transform: none;
+  border-color: rgba(214, 222, 232, 0.96);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.section-copy p,
+.section-hint,
+.toolbar-copy span,
+.guide-copy p,
+.result-kpi-main p,
+.result-summary span,
+.progress-caption span {
+  color: var(--text-soft);
+}
+
+.guide-copy p,
+.section-hint {
+  font-size: 12px;
+}
+
+.fixed-invalid-text {
+  color: var(--danger);
+}
+
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.admin-header {
+  margin-bottom: 0;
+  padding: 4px 2px;
+}
+
+.admin-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.admin-projects,
+.admin-members {
+  min-height: 0;
+  padding: 20px;
+  border-radius: 26px;
+}
+
+.admin-projects {
+  overflow-y: auto;
+}
+
+.admin-members {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.admin-members .workbench-table {
+  flex: 1;
+}
+
+.admin-project-card {
+  margin-top: 12px;
+}
+
+.profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.profile-header {
+  margin-bottom: 0;
+  padding: 4px 2px;
+}
+
+.profile-desktop-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.profile-summary-panel,
+.profile-workspace-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.profile-section-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-hero-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(90, 200, 250, 0.92), rgba(10, 132, 255, 0.98));
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.profile-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-hero-copy strong {
+  font-size: 1.05rem;
+}
+
+.profile-hero-copy span {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.profile-workspace-panel > h2 {
+  margin: 0;
+  padding: 4px 2px 0;
+  font-size: 1rem;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.profile-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.profile-section-head h2 {
+  margin: 0;
+}
+
+.auth-page {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+.auth-card {
+  max-width: 460px;
+  border-radius: 30px;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .workbench-desktop-layout,
+  .admin-layout,
+  .profile-desktop-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  html,
+  body,
+  #app {
+    overflow: auto;
+  }
+
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    padding: 12px;
+  }
+
+  .app-shell-sidebar,
+  .app-shell-main {
+    min-height: 0;
+  }
+
+  .app-shell-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .app-shell-link {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .app-shell-page {
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .workbench-step-guide-shell,
+  .workbench-step-guide-meta,
+  .workbench-toolbar-shell,
+  .app-shell-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workbench-step-guide-shell {
+    padding: 18px;
+  }
+
+  .workbench-step-guide-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .workbench-step-guide-detail {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px;
+  }
+
+  .workbench-step-guide-side {
+    padding: 16px;
+  }
+
+  .workbench-step-guide-actions {
+    justify-content: flex-start;
+  }
+
+  .step-guide-nav-item {
+    min-width: 0;
   }
 }

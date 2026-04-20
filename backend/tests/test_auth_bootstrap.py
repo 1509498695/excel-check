@@ -9,6 +9,7 @@ from sqlalchemy import select
 from backend.app.auth.service import hash_password, verify_password
 from backend.app.database import (
     async_session_factory,
+    ensure_default_auth_bootstrap,
     init_db,
     _seed_default_project,
     _seed_default_super_admin,
@@ -176,6 +177,54 @@ async def test_login_admin_after_init_db_on_empty_database(test_db) -> None:
     assert payload["data"]["user"]["username"] == settings.default_super_admin_username
     assert payload["data"]["user"]["is_super_admin"] is True
     assert payload["data"]["user"]["current_project_id"] is not None
+
+
+@pytest.mark.anyio
+async def test_login_self_heals_missing_default_admin(test_db) -> None:
+    """默认管理员缺失时，登录接口应触发一次受控自修复并恢复登录。"""
+    await ensure_default_auth_bootstrap()
+
+    async with async_session_factory() as session:
+        admin_result = await session.execute(
+            select(User).where(User.username == settings.default_super_admin_username)
+        )
+        admin_user = admin_result.scalar_one()
+        await session.delete(admin_user)
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": settings.default_super_admin_username,
+                "password": settings.default_super_admin_password,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["user"]["username"] == settings.default_super_admin_username
+    assert payload["data"]["user"]["is_super_admin"] is True
+
+    async with async_session_factory() as session:
+        repaired_user_result = await session.execute(
+            select(User).where(User.username == settings.default_super_admin_username)
+        )
+        repaired_user = repaired_user_result.scalar_one()
+        role_result = await session.execute(
+            select(UserProjectRole).where(UserProjectRole.user_id == repaired_user.id)
+        )
+        repaired_roles = role_result.scalars().all()
+
+    assert repaired_user.primary_project_id is not None
+    assert verify_password(
+        settings.default_super_admin_password,
+        repaired_user.hashed_password,
+    )
+    assert repaired_roles
 
 
 @pytest.mark.anyio

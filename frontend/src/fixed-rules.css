@@ -669,3 +669,283 @@
     padding: 18px;
   }
 }
+
+/* ===== 2026-04-20 Desktop Full-screen Fixed Rules Layout ===== */
+
+/* // 流式安全边距：整页内容随浏览器宽度自然伸展，左右各 24px 内边距防止贴边 */
+.fixed-rules-board {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 4px 24px 32px;
+}
+
+/* // 移除固定宽度，改为流式铺满：单列瀑布 + 100% 全宽，所有主区块自上而下垂直堆叠 */
+.fixed-rules-desktop-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: stretch;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* // 移除固定宽度，改为流式铺满：步骤 1（数据源）/ 步骤 2（变量池）上下堆叠并 100% 占满主区 */
+.fixed-rules-config-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  grid-template-columns: none;
+}
+
+/* // 规则组面板从 sticky 侧栏变成正常流，按 DOM 顺序出现在步骤 2 下方 */
+.fixed-rules-sidebar {
+  position: static;
+  top: auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.fixed-rules-workspace {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* // 顶部 header / 概览 / 告警全部 100% 宽，由 header 内部 flex space-between 决定左右内容分布 */
+.fixed-rules-board > .fixed-rules-toolbar-shell,
+.fixed-rules-board > .fixed-rules-overview-strip,
+.fixed-rules-board > .result-alert {
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.fixed-rules-overview-strip {
+  margin-bottom: 0;
+}
+
+.fixed-group-pill-column {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  max-height: min(60vh, 720px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.group-band-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.group-band-head,
+.rule-workspace-head,
+.result-kpi-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.group-band-head > div:first-child,
+.rule-workspace-copy,
+.result-kpi-main {
+  min-width: 0;
+}
+
+.group-band-actions,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.group-band-search {
+  min-width: 180px;
+}
+
+.rule-workspace-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rule-table-shell,
+.result-summary,
+.svn-result-list {
+  min-width: 0;
+}
+
+.fixed-pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.pagination-caption {
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.result-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.summary-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.64)),
+    radial-gradient(circle at top left, rgba(10, 132, 255, 0.08), transparent 48%);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.summary-tile span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.summary-tile strong {
+  font-size: 1.08rem;
+  letter-spacing: -0.03em;
+}
+
+.result-kpi-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.result-kpi-progress {
+  min-width: min(260px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progress-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.progress-caption strong {
+  color: var(--text-main);
+  font-size: 0.98rem;
+}
+
+.rule-empty-state {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* // 拍平卡片层级：3 张主卡统一纯白底 + 极淡边框 + 柔和弥散阴影，不再嵌玻璃质感 */
+.group-band-card,
+.rule-workspace-card,
+.rule-result-card {
+  background: #ffffff;
+  border: 1px solid rgba(228, 232, 240, 0.92);
+  border-radius: 24px;
+  padding: 24px 26px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.group-band-card::before,
+.rule-workspace-card::before,
+.rule-result-card::before {
+  display: none;
+}
+
+.group-band-card:hover,
+.rule-workspace-card:hover,
+.rule-result-card:hover {
+  transform: none;
+  border-color: rgba(214, 222, 232, 0.96);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+/* // 内部统计 tile 改用浅灰色块，不再叠卡片边框，避免“卡套卡”视觉噪点 */
+.summary-tile {
+  border: 0;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(247, 248, 250, 0.96);
+  box-shadow: none;
+}
+
+.fixed-group-pill-column {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+@media (max-width: 1180px) {
+  .fixed-rules-board {
+    padding: 4px 16px 28px;
+  }
+}
+
+@media (max-width: 768px) {
+  .fixed-rules-board {
+    padding: 4px 12px 24px;
+  }
+
+  .fixed-rules-config-grid,
+  .fixed-rules-desktop-layout,
+  .fixed-rules-workspace {
+    gap: 18px;
+  }
+
+  .group-band-card,
+  .rule-workspace-card,
+  .rule-result-card {
+    padding: 20px 18px;
+    border-radius: 20px;
+  }
+
+  .group-band-head,
+  .rule-workspace-head,
+  .result-kpi-bar,
+  .fixed-pagination-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .group-band-actions,
+  .toolbar-actions {
+    justify-content: stretch;
+  }
+
+  .group-band-search,
+  .result-kpi-progress {
+    min-width: 0;
+  }
+}

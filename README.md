@@ -1,5 +1,107 @@
 # Excel Check
 
+## 2026-04-20 主工作台步骤说明模块铺满框体说明（逻辑零改动）
+
+- 本轮继续收口主工作台 `/` 顶部的步骤说明模块：
+  - 顶部横排步骤条改为占满整个模块宽度
+  - 下方详情区不再保持中轴窄卡，而是横向铺满整个模块
+  - 详情区内部改为桌面端 `左主信息 + 右辅助信息` 双列布局，移动端回退为单列堆叠
+- **严格不改业务契约**：
+  - 不修改 Pinia state、路由、API 请求、事件绑定、类型定义和后端字段消费
+  - `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`、`scrollToStep(step)`、`runExecution` 全部维持原状
+  - 本轮仅调整 `frontend/src/style.css` 的布局样式，不引入新的业务数据结构
+- 本轮回归：
+  - `python -m pytest backend/tests -q` => `67 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/` / `login` => `200`
+
+## 2026-04-20 默认管理员登录失败自修复说明
+
+- 本轮收口了运行时默认管理员 `admin / 123456` 偶发登录失败的问题。
+- 根因是运行时 SQLite 在个别坏状态下可能缺少默认管理员或默认项目，但接口此前只做直接鉴权，缺少请求期兜底修复。
+- 当前后端已升级为双保险：
+  - 启动时继续执行 `init_db()`，统一补齐表结构、默认项目、默认管理员和主归属项目。
+  - `POST /api/v1/auth/login` 在检测到默认管理员登录失败时，会额外触发一次受控自修复并仅重试一次。
+- **影响边界**：
+  - 普通用户登录链路不变，仍直接按原用户名/密码校验。
+  - 只对默认管理员 `admin` 启用这一层兜底，不改 JWT、路由、前端登录表单和普通账号口径。
+- 本轮真实验证：
+  - `python -m pytest backend/tests -q` => `67 passed`
+  - `cd frontend && npm run build` => 通过
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `POST http://127.0.0.1:8000/api/v1/auth/login` 使用 `admin / 123456` => `200`
+  - `GET http://127.0.0.1:5173/login` => `200`
+
+## 2026-04-20 工作台顶部排版对齐第二张示意图说明（逻辑零改动）
+
+- 本轮继续细调主工作台 `/` 顶部排版，使其更接近你给的第二张示意图：
+  - 概览卡条回到步骤说明模块上方
+  - 步骤说明模块改为更居中的大面板
+  - 模块内部采用“上方横排步骤条 + 下方居中详情卡”的排版方式
+- **严格不改业务契约**：
+  - 不修改 Pinia state、路由、API 请求、事件绑定、类型定义和后端字段消费
+  - 仅调整 `MainBoard.vue` 与 `style.css` 的视图层结构和样式
+- 本轮回归：
+  - `cd frontend && npm run build` => 通过
+  - `python -m pytest backend/tests -q` => `66 passed`
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/` / `login` => `200`
+
+## 2026-04-20 工作台步骤按钮改为模块顶部横排说明（逻辑零改动）
+
+- 本轮继续收口主工作台 `/` 的步骤说明模块：
+  - 步骤按钮从模块左侧改为放到说明模块顶部，按横排方式展示
+  - 左侧旧步骤列已移除，页面只保留这一套顶部步骤按钮，避免重复
+  - 顶部横排按钮点击后，仍会同步切换下方详情，并继续保留原 `scrollToStep(step)` 定位行为
+- **严格不改业务契约**：
+  - 不修改 Pinia state、生命周期、路由、API 请求、事件绑定、类型定义和后端字段消费
+  - `MainBoard.vue` 继续仅复用现有 `workflowGuide`、`stepHints`、`stepStatuses` 结果组织展示
+  - 相关计算与执行入口继续保留 `// 保留原有业务逻辑` 注释
+- 本轮回归：
+  - `cd frontend && npm run build` => 通过
+  - `python -m pytest backend/tests -q` => `66 passed`
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/` / `login` / `register` / `fixed-rules` / `profile` => `200`
+
+## 2026-04-20 工作台“下一步说明”区重构说明（逻辑零改动）
+
+- 本轮仅收口主工作台 `/` 的说明区展示：
+  - 原左侧侧栏底部的 `workflowGuide` 单卡说明，迁移到“配置表校验工作台”模块下方
+  - 新说明区改为 `左侧步骤导航 + 右侧详情栏` 的双栏结构
+  - 左侧点击 `数据源 / 变量池 / 规则 / 结果` 时，右侧详情同步切换，并继续保留原有 `scrollToStep(step)` 定位行为
+- **严格不改业务契约**：
+  - 不修改 Pinia state、`watch/onMounted` 生命周期、路由、API 请求、事件绑定、类型定义和后端字段消费
+  - `MainBoard.vue` 内新增的步骤详情仅复用现有 `workflowGuide`、`stepHints`、`stepStatuses` 计算结果组织展示
+  - 被触达的业务计算与执行入口继续保留 `// 保留原有业务逻辑` 注释
+- 本轮回归：
+  - `cd frontend && npm run build` => 通过
+  - `python -m pytest backend/tests -q` => `66 passed`
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `profile` => `200`
+
+## 2026-04-20 桌面级全屏应用 UI 重构说明（逻辑零改动）
+
+- 本轮在既有 Apple 风格 token 基础上，继续把前端壳层收口为 **桌面级全屏应用**：
+  - 认证后统一切换为 `左侧固定边栏 + 右侧独立滚动工作区`
+  - 外层应用固定 `100vw / 100vh`，浏览器页面本身不再承担业务滚动
+  - 工作台 `/`、固定规则 `/fixed-rules`、管理后台 `/admin`、个人设置 `/profile`、登录 `/login`、注册 `/register` 全部纳入同一轮布局重构
+- **严格不改业务契约**：
+  - Pinia state、`watch/onMounted` 生命周期、路由守卫、API 请求、事件绑定、类型定义、后端字段结构全部保持原状
+  - 仅调整模板结构、布局容器、CSS 样式、Tooltip 收纳和交互反馈
+  - 被触达页面显式补充了 `// 保留原有业务逻辑` / `// 保持原有逻辑不变` 注释
+- 本轮界面收口重点：
+  - `frontend/src/App.vue` 改为左侧固定导航壳层，承载 `工作台 / 固定规则 / 管理后台 / 个人设置 / 项目切换 / 退出`
+  - `frontend/src/views/MainBoard.vue` 改为左侧四步流程导航 + 右侧工作区，顶部工具条收纳状态、样例与执行入口
+  - `frontend/src/views/FixedRulesBoard.vue` 改为上方配置区 + 左侧规则组 + 右侧规则编辑与结果区的桌面工具布局
+  - `frontend/src/views/AdminView.vue`、`ProfileView.vue`、`LoginView.vue`、`RegisterView.vue` 统一切换为更稳定的桌面面板结构
+  - `frontend/src/style.css` 与 `frontend/src/fixed-rules.css` 统一补齐全屏布局、玻璃材质、Apple 风格控件皮肤和响应式收口
+- 本轮回归：
+  - `cd frontend && npm run build` => 通过
+  - `python -m pytest backend/tests -q` => `66 passed`
+  - `GET http://127.0.0.1:8000/health` => `200`
+  - `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `admin` / `profile` => `200`
+
 ## 2026-04-20 前端全站 Apple Design 视觉重构说明（逻辑零改动）
 
 - 本轮聚焦 `frontend/` 视图层：共享壳层、`/` 工作台、`/fixed-rules`、`/login`、`/register`、`/admin`、`/profile` 全部切换为 Apple Design / Human Interface Guidelines 风格。

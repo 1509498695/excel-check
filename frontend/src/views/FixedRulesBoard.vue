@@ -278,6 +278,7 @@ watch(
 
 onMounted(async () => {
   try {
+    // 保留原有业务逻辑：页面初始化仍并行读取能力声明与已保存配置。
     await Promise.all([store.loadCapabilities(), store.loadConfig()])
   } catch {
     // 页面级错误由 store 托管，这里避免重复提示。
@@ -962,6 +963,7 @@ async function handleSaveConfig(): Promise<void> {
 
 async function handleExecute(): Promise<void> {
   try {
+    // 保留原有业务逻辑：固定规则执行仍走原有 executeConfig 链路与结果消费模型。
     await store.executeConfig()
     if (store.abnormalResults.length) {
       ElMessage.warning(`执行完成，发现 ${store.abnormalResults.length} 条异常结果。`)
@@ -975,6 +977,7 @@ async function handleExecute(): Promise<void> {
 
 async function handleSvnUpdate(): Promise<void> {
   try {
+    // 保留原有业务逻辑：SVN 更新继续复用原有工作副本更新接口。
     await store.runSvnUpdate()
     ElMessage.success(store.svnUpdateSummary || 'SVN 更新完成。')
   } catch {
@@ -984,27 +987,31 @@ async function handleSvnUpdate(): Promise<void> {
 </script>
 
 <template>
-  <div class="fixed-rules-board rule-binding-board">
-    <header class="rule-binding-header">
+  <div class="fixed-rules-board rule-binding-board fixed-rules-desktop-app">
+    <header class="rule-binding-header fixed-rules-toolbar-shell">
       <div class="rule-binding-header-main">
         <span class="guide-badge">固定规则检查</span>
         <h1>固定规则检查</h1>
-        <p>本页数据独立保存。</p>
+        <p>固定外壳，只在右侧工作区处理保存、执行、复查和规则维护。</p>
       </div>
 
       <div class="rule-binding-actions">
-        <el-button :icon="CircleCheckFilled" plain :loading="store.isSaving" @click="handleSaveConfig">
-          保存配置
-        </el-button>
-        <el-button
-          :icon="RefreshRight"
-          plain
-          :loading="store.isUpdatingSvn"
-          :disabled="!store.canRunSvnUpdate"
-          @click="handleSvnUpdate"
-        >
-          SVN 更新
-        </el-button>
+        <el-tooltip content="持久化本页数据源、变量、分组和规则配置" placement="bottom">
+          <el-button :icon="CircleCheckFilled" plain :loading="store.isSaving" @click="handleSaveConfig">
+            保存
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="对当前规则引用到的工作副本执行 SVN 更新" placement="bottom">
+          <el-button
+            :icon="RefreshRight"
+            plain
+            :loading="store.isUpdatingSvn"
+            :disabled="!store.canRunSvnUpdate"
+            @click="handleSvnUpdate"
+          >
+            SVN
+          </el-button>
+        </el-tooltip>
         <el-button
           type="primary"
           :icon="VideoPlay"
@@ -1012,13 +1019,14 @@ async function handleSvnUpdate(): Promise<void> {
           :disabled="!store.canExecute"
           @click="handleExecute"
         >
-          执行全部规则
+          执行
         </el-button>
       </div>
     </header>
 
-    <section class="overview-strip">
+    <section class="overview-strip fixed-rules-overview-strip">
       <div class="overview-grid">
+        <!-- // 保留原有业务逻辑：固定规则概览卡仍基于 overviewItems 结果遍历渲染 -->
         <article v-for="item in overviewItems" :key="item.label" class="overview-item">
           <div>
             <span>{{ item.label }}</span>
@@ -1065,290 +1073,302 @@ async function handleSvnUpdate(): Promise<void> {
       description="补齐目标变量、规则名、比较值或分支配置后才能执行。"
     />
 
-    <div class="rule-binding-layout" v-loading="isBootstrapping || store.isLoading">
-      <SectionBlock
-        step="1"
-        title="数据源接入管理"
-        description="录入并维护本页专用数据源。"
-        :status="sourceStepStatus"
-        :hint="sourceStepHint"
-      >
-        <DataSourcePanel
-          :store="store"
-          variant="fixed-rules"
-          :source-issues="sourceIssueMap"
-          @changed="handlePanelChanged"
-        />
-      </SectionBlock>
-
-      <SectionBlock
-        step="2"
-        title="变量池构建"
-        description="沉淀单变量和组合变量。"
-        :status="variableStepStatus"
-        :hint="variableStepHint"
-      >
-        <VariablePoolPanel :store="store" variant="fixed-rules" @changed="handlePanelChanged" />
-      </SectionBlock>
-
-      <section class="group-band-card">
-        <div class="group-band-head">
-          <div>
-            <strong>规则组导航</strong>
-            <p>管理规则分组。</p>
-          </div>
-
-          <div class="group-band-actions">
-            <el-input
-              v-model="store.groupKeyword"
-              class="group-band-search"
-              placeholder="搜索规则组"
-              :prefix-icon="Search"
-              clearable
-            />
-            <el-button :icon="Plus" plain @click="handleCreateGroup">新建规则组</el-button>
-          </div>
-        </div>
-
-        <div class="group-pill-row">
-          <button
-            v-for="group in store.filteredGroups"
-            :key="group.group_id"
-            type="button"
-            class="group-pill"
-            :class="{ 'is-active': group.group_id === store.selectedGroup.group_id }"
-            @click="store.setSelectedGroup(group.group_id)"
-          >
-            <div class="group-pill-main">
-              <strong>{{ group.group_name }}</strong>
-              <span class="group-pill-badge">
-                {{ store.groupRuleCounts[group.group_id] ?? 0 }}
-              </span>
-            </div>
-            <div class="group-pill-meta">
-              <span class="group-pill-tag">
-                {{ group.builtin ? '系统默认组' : '自定义组' }}
-              </span>
-              <span
-                v-if="invalidGroupIdSet.has(group.group_id)"
-                class="group-pill-tag is-danger"
-              >
-                待修复
-              </span>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      <section class="rule-workspace-card">
-        <div class="rule-workspace-head">
-          <div class="rule-workspace-copy">
-            <div class="rule-workspace-title">
-              <strong>{{ store.selectedGroup.group_name }}</strong>
-              <el-tag type="info" effect="light" round>
-                当前组 {{ currentGroupCount }} 条规则
-              </el-tag>
-              <el-tag type="warning" effect="light" round>
-                当前组 {{ currentGroupVariableCount }} 个目标变量
-              </el-tag>
-            </div>
-            <p>单变量做基础校验，组合变量做分支校验。</p>
-          </div>
-
-          <div class="toolbar-actions">
-            <el-button
-              :icon="EditPen"
-              plain
-              :disabled="store.selectedGroup.builtin"
-              @click="handleRenameGroup"
-            >
-              编辑组名
-            </el-button>
-            <el-button
-              :icon="Delete"
-              plain
-              :disabled="store.selectedGroup.builtin"
-              @click="handleRemoveGroup"
-            >
-              删除规则组
-            </el-button>
-            <el-button
-              type="primary"
-              :icon="Plus"
-              :disabled="!canCreateRule"
-              @click="openCreateRuleDialog"
-            >
-              新增规则
-            </el-button>
-          </div>
-        </div>
-
-        <div
-          v-if="!canCreateRule"
-          class="compact-empty-state rule-empty-state"
+    <div class="rule-binding-layout fixed-rules-desktop-layout" v-loading="isBootstrapping || store.isLoading">
+      <div class="fixed-rules-config-grid">
+        <SectionBlock
+          step="1"
+          title="数据源"
+          description="录入当前规则依赖的数据源。"
+          :status="sourceStepStatus"
+          :hint="sourceStepHint"
         >
-          先在上方变量池中保存变量。
-        </div>
+          <DataSourcePanel
+            :store="store"
+            variant="fixed-rules"
+            :source-issues="sourceIssueMap"
+            @changed="handlePanelChanged"
+          />
+        </SectionBlock>
 
-        <div
-          v-else-if="!store.currentGroupRules.length"
-          class="compact-empty-state rule-empty-state"
+        <SectionBlock
+          step="2"
+          title="变量池"
+          description="沉淀单变量和组合变量。"
+          :status="variableStepStatus"
+          :hint="variableStepHint"
         >
-          当前规则组还没有规则。
-        </div>
+          <VariablePoolPanel :store="store" variant="fixed-rules" @changed="handlePanelChanged" />
+        </SectionBlock>
+      </div>
 
-        <div v-else class="rule-table-shell">
-          <el-table class="workbench-table" :data="store.pagedCurrentGroupRules">
-            <el-table-column prop="rule_name" label="规则名称" min-width="220">
-              <template #default="{ row }">
-                <div class="rule-name-cell">
-                  <strong :class="{ 'fixed-invalid-text': invalidRuleIdSet.has(row.rule_id) }">
-                    {{ row.rule_name }}
-                  </strong>
-                  <span>{{ buildRuleCondition(row) }}</span>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="目标变量" min-width="360">
-              <template #default="{ row }">
-                <div class="rule-binding-cell">
-                  <div class="rule-binding-top">
-                    <strong>{{ row.target_variable_tag }}</strong>
-                    <span>{{ buildRuleVariableSummary(row) }}</span>
-                  </div>
-                  <small>{{ buildRuleSourcePathSummary(row) }}</small>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="规则选择" min-width="220">
-              <template #default="{ row }">
-                <div class="rule-operator-cell">
-                  <span>{{ buildRuleSelectionSummary(row) }}</span>
-                  <strong v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</strong>
-                  <strong v-else-if="row.rule_type === 'composite_condition_check'">
-                    {{ row.composite_config?.branches.length ?? 0 }} 个分支
-                  </strong>
-                  <strong v-else>无需比较值</strong>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <div class="table-actions">
-                  <el-button link type="primary" @click="openEditRuleDialog(row)">编辑</el-button>
-                  <el-button link type="danger" @click="handleRemoveRule(row)">删除</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div v-if="store.currentGroupRuleTotal > 20" class="fixed-pagination-row">
-            <span class="pagination-caption">
-              第 {{ store.currentPage }} 页 / 共 {{ store.currentGroupRuleTotal }} 条
-            </span>
-            <el-pagination
-              layout="prev, pager, next"
-              :page-size="20"
-              :total="store.currentGroupRuleTotal"
-              :current-page="store.currentPage"
-              @current-change="store.setCurrentPage"
-            />
-          </div>
-        </div>
-      </section>
-
-      <section class="rule-result-card">
-        <div class="result-kpi-bar">
-          <div class="result-kpi-main">
-            <div class="result-kpi-icon">
-              <CircleCheckFilled />
-            </div>
+      <aside class="fixed-rules-sidebar">
+        <section class="group-band-card">
+          <div class="group-band-head">
             <div>
-              <strong>{{ executionSummary.title }}</strong>
-              <p>{{ executionSummary.description }}</p>
+              <strong>规则组</strong>
+              <p>侧栏切组，右侧专注编辑。</p>
+            </div>
+
+            <div class="group-band-actions">
+              <el-input
+                v-model="store.groupKeyword"
+                class="group-band-search"
+                placeholder="搜索规则组"
+                :prefix-icon="Search"
+                clearable
+              />
+              <el-button :icon="Plus" plain @click="handleCreateGroup">新建</el-button>
             </div>
           </div>
 
-          <div class="result-kpi-progress">
-            <div class="progress-caption">
-              <span>执行耗时</span>
-              <strong>{{ store.executionMeta?.execution_time_ms ?? 0 }} ms</strong>
+          <div class="group-pill-row fixed-group-pill-column">
+            <!-- // 保留原有业务逻辑：规则组侧栏仍基于 store.filteredGroups 遍历并沿用原选中逻辑 -->
+            <button
+              v-for="group in store.filteredGroups"
+              :key="group.group_id"
+              type="button"
+              class="group-pill"
+              :class="{ 'is-active': group.group_id === store.selectedGroup.group_id }"
+              @click="store.setSelectedGroup(group.group_id)"
+            >
+              <div class="group-pill-main">
+                <strong>{{ group.group_name }}</strong>
+                <span class="group-pill-badge">
+                  {{ store.groupRuleCounts[group.group_id] ?? 0 }}
+                </span>
+              </div>
+              <div class="group-pill-meta">
+                <span class="group-pill-tag">
+                  {{ group.builtin ? '系统默认组' : '自定义组' }}
+                </span>
+                <span
+                  v-if="invalidGroupIdSet.has(group.group_id)"
+                  class="group-pill-tag is-danger"
+                >
+                  待修复
+                </span>
+              </div>
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <div class="fixed-rules-workspace">
+        <section class="rule-workspace-card">
+          <div class="rule-workspace-head">
+            <div class="rule-workspace-copy">
+              <div class="rule-workspace-title">
+                <strong>{{ store.selectedGroup.group_name }}</strong>
+                <el-tag type="info" effect="light" round>
+                  {{ currentGroupCount }} 条
+                </el-tag>
+                <el-tag type="warning" effect="light" round>
+                  {{ currentGroupVariableCount }} 个变量
+                </el-tag>
+              </div>
+              <p>基础校验与分支校验都在这里维护。</p>
             </div>
-            <el-progress
-              :percentage="store.executionMeta ? 100 : 0"
-              :show-text="false"
-              :stroke-width="8"
-              status="success"
-            />
+
+            <div class="toolbar-actions">
+              <el-tooltip content="修改当前规则组名称" placement="bottom">
+                <el-button
+                  :icon="EditPen"
+                  plain
+                  :disabled="store.selectedGroup.builtin"
+                  @click="handleRenameGroup"
+                >
+                  组名
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="删除当前规则组" placement="bottom">
+                <el-button
+                  :icon="Delete"
+                  plain
+                  :disabled="store.selectedGroup.builtin"
+                  @click="handleRemoveGroup"
+                >
+                  删除
+                </el-button>
+              </el-tooltip>
+              <el-button
+                type="primary"
+                :icon="Plus"
+                :disabled="!canCreateRule"
+                @click="openCreateRuleDialog"
+              >
+                新增规则
+              </el-button>
+            </div>
           </div>
 
-          <div class="overview-actions">
-            <el-tag v-if="store.executionMeta" type="success" effect="light" round>
-              已完成最近一次执行
-            </el-tag>
-            <el-tag v-else type="info" effect="light" round>
-              等待执行
-            </el-tag>
-          </div>
-        </div>
-
-        <div class="result-summary">
-          <article class="summary-tile">
-            <span>扫描总行数</span>
-            <strong>{{ store.executionMeta?.total_rows_scanned ?? 0 }}</strong>
-          </article>
-          <article class="summary-tile">
-            <span>失败数据源</span>
-            <strong>{{ store.executionMeta?.failed_sources.length ?? 0 }}</strong>
-          </article>
-          <article class="summary-tile">
-            <span>异常结果</span>
-            <strong>{{ store.abnormalResults.length }}</strong>
-          </article>
-          <article class="summary-tile">
-            <span>固定规则数据源</span>
-            <strong>{{ store.sourceCount }}</strong>
-          </article>
-        </div>
-
-        <el-alert
-          v-if="store.svnUpdateSummary"
-          class="result-alert"
-          type="info"
-          show-icon
-          :closable="false"
-          :title="store.svnUpdateSummary"
-          :description="`成功 ${svnResultStats.successCount} 个，失败 ${svnResultStats.failedCount} 个。`"
-        />
-
-        <div v-if="store.svnUpdateResults.length" class="svn-result-list">
-          <article
-            v-for="item in store.svnUpdateResults"
-            :key="item.working_copy"
-            class="svn-result-item"
-            :class="{ 'is-error': item.status === 'error' }"
+          <div
+            v-if="!canCreateRule"
+            class="compact-empty-state rule-empty-state"
           >
-            <strong>{{ item.working_copy }}</strong>
-            <span>{{ item.status === 'success' ? '更新成功' : '更新失败' }}</span>
-            <small>{{ item.output || item.error || '无额外输出' }}</small>
-          </article>
-        </div>
+            先保存变量。
+          </div>
 
-        <div v-if="!store.abnormalResults.length" class="compact-empty-state rule-empty-state">
-          暂无异常。
-        </div>
+          <div
+            v-else-if="!store.currentGroupRules.length"
+            class="compact-empty-state rule-empty-state"
+          >
+            当前组还没有规则。
+          </div>
 
-        <el-table v-else class="workbench-table" :data="store.abnormalResults">
-          <el-table-column prop="rule_name" label="命中规则" min-width="200" />
-          <el-table-column prop="location" label="定位" min-width="240" />
-          <el-table-column prop="row_index" label="行号" width="100" />
-          <el-table-column prop="raw_value" label="原始值" min-width="160" />
-          <el-table-column prop="message" label="说明" min-width="240" />
-        </el-table>
-      </section>
+          <div v-else class="rule-table-shell">
+            <el-table class="workbench-table" :data="store.pagedCurrentGroupRules">
+              <el-table-column prop="rule_name" label="规则名称" min-width="220">
+                <template #default="{ row }">
+                  <div class="rule-name-cell">
+                    <strong :class="{ 'fixed-invalid-text': invalidRuleIdSet.has(row.rule_id) }">
+                      {{ row.rule_name }}
+                    </strong>
+                    <span>{{ buildRuleCondition(row) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="目标变量" min-width="360">
+                <template #default="{ row }">
+                  <div class="rule-binding-cell">
+                    <div class="rule-binding-top">
+                      <strong>{{ row.target_variable_tag }}</strong>
+                      <span>{{ buildRuleVariableSummary(row) }}</span>
+                    </div>
+                    <small>{{ buildRuleSourcePathSummary(row) }}</small>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="规则选择" min-width="220">
+                <template #default="{ row }">
+                  <div class="rule-operator-cell">
+                    <span>{{ buildRuleSelectionSummary(row) }}</span>
+                    <strong v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</strong>
+                    <strong v-else-if="row.rule_type === 'composite_condition_check'">
+                      {{ row.composite_config?.branches.length ?? 0 }} 个分支
+                    </strong>
+                    <strong v-else>无需比较值</strong>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="操作" width="160" fixed="right">
+                <template #default="{ row }">
+                  <div class="table-actions">
+                    <el-button link type="primary" @click="openEditRuleDialog(row)">编辑</el-button>
+                    <el-button link type="danger" @click="handleRemoveRule(row)">删除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div v-if="store.currentGroupRuleTotal > 20" class="fixed-pagination-row">
+              <span class="pagination-caption">
+                第 {{ store.currentPage }} 页 / 共 {{ store.currentGroupRuleTotal }} 条
+              </span>
+              <el-pagination
+                layout="prev, pager, next"
+                :page-size="20"
+                :total="store.currentGroupRuleTotal"
+                :current-page="store.currentPage"
+                @current-change="store.setCurrentPage"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="rule-result-card">
+          <div class="result-kpi-bar">
+            <div class="result-kpi-main">
+              <div class="result-kpi-icon">
+                <CircleCheckFilled />
+              </div>
+              <div>
+                <strong>{{ executionSummary.title }}</strong>
+                <p>{{ executionSummary.description }}</p>
+              </div>
+            </div>
+
+            <div class="result-kpi-progress">
+              <div class="progress-caption">
+                <span>执行耗时</span>
+                <strong>{{ store.executionMeta?.execution_time_ms ?? 0 }} ms</strong>
+              </div>
+              <el-progress
+                :percentage="store.executionMeta ? 100 : 0"
+                :show-text="false"
+                :stroke-width="8"
+                status="success"
+              />
+            </div>
+
+            <div class="overview-actions">
+              <el-tag v-if="store.executionMeta" type="success" effect="light" round>
+                已完成
+              </el-tag>
+              <el-tag v-else type="info" effect="light" round>
+                等待执行
+              </el-tag>
+            </div>
+          </div>
+
+          <div class="result-summary">
+            <article class="summary-tile">
+              <span>扫描总行数</span>
+              <strong>{{ store.executionMeta?.total_rows_scanned ?? 0 }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span>失败数据源</span>
+              <strong>{{ store.executionMeta?.failed_sources.length ?? 0 }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span>异常结果</span>
+              <strong>{{ store.abnormalResults.length }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span>固定规则数据源</span>
+              <strong>{{ store.sourceCount }}</strong>
+            </article>
+          </div>
+
+          <el-alert
+            v-if="store.svnUpdateSummary"
+            class="result-alert"
+            type="info"
+            show-icon
+            :closable="false"
+            :title="store.svnUpdateSummary"
+            :description="`成功 ${svnResultStats.successCount} 个，失败 ${svnResultStats.failedCount} 个。`"
+          />
+
+          <div v-if="store.svnUpdateResults.length" class="svn-result-list">
+            <!-- // 保留原有业务逻辑：SVN 结果列表仍基于 store.svnUpdateResults 遍历展示 -->
+            <article
+              v-for="item in store.svnUpdateResults"
+              :key="item.working_copy"
+              class="svn-result-item"
+              :class="{ 'is-error': item.status === 'error' }"
+            >
+              <strong>{{ item.working_copy }}</strong>
+              <span>{{ item.status === 'success' ? '更新成功' : '更新失败' }}</span>
+              <small>{{ item.output || item.error || '无额外输出' }}</small>
+            </article>
+          </div>
+
+          <div v-if="!store.abnormalResults.length" class="compact-empty-state rule-empty-state">
+            暂无异常。
+          </div>
+
+          <el-table v-else class="workbench-table" :data="store.abnormalResults">
+            <el-table-column prop="rule_name" label="命中规则" min-width="200" />
+            <el-table-column prop="location" label="定位" min-width="240" />
+            <el-table-column prop="row_index" label="行号" width="100" />
+            <el-table-column prop="raw_value" label="原始值" min-width="160" />
+            <el-table-column prop="message" label="说明" min-width="240" />
+          </el-table>
+        </section>
+      </div>
     </div>
 
     <el-dialog

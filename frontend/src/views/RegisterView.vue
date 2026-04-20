@@ -20,6 +20,7 @@ const isLoading = ref(false)
 
 onMounted(async () => {
   try {
+    // 保留原有业务逻辑：注册页项目列表继续通过原公开接口加载。
     const response = await apiListProjectsPublic()
     projects.value = response.data
     if (projects.value.length) {
@@ -54,6 +55,7 @@ async function handleRegister(): Promise<void> {
 
   isLoading.value = true
   try {
+    // 保留原有业务逻辑：注册成功后的登录态建立与跳转仍复用原有 store 行为。
     await auth.register(username.value.trim(), password.value, selectedProjectId.value)
     ElMessage.success('注册成功')
     router.push('/')

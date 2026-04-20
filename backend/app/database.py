@@ -40,6 +40,11 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_user_primary_project_column()
+    await ensure_default_auth_bootstrap()
+
+
+async def ensure_default_auth_bootstrap() -> None:
+    """确保默认项目、默认管理员与主归属项目口径处于可登录状态。"""
     default_project = await _seed_default_project()
     await _seed_default_super_admin(default_project.id)
     await _backfill_user_primary_projects()

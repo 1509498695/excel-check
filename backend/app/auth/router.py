@@ -25,7 +25,8 @@ from backend.app.auth.service import (
     resolve_active_project_id,
     verify_password,
 )
-from backend.app.database import get_db
+from backend.app.database import ensure_default_auth_bootstrap, get_db
+from backend.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -95,9 +96,18 @@ async def login(
 ) -> dict[str, Any]:
     """用户登录。"""
     try:
+        # 保留原有业务逻辑：优先按原认证链路校验用户名和密码。
         user = await authenticate_user(db, payload.username, payload.password)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        if payload.username.strip() != settings.default_super_admin_username:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        await ensure_default_auth_bootstrap()
+        try:
+            # 保留原有业务逻辑：仅在默认管理员缺失时做一次受控自修复并重试。
+            user = await authenticate_user(db, payload.username, payload.password)
+        except ValueError as retry_exc:
+            raise HTTPException(status_code=401, detail=str(retry_exc)) from retry_exc
 
     default_project_id = get_default_project_id(user)
     token = create_access_token(user.id, project_id=default_project_id)

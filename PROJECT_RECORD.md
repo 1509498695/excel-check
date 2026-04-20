@@ -2,6 +2,75 @@
 
 项目目录：`D:\project\excel-check`
 
+## 进度记录 2026-04-20 13:43
+
+### 本次目标
+- 把主工作台顶部步骤说明模块从“中轴窄卡”改成真正铺满整个模块框体的桌面工作区布局。
+- 保持步骤切换、滚动定位和执行入口全部不变，只做视图层重排。
+
+### 本次完成
+- `frontend/src/style.css`
+  - `workbench-step-guide-shell` 改为全宽纵向容器，不再为中间小卡保留收缩宽度。
+  - `workbench-step-guide-nav` 改为整行四等分横排，占满模块宽度。
+  - `workbench-step-guide-detail` 改为全宽 grid 布局，桌面端使用 `左主信息 + 右辅助信息` 双列结构。
+  - `workbench-step-guide-meta` 改为右侧纵向堆叠，`step-guide-summary-card` 占满辅助列。
+  - `workbench-step-guide-actions` 在桌面端改为右对齐，移动端回退为单列纵向堆叠。
+- `frontend/src/views/MainBoard.vue`
+  - 模板和业务逻辑保持不变，继续复用现有 `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`、`scrollToStep(step)`、`runExecution`。
+
+### 当前状态
+- 主工作台顶部区域当前为：
+  - 概览卡条
+  - 全宽步骤说明模块（顶部横排步骤条 + 下方铺满模块的详情区）
+  - 下方实际工作区
+- 详情区不再只聚集在中间 560px 小卡内，桌面端已形成更完整的模块内占满效果。
+
+### 本轮回归
+- `python -m pytest backend/tests -q` => `67 passed`
+- `cd frontend && npm run build` => 通过
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/` => `200`
+- `GET http://127.0.0.1:5173/login` => `200`
+
+### 下一步建议
+1. 如果你还想继续压缩留白，下一轮可以把右侧辅助列里的标签和按钮做成更紧凑的工具区。
+2. 如果想更接近专业工作台风格，可以再补一步，把步骤按钮的选中态做成更明显的分段控制器视觉。
+
+## 进度记录 2026-04-20 13:37
+
+### 本次目标
+- 修复默认管理员 `admin / 123456` 在运行时偶发无法登录的问题。
+- 把修复做成代码级自恢复，而不是手工重新播种一次数据库。
+
+### 本次完成
+- `backend/app/database.py`
+  - 新增 `ensure_default_auth_bootstrap()`，统一补齐默认项目、默认管理员与用户主归属项目。
+  - `init_db()` 改为复用这条自修复入口，避免启动链路和登录兜底逻辑分叉。
+- `backend/app/auth/router.py`
+  - 登录接口继续优先走原 `authenticate_user()`。
+  - 当且仅当默认管理员 `admin` 登录失败时，触发一次受控自修复并重试一次。
+  - 普通用户登录行为保持不变。
+- `backend/tests/test_auth_bootstrap.py`
+  - 新增“默认管理员缺失时，登录接口可自修复恢复登录”的回归测试。
+- 运行态
+  - 已重启当前 `backend/run.py` 服务，让 8000 端口实例切换到新修复版本。
+
+### 当前状态
+- 当前后端既能在启动时播种默认管理员，也能在默认管理员缺失的坏运行态下于登录时自恢复。
+- 实际运行中的 `http://127.0.0.1:8000` 已切换到新版本，`admin / 123456` 可直接登录。
+
+### 本轮回归
+- `python -m pytest backend/tests/test_auth_bootstrap.py -q` => `7 passed`
+- `python -m pytest backend/tests -q` => `67 passed`
+- `cd frontend && npm run build` => 通过
+- `GET http://127.0.0.1:8000/health` => `200`
+- `POST http://127.0.0.1:8000/api/v1/auth/login` 使用 `admin / 123456` => `200`
+- `GET http://127.0.0.1:5173/login` => `200`
+
+### 下一步建议
+1. 如果后续允许管理员主动修改默认账号密码，可以把“启动时重置默认密码”和“登录时自修复密码”拆成更细粒度策略。
+2. 如果还要继续强化可观测性，可以补一条启动日志或告警，明确记录默认管理员修复是否发生过。
+
 ## 进度记录 2026-04-20 12:22
 
 ### 本次目标
@@ -2177,3 +2246,144 @@
 
 ### 下一步建议
 1. 如果后续还要统一更多空响应接口，可继续把 `apiFetch` 的成功响应处理沉淀成更明确的响应规范。
+
+## 进度记录 2026-04-20 12:45
+
+### 本次目标
+- 把前端认证后壳层收口为桌面级全屏应用，固定左侧导航与右侧独立滚动工作区。
+- 在不改 Pinia、路由守卫、API、事件绑定和后端字段消费的前提下，完成工作台、固定规则页、管理后台、个人设置、登录、注册的布局升级。
+
+### 本次完成
+- `frontend/src/App.vue`
+  - 顶部导航壳层改为左侧固定边栏，统一承载 `工作台 / 固定规则 / 管理后台 / 个人设置 / 项目切换 / 退出登录`
+  - 保留原项目切换、登出和角色显隐逻辑，并补充 `// 保留原有业务逻辑` 注释
+- `frontend/src/views/MainBoard.vue`
+  - 改为左侧四步流程导航 + 右侧工作内容区
+  - 顶部工具条收口样例、清错、执行与状态信息
+  - 保留数据遍历、执行入口、自动保存和滚动定位逻辑
+- `frontend/src/views/FixedRulesBoard.vue`
+  - 改为上方配置区 + 左侧规则组侧栏 + 右侧规则编辑与结果区的桌面工具布局
+  - 保留 `loadCapabilities / loadConfig / executeConfig / runSvnUpdate` 与规则组、规则列表遍历逻辑
+- `frontend/src/views/AdminView.vue`、`ProfileView.vue`、`LoginView.vue`、`RegisterView.vue`
+  - 统一切换为更稳定的桌面面板结构
+  - 继续保留既有提交、跳转、项目切换和鉴权调用逻辑
+- `frontend/src/style.css`、`frontend/src/fixed-rules.css`
+  - 补齐全屏应用壳层、独立滚动区、固定规则三段式布局和对应响应式收口
+- 同步更新 `README.md`、`CHANGELOG.md`、`frontend/README.md`、`需求文档.md`
+
+### 当前状态
+- 认证后页面当前统一为桌面级全屏应用壳层，浏览器页面本身不再承担主业务滚动。
+- 被触达页面已显式补充 `// 保留原有业务逻辑` / `// 保持原有逻辑不变` 注释，便于后续继续做 UI 演进时核对业务零改动边界。
+- 固定规则页现在具备更清晰的“配置区 / 规则组 / 规则与结果工作区”分区，长规则组列表限制在侧栏内部滚动。
+
+### 本轮回归
+- `cd frontend && npm run build` => 通过
+- `python -m pytest backend/tests -q` => `66 passed`
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `admin` / `profile` => `200`
+
+### 下一步建议
+1. 如果下一轮还要继续减字，可优先把表格内的长摘要、规则条件描述和空状态说明进一步收进 Tooltip / Popover。
+2. 如果后续要做更强的桌面工作流体验，可以单开一轮补充键盘快捷操作、分段控制器高亮动画和结果区筛选器。
+
+## 进度记录 2026-04-20 13:11
+
+### 本次目标
+- 把主工作台中原左侧侧栏底部的“下一步说明”单卡迁移到 hero 下方。
+- 将该区域改为“左侧步骤导航 + 右侧详情栏”双栏结构，同时保持原滚动定位和执行入口不变。
+
+### 本次完成
+- `frontend/src/views/MainBoard.vue`
+  - 新增基于现有 `workflowGuide / stepHints / stepStatuses` 组织出来的 `stepGuideItems`
+  - hero 下方新增步骤说明区，左侧显示 `数据源 / 变量池 / 规则 / 结果`，右侧显示当前步骤的完整说明、状态摘要和操作按钮
+  - 左侧点击步骤后会同步切换详情，并继续调用原 `scrollToStep(step)` 逻辑
+  - 当步骤 4 处于“可执行”状态时，详情区按钮继续复用原 `runExecution` 入口
+  - 原左侧侧栏底部的 `workflowGuide` 卡片移除，侧栏只保留步骤跳转
+- `frontend/src/style.css`
+  - 新增 `workbench-step-guide-*` 样式，收口 hero 下方的步骤说明区布局、卡片层次和移动端折叠表现
+  - 原左侧步骤导航与新说明区共享选中态高亮
+- 同步更新 `README.md`、`CHANGELOG.md`、`frontend/README.md`、`需求文档.md`
+
+### 当前状态
+- 主工作台当前同时具备：
+  - hero 下方的步骤说明区，用于集中阅读每一步的说明
+  - 左侧步骤导航，用于快速跳转到实际工作区
+- 新说明区不引入第二套业务状态，只是复用既有计算结果做视图重组。
+
+### 本轮回归
+- `cd frontend && npm run build` => 通过
+- `python -m pytest backend/tests -q` => `66 passed`
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `profile` => `200`
+
+### 下一步建议
+1. 如果你希望这块更像 macOS Finder 的 inspector，下一轮可以把右侧详情做成更强的信息层级和图标化摘要。
+2. 如果后续要继续压缩首页信息密度，可以再把概览卡和步骤说明区合并成一块分区式看板。
+
+## 进度记录 2026-04-20 13:19
+
+### 本次目标
+- 把主工作台说明模块中的步骤按钮改为顶部横排。
+- 移除左侧旧步骤列，让页面只保留一套步骤导航入口。
+
+### 本次完成
+- `frontend/src/views/MainBoard.vue`
+  - 移除 `workbench-desktop-layout` 中左侧旧步骤列
+  - 保留 hero 下方说明模块，并让步骤按钮只在该模块顶部横排展示
+  - 顶部横排按钮继续复用 `stepGuideItems`、`activeGuideDetail` 和 `handleGuideStepClick`
+  - 点击步骤后仍同步切换详情，并继续调用原 `scrollToStep(step)` 逻辑
+- `frontend/src/style.css`
+  - `workbench-step-guide-shell` 改为“顶部横排步骤条 + 下方详情卡”的纵向结构
+  - `workbench-step-guide-nav` 改为四等分横排，移动端降级为两列换行
+  - `workbench-desktop-layout` 改为单列内容区，消除旧侧栏留白
+- 同步更新 `README.md`、`CHANGELOG.md`、`frontend/README.md`、`需求文档.md`
+
+### 当前状态
+- 主工作台当前只保留一套顶部横排步骤按钮，不再存在左侧重复步骤列。
+- 页面结构已收口为：
+  - 顶部 hero
+  - hero 下方说明模块（顶部横排步骤条 + 下方详情卡）
+  - 下方工作内容区
+
+### 本轮回归
+- `cd frontend && npm run build` => 通过
+- `python -m pytest backend/tests -q` => `66 passed`
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/` / `login` / `register` / `fixed-rules` / `profile` => `200`
+
+### 下一步建议
+1. 如果还想更贴近你给的示意图，下一轮可以继续把横排步骤按钮压缩得更“胶囊化”，减少内部字数层级。
+2. 如果后续首页还要进一步去网页感，可以再把概览卡位置往说明模块内部收，减少模块切换感。
+
+## 进度记录 2026-04-20 13:30
+
+### 本次目标
+- 让主工作台顶部排版更接近最新示意图。
+- 收口“概览卡、步骤条、详情卡”三者的上下关系与居中方式。
+
+### 本次完成
+- `frontend/src/views/MainBoard.vue`
+  - 调整顶部结构顺序，改为“概览卡在上、步骤说明模块在下”
+  - 步骤说明模块内部继续保留横排步骤条和详情卡，但整体移入主内容区并与概览卡形成同一层级
+- `frontend/src/style.css`
+  - 收口步骤说明模块为更居中的大面板
+  - 横排步骤条宽度压缩到更接近示意图
+  - 详情卡改为固定最大宽度并居中显示
+- 同步更新 `README.md`、`CHANGELOG.md`、`frontend/README.md`、`需求文档.md`
+
+### 当前状态
+- 主工作台顶部区域当前为：
+  - 概览卡条
+  - 步骤说明模块（上方横排步骤条 + 下方居中详情卡）
+  - 下方具体工作区
+- 整体版式已经比上一轮更接近你给的第二张图。
+
+### 本轮回归
+- `cd frontend && npm run build` => 通过
+- `python -m pytest backend/tests -q` => `66 passed`
+- `GET http://127.0.0.1:8000/health` => `200`
+- `GET http://127.0.0.1:5173/` / `login` => `200`
+
+### 下一步建议
+1. 如果你还想继续贴近图稿，下一轮可以把详情卡的按钮和标签再往右侧收，做成更轻的浮层感。
+2. 如果顶部概览卡还显得过高，可以继续压缩卡片高度和 icon 尺寸。

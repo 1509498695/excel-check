@@ -21,6 +21,7 @@ async function handleLogin(): Promise<void> {
 
   isLoading.value = true
   try {
+    // 保留原有业务逻辑：登录继续调用原 auth store 鉴权链路。
     await auth.login(username.value.trim(), password.value)
     ElMessage.success('登录成功')
     router.push('/')

@@ -1,8 +1,71 @@
 # 更新日志
 
-文档更新时间：2026-04-20 12:22
+文档更新时间：2026-04-20 13:43
 
 ## [Unreleased]
+
+- **主工作台步骤说明模块铺满整个框体**：
+  - `frontend/src/style.css` 将步骤说明模块从“顶部步骤条 + 中间固定窄详情卡”改为“顶部全宽步骤条 + 下方全宽详情区”。
+  - 详情区桌面端改为 `左主信息 + 右辅助信息` 双列布局，右侧承载当前说明、标签和操作按钮；移动端回退为单列堆叠。
+  - `frontend/src/views/MainBoard.vue` 的步骤切换、滚动定位和执行入口逻辑保持不变，继续复用现有 `stepGuideItems`、`activeGuideDetail`、`handleGuideStepClick`、`scrollToStep(step)`、`runExecution`。
+  - 回归：
+    - `python -m pytest backend/tests -q` => `67 passed`
+    - `cd frontend && npm run build` => 通过
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/` / `login` => `200`
+
+- **默认管理员登录失败自修复**：
+  - `backend/app/database.py` 新增 `ensure_default_auth_bootstrap()`，统一补齐默认项目、默认管理员和用户主归属项目。
+  - `backend/app/auth/router.py` 在默认管理员 `admin` 登录失败时，会触发一次受控自修复并重试一次；普通用户登录逻辑不变。
+  - `backend/tests/test_auth_bootstrap.py` 新增“默认管理员缺失时，登录接口可自恢复登录”的回归测试。
+  - 回归：
+    - `python -m pytest backend/tests -q` => `67 passed`
+    - `cd frontend && npm run build` => 通过
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `POST http://127.0.0.1:8000/api/v1/auth/login` 使用 `admin / 123456` => `200`
+
+- **主工作台顶部排版对齐第二张示意图**：
+  - `frontend/src/views/MainBoard.vue` 调整了顶部结构顺序，改为“概览卡在上、步骤说明模块在下”。
+  - `frontend/src/style.css` 将步骤说明模块继续收口为更居中的大面板，内部采用“上方横排步骤条 + 下方居中详情卡”的排版。
+  - 业务逻辑不变，步骤点击仍复用原 `scrollToStep(step)` 和 `runExecution`。
+  - 回归：
+    - `cd frontend && npm run build` => 通过
+    - `python -m pytest backend/tests -q` => `66 passed`
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/` / `login` => `200`
+
+- **主工作台步骤按钮改为模块顶部横排**：
+  - `frontend/src/views/MainBoard.vue` 把说明模块内的步骤按钮改为顶部横排展示，并移除左侧旧步骤列，页面只保留一套步骤导航入口。
+  - 顶部横排按钮继续基于现有 `stepGuideItems` 遍历，点击后仍会同步切换下方详情并执行原 `scrollToStep(step)`。
+  - `frontend/src/style.css` 将 `workbench-step-guide-shell` 收口为“顶部横排步骤条 + 下方详情卡”的纵向结构，同时让主内容区恢复单列占满。
+  - 回归：
+    - `cd frontend && npm run build` => 通过
+    - `python -m pytest backend/tests -q` => `66 passed`
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/` / `login` / `register` / `fixed-rules` / `profile` => `200`
+
+- **主工作台“下一步说明”区改为步骤详情双栏**：
+  - `frontend/src/views/MainBoard.vue` 把原左侧侧栏底部的 `workflowGuide` 单卡迁移到 hero 下方，重构为“左侧步骤导航 + 右侧详情栏”的说明区。
+  - 右侧详情继续复用现有 `workflowGuide`、`stepHints`、`stepStatuses` 的业务判断结果，不新增第二套状态逻辑。
+  - 左侧步骤点击后会同时切换详情并保留原有 `scrollToStep(step)` 滚动定位；若当前可直接执行，详情区按钮仍复用原 `runExecution` 入口。
+  - `frontend/src/style.css` 新增 `workbench-step-guide-*` 样式，并让原侧栏步骤导航与新说明区共享选中态。
+  - 回归：
+    - `cd frontend && npm run build` => 通过
+    - `python -m pytest backend/tests -q` => `66 passed`
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `profile` => `200`
+
+- **前端收口为桌面级全屏应用壳层**：
+  - `frontend/src/App.vue` 改为认证后左侧固定边栏 + 右侧独立滚动工作区，主导航、项目切换、退出登录全部收进共享壳层；不改路由守卫、鉴权逻辑和项目切换链路。
+  - `frontend/src/views/MainBoard.vue` 改为左侧四步流程导航 + 右侧工作面板，顶部工具条收纳样例、清错、执行与状态卡；相关数据遍历、执行入口和滚动定位逻辑保持原实现。
+  - `frontend/src/views/FixedRulesBoard.vue` 改为上方数据源/变量池配置区 + 左侧规则组导航 + 右侧规则编辑与结果区；`executeConfig`、`runSvnUpdate`、规则组/规则遍历与保存链路不变。
+  - `frontend/src/views/AdminView.vue`、`ProfileView.vue`、`LoginView.vue`、`RegisterView.vue` 同步切换为桌面级面板布局；所有被触达页面显式补充 `// 保留原有业务逻辑` 注释。
+  - `frontend/src/style.css` 与 `frontend/src/fixed-rules.css` 新增全屏布局、侧栏、独立滚动区、规则组三段式工作区以及对应的响应式收口。
+  - 回归：
+    - `cd frontend && npm run build` => 通过
+    - `python -m pytest backend/tests -q` => `66 passed`
+    - `GET http://127.0.0.1:8000/health` => `200`
+    - `GET http://127.0.0.1:5173/login` / `register` / `/` / `fixed-rules` / `admin` / `profile` => `200`
 
 - **前端全站 Apple Design 视觉重构**：
   - 共享壳层、主工作台、固定规则页、登录、注册、管理后台、个人设置统一切换为 Apple HIG 风格的玻璃材质、细描边、多层阴影、大圆角与平滑动效。
