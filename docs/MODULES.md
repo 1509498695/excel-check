@@ -1,138 +1,156 @@
-# Excel Check 项目模块作用一览
+# Excel Check 模块速查
 
-依据 [README.md](../README.md)、[需求文档.md](archive/需求文档.md) 第 2 章架构与目录、[frontend/README.md](../frontend/README.md) 及后端路由 [backend/app/api/router.py](../backend/app/api/router.py)。
+依据 [../README.md](../README.md)、[ARCHITECTURE.md](ARCHITECTURE.md) 与后端路由 [../backend/app/api/router.py](../backend/app/api/router.py)。
 
----
+## 一、产品级入口（4 个路由）
 
-## 一、产品级入口（两条业务线）
+| 入口 | 视图 | 作用 |
+|:---|:---|:---|
+| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 主工作台四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
+| `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 长期复用：独立 `version=4` 配置（`sources / variables / groups / rules`），支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
+| `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目，项目管理员仅见自己可管理的项目。 |
+| `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
+| `/login` `/register` | [LoginView.vue](../frontend/src/views/LoginView.vue)、[RegisterView.vue](../frontend/src/views/RegisterView.vue) | 认证入口；默认管理员 `admin / 123456`。 |
 
-| 入口 | 作用 |
-|:---|:---|
-| 主工作台 `/`（[frontend/src/views/MainBoard.vue](../frontend/src/views/MainBoard.vue)） | 临时编排：数据源 → 变量池 → **静态**规则 → 执行结果；构建 `TaskTree` 并调用 `POST /api/v1/engine/execute`。 |
-| 固定规则页 `/fixed-rules`（[frontend/src/views/FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue)） | 长期复用：本页独立的 `sources / variables / groups / rules`，持久化到 `backend/.runtime/fixed-rules/default.json`（`version = 4`）；支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
+## 二、前端目录（`frontend/src`）
 
----
-
-## 二、前端目录与模块（`frontend/src`）
-
-| 路径/文件 | 作用 |
-|:---|:---|
-| [frontend/src/api/workbench.ts](../frontend/src/api/workbench.ts) | 封装主工作台相关 HTTP：数据源能力、元数据、列预览、引擎执行等。 |
-| [frontend/src/api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 封装固定规则 API：读/写配置、SVN、执行。 |
-| [frontend/src/store/workbench.ts](../frontend/src/store/workbench.ts) | Pinia：主工作台数据源、变量、规则、结果、缓存等状态。 |
-| [frontend/src/store/fixedRules.ts](../frontend/src/store/fixedRules.ts) | Pinia：固定规则页独立状态，与主工作台隔离。 |
-| [frontend/src/types/workbench.ts](../frontend/src/types/workbench.ts)、[frontend/src/types/fixedRules.ts](../frontend/src/types/fixedRules.ts) | TypeScript 类型定义。 |
-| [frontend/src/utils/taskTree.ts](../frontend/src/utils/taskTree.ts) | `TaskTree` 组装/校验等工具逻辑。 |
-| [frontend/src/utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 工作台元数据相关辅助。 |
-| [frontend/src/router/index.ts](../frontend/src/router/index.ts) | 路由：`/`、`/fixed-rules`。 |
-| [frontend/src/App.vue](../frontend/src/App.vue) | 应用壳：统一头部与导航切换两条入口。 |
-
-### 工作台 UI 组件（`frontend/src/components/workbench`）
+### 2.1 共享展示组件 `components/shell/`
 
 | 组件 | 作用 |
 |:---|:---|
-| [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源增删改、本地路径、调用 `local-pick` 等（固定规则页复用时可注入 `config_issues` 等提示）。 |
-| [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量/组合变量、Sheet/列下拉、详情弹窗、JSON 预览等。 |
-| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航与当前组规则列表（与 `/fixed-rules` 同构的编排能力），数据仅存于 `workbench` store，映射为引擎规则后执行。 |
-| [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：统一结果看板（概览 + 异常列表）。 |
-| [SectionBlock.vue](../frontend/src/components/workbench/SectionBlock.vue) | 步骤区块布局/标题等复用容器。 |
+| [PageHeader.vue](../frontend/src/components/shell/PageHeader.vue) | 顶栏：面包屑 + h1 标题 + 右侧 actions 槽。 |
+| [SectionHeader.vue](../frontend/src/components/shell/SectionHeader.vue) | 模块头：默认极简标题 + 描述；`variant="workbench"` 时切到「序号方块 + 标题 + 状态胶囊 + 副说明」工作台样式。 |
+| [StatPill.vue](../frontend/src/components/shell/StatPill.vue) | KPI 卡：caption + 等宽大数字 + StatusDot。 |
+| [StatusDot.vue](../frontend/src/components/shell/StatusDot.vue) | 5 色状态胶囊：`pending / active / done / warn / error`。 |
+| [EmptyState.vue](../frontend/src/components/shell/EmptyState.vue) | 空态：圆底 icon + 标题 + 副文案 + 可选 CTA。 |
+| [DataTable.vue](../frontend/src/components/shell/DataTable.vue) | 数据表壳：极简表头 + 行 hover；空态调用方自填。 |
 
-### 固定规则 UI（`frontend/src/components/fixed-rules`）
+### 2.2 工作台业务组件 `components/workbench/`
 
 | 组件 | 作用 |
 |:---|:---|
-| [FixedRulesResultPanel.vue](../frontend/src/components/fixed-rules/FixedRulesResultPanel.vue) | 固定规则执行与 SVN 反馈的结果展示区。 |
+| [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源 CRUD、本地文件选择、`source_id`-级 `config_issues` 注入。 |
+| [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量 / 组合变量、Sheet/列下拉、详情弹窗、JSON 预览。 |
+| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗（`fixed_value_compare / not_null / unique / composite_condition_check`）。 |
+| [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
 
----
+### 2.3 已废弃 / 未使用组件
 
-## 三、后端目录与模块（`backend`）
+以下组件留在仓库中但当前未被任何视图引用，待统一清理：
 
-### 启动与配置
+- [components/workbench/WorkbenchSectionHeader.vue](../frontend/src/components/workbench/WorkbenchSectionHeader.vue)：薄包装到 `shell/SectionHeader.vue variant="workbench"`，新代码统一直用后者。
+- [components/workbench/SectionBlock.vue](../frontend/src/components/workbench/SectionBlock.vue)、[components/workbench/WorkbenchStepCard.vue](../frontend/src/components/workbench/WorkbenchStepCard.vue)：早期工作台折叠卡，已被全展开模块结构取代。
+- [components/fixed-rules/FixedRulesResultPanel.vue](../frontend/src/components/fixed-rules/FixedRulesResultPanel.vue)：原固定规则结果区，已被 `ResultBoardPanel.vue` 复用替代。
+
+### 2.4 状态、路由、API、工具
+
+| 路径 | 作用 |
+|:---|:---|
+| [store/auth.ts](../frontend/src/store/auth.ts) | Pinia：JWT、用户、当前项目、可访问项目。 |
+| [store/workbench.ts](../frontend/src/store/workbench.ts) | Pinia：主工作台数据源、变量、规则编排、执行结果。 |
+| [store/fixedRules.ts](../frontend/src/store/fixedRules.ts) | Pinia：固定规则页独立状态，与主工作台隔离。 |
+| [api/auth.ts](../frontend/src/api/auth.ts) | 注册 / 登录 / `me` / 切换项目 / 修改密码。 |
+| [api/admin.ts](../frontend/src/api/admin.ts) | 项目 CRUD、成员管理、密码重置。 |
+| [api/workbench.ts](../frontend/src/api/workbench.ts) | 数据源能力 / 元数据 / 列预览 / 引擎执行 / 工作台配置持久化。 |
+| [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 固定规则配置 CRUD / SVN 更新 / 执行。 |
+| [utils/apiFetch.ts](../frontend/src/utils/apiFetch.ts) | 统一注入 JWT、`401` 跳登录、空响应体兼容。 |
+| [utils/taskTree.ts](../frontend/src/utils/taskTree.ts) | `TaskTree` 组装与归一化。 |
+| [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 工作台 / 固定规则共享的规则模型工具。 |
+| [utils/workbenchOrchestrationRules.ts](../frontend/src/utils/workbenchOrchestrationRules.ts) | 编排规则映射为引擎 `ValidationRule[]`。 |
+| [utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 工作台元数据辅助（来源类型、规则类型、列预览限制等）。 |
+| [router/index.ts](../frontend/src/router/index.ts) | vue-router：路由表与全局认证守卫。 |
+| [App.vue](../frontend/src/App.vue) | 应用壳：左固定边栏 + 右独立滚动工作区；项目卡 + 用户菜单。 |
+| [style.css](../frontend/src/style.css) | 全局 token、Element Plus 校准、共享 utility class（`ec-btn-*` / `workbench-*` / `table-actions` 等）。 |
+
+## 三、后端目录（`backend`）
+
+### 3.1 启动与配置
 
 | 文件 | 作用 |
 |:---|:---|
-| [backend/run.py](../backend/run.py) | 启动 FastAPI 应用。 |
-| [backend/config.py](../backend/config.py) | 应用配置（含 `SVN_EXECUTABLE` 等）。 |
+| [run.py](../backend/run.py) | 启动 FastAPI（`uvicorn`）。 |
+| [config.py](../backend/config.py) | 应用配置：`api_v1_prefix=/api/v1`、`SVN_EXECUTABLE` 等。 |
+| [app/database.py](../backend/app/database.py) | 异步 SQLAlchemy 引擎、会话、`init_db()` 与默认管理员/项目兜底。 |
 
-### API 层（`backend/app/api`）
-
-| 模块 | 作用 |
-|:---|:---|
-| [router.py](../backend/app/api/router.py) | 聚合 `source` / `execute` / `fixed-rules` 子路由。 |
-| [source_api.py](../backend/app/api/source_api.py) | 数据源：`capabilities`、`local-pick`（tkinter）、`metadata`、`column-preview`、组合预览等。 |
-| [execute_api.py](../backend/app/api/execute_api.py) | 主引擎：`POST /api/v1/engine/execute`，消费 `TaskTree`。 |
-| [fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | 固定规则：配置 CRUD、SVN、执行。 |
-| [schemas.py](../backend/app/api/schemas.py)、[fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py) | Pydantic 请求/响应模型。 |
-
-### 固定规则服务（`backend/app/fixed_rules`）
+### 3.2 认证与权限
 
 | 模块 | 作用 |
 |:---|:---|
-| [service.py](../backend/app/fixed_rules/service.py) | 配置读写、版本迁移、`config_issues` 非阻断加载、编排执行并对接统一结果协议。 |
-| [schemas.py](../backend/app/fixed_rules/schemas.py) | 固定规则域内数据结构。 |
+| [app/auth/router.py](../backend/app/auth/router.py) | `/api/v1/auth/*`：注册 / 登录 / me / change-password / switch-project；默认管理员登录失败时受控自修复。 |
+| [app/auth/security.py](../backend/app/auth/security.py) | bcrypt 哈希、JWT 编解码。 |
+| [app/auth/dependencies.py](../backend/app/auth/dependencies.py) | 当前用户、当前项目、超级管理员校验依赖。 |
+| [app/admin/router.py](../backend/app/admin/router.py) | `/api/v1/admin/*`：项目 CRUD、成员角色 / 归属调整、密码重置；项目管理员获得受限版后台。 |
 
-### 数据加载与外部能力（`backend/app/loaders`）
-
-| 模块 | 作用 |
-|:---|:---|
-| [local_reader.py](../backend/app/loaders/local_reader.py) | 本地 Excel（openpyxl/xlrd）/ CSV 读取与元数据、预览数据。 |
-| [svn_manager.py](../backend/app/loaders/svn_manager.py) | 固定规则场景下的 SVN CLI 调用与工作副本更新（含 Windows 探测逻辑）。 |
-| [feishu_reader.py](../backend/app/loaders/feishu_reader.py) | 飞书读取占位（文档与代码均标明未完全打通）。 |
-
-### 规则引擎（`backend/app/rules`）
+### 3.3 数据源与执行
 
 | 模块 | 作用 |
 |:---|:---|
-| [engine_core.py](../backend/app/rules/engine_core.py) | 规则注册、调度执行、与主工作台执行链路核心。 |
-| [rule_basics.py](../backend/app/rules/rule_basics.py) | 基础规则：`not_null`、`unique` 等。 |
-| [rule_cross.py](../backend/app/rules/rule_cross.py) | 跨表类规则：`cross_table_mapping`。 |
-| [rule_fixed.py](../backend/app/rules/rule_fixed.py) | 固定规则执行侧：`fixed_value_compare`、`not_null`、`unique`、组合变量 `composite_condition_check` 等。 |
+| [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、metadata、列预览、组合预览。 |
+| [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config`：工作台配置按 `project_id + user_id` 隔离持久化。 |
+| [app/api/execute_api.py](../backend/app/api/execute_api.py) | `/api/v1/engine/execute`：消费 `TaskTree`，调用规则引擎，返回统一结果。 |
+| [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、SVN 更新、执行。 |
+| [app/api/schemas.py](../backend/app/api/schemas.py)、[app/api/fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py) | Pydantic 入参 / 出参模型。 |
 
-### 工具（`backend/app/utils`）
+### 3.4 固定规则服务
 
 | 模块 | 作用 |
 |:---|:---|
-| [formatter.py](../backend/app/utils/formatter.py) | 响应/结果格式化。 |
-| [data_cleaner.py](../backend/app/utils/data_cleaner.py) | 数据清洗辅助。 |
+| [app/fixed_rules/service.py](../backend/app/fixed_rules/service.py) | 配置读写、`version 2/3 → 4` 自动迁移、`config_issues` 非阻断加载、临时 `TaskTree` 聚合并复用主引擎。 |
+| [app/fixed_rules/schemas.py](../backend/app/fixed_rules/schemas.py) | 固定规则域内数据结构。 |
 
-### 测试（`backend/tests`）
+### 3.5 数据加载
 
-| 作用 |
-|:---|
-| 对 execute、fixed-rules、SVN 等接口与逻辑的自动化回归（README 中记录 `pytest` 基线）。 |
-
----
-
-## 四、文档类模块（仓库根与协作）
-
-| 文档 | 作用 |
+| 模块 | 作用 |
 |:---|:---|
-| [MODULES.md](MODULES.md) | 本文档：前后端与页面级模块职责一览与架构简图。 |
-| [README.md](../README.md) | 项目简介、接口清单、联调步骤、变更说明汇总。 |
-| [需求文档.md](archive/需求文档.md) | SDD：与代码对齐的架构、页面设计、协议与边界（已归档，由 `docs/ARCHITECTURE.md` 取代）。 |
-| [frontend/README.md](../frontend/README.md) | 前端子项目说明与模块推进建议。 |
-| [PROJECT_RECORD.md](archive/PROJECT_RECORD.md)、[CHANGELOG.md](../CHANGELOG.md) | 进度与版本记录（README「相关文档」引用）。 |
+| [app/loaders/local_reader.py](../backend/app/loaders/local_reader.py) | 本地 Excel（openpyxl/xlrd）/ CSV 读取、Sheet/列元数据、列预览。 |
+| [app/loaders/svn_manager.py](../backend/app/loaders/svn_manager.py) | SVN CLI 调用与工作副本更新（含 Windows TortoiseSVN 自动探测）。 |
+| [app/loaders/feishu_reader.py](../backend/app/loaders/feishu_reader.py) | 飞书读取占位实现（未闭环）。 |
 
----
+### 3.6 规则引擎（三层架构）
 
-## 五、关系简图（逻辑分层）
+| 模块 | 作用 |
+|:---|:---|
+| [app/rules/engine_core.py](../backend/app/rules/engine_core.py) | `RuleSpec` 注册中心、调度、执行；`register_rule(rule_type, *, dependent_tags=...)` 唯一签名。 |
+| [app/rules/domain/](../backend/app/rules/domain/) | 值规范化（`value.py`）、统一异常结果（`result.py`）、operator 判定（`operators.py`）。 |
+| [app/rules/infrastructure/](../backend/app/rules/infrastructure/) | 依赖 tag 提取器（`tag_extractor.py`）。 |
+| [app/rules/handlers/](../backend/app/rules/handlers/) | 5 个 `rule_type` handler：`basics.py`、`cross.py`、`fixed.py`；`__init__.py` 副作用 import 触发 `@register_rule` 注册。 |
+
+`backend/app/rules/_*.py` 与 `rule_*.py` 是旧路径薄壳 shim，仅 `from <new path> import *` 转发，对外行为零变更。
+
+### 3.7 工具与测试
+
+| 模块 | 作用 |
+|:---|:---|
+| [app/utils/formatter.py](../backend/app/utils/formatter.py) | 统一执行响应格式化。 |
+| [app/utils/data_cleaner.py](../backend/app/utils/data_cleaner.py) | 数据清洗辅助。 |
+| [tests/](../backend/tests/) | 接口与引擎黑盒回归；`tests/snapshots/engine/S1–S4.json` 是引擎执行的字节级快照基线。 |
+
+## 四、关系简图（逻辑分层）
 
 ```mermaid
 flowchart TB
   subgraph ui [展示层]
-    MainBoard[MainBoard]
-    FixedRulesBoard[FixedRulesBoard]
+    MainBoard
+    FixedRulesBoard
+    AdminView
+    ProfileView
   end
   subgraph state [状态层]
+    AuthStore[store/auth]
     WBStore[store/workbench]
     FRStore[store/fixedRules]
   end
-  subgraph apiClient [前端API层]
+  subgraph apiClient [前端 API 层]
+    AuthApi[api/auth]
+    AdminApi[api/admin]
     WBApi[api/workbench]
     FRApi[api/fixedRules]
   end
   subgraph http [FastAPI]
+    AuthRouter[auth/router]
+    AdminRouter[admin/router]
     SourceAPI[source_api]
+    WorkbenchAPI[workbench_api]
     ExecuteAPI[execute_api]
     FixedAPI[fixed_rules_api]
   end
@@ -141,13 +159,24 @@ flowchart TB
     Rules[rules]
     FRService[fixed_rules/service]
   end
+
   MainBoard --> WBStore
   FixedRulesBoard --> FRStore
+  AdminView --> AuthStore
+  ProfileView --> AuthStore
+
+  AuthStore --> AuthApi
   WBStore --> WBApi
   FRStore --> FRApi
+  AdminView --> AdminApi
+
+  AuthApi --> AuthRouter
+  AdminApi --> AdminRouter
   WBApi --> SourceAPI
+  WBApi --> WorkbenchAPI
   WBApi --> ExecuteAPI
   FRApi --> FixedAPI
+
   ExecuteAPI --> Rules
   ExecuteAPI --> Loaders
   FixedAPI --> FRService
@@ -155,6 +184,12 @@ flowchart TB
   FRService --> Loaders
 ```
 
----
+## 五、文档入口
 
-**说明**：主工作台步骤 3 仅静态规则；主工作台静态规则仍主要面向**单变量**（组合变量进入 `TaskTree` 但步骤 3 会过滤）。固定规则页在 `version = 4` 下可绑定单变量与组合变量规则（含 `composite_condition_check`），与主工作台数据源/变量池持久化隔离。以上与 [需求文档.md](archive/需求文档.md) 第 1.3 节「能力边界」及 [README.md](../README.md)「当前关键能力」一致。
+| 文档 | 作用 |
+|:---|:---|
+| [../README.md](../README.md) | 项目简介、快速开始、API 速览。 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 当前稳定 SDD（数据模型 / 协议 / 架构 / 边界）。 |
+| [MODULES.md](MODULES.md) | 本文档：模块速查。 |
+| [../CHANGELOG.md](../CHANGELOG.md) | 版本日志。 |
+| [archive/](archive/) | 历史快照（`PROJECT_RECORD.md` 与早期 `需求文档.md`），不再追加。 |
