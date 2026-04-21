@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from typing import Any, Literal
 
@@ -64,6 +68,41 @@ def _get_pick_filetypes(source_type: str) -> list[tuple[str, str]]:
     raise ValueError(f"暂不支持 {source_type} 的本地文件选择。")
 
 
+# 以独立子进程运行 tkinter 文件选择框，避免在长生命周期的 FastAPI/uvicorn
+# 主进程里残留 Tcl 解释器与窗口焦点资源；子进程退出后所有 GUI 资源会被
+# 操作系统一并回收，前后端事件循环也不会被阻塞或挂起。
+_PICKER_SUBPROCESS_SCRIPT = textwrap.dedent(
+    """
+    import json
+    import sys
+    import tkinter as tk
+    from tkinter import filedialog
+
+    config = json.loads(sys.argv[1])
+    filetypes = [tuple(item) for item in config.get("filetypes", [])]
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.update()
+        selected_path = filedialog.askopenfilename(
+            title=config.get("title", "选择文件"),
+            filetypes=filetypes,
+        )
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    sys.stdout.write(selected_path or "")
+    """
+).strip()
+
+_PICKER_SUBPROCESS_TIMEOUT_SECONDS = 600
+
+
 def _validate_selected_path(source_type: str, selected_path: str) -> str:
     """校验系统文件框返回的真实路径。"""
     if not selected_path:
@@ -92,31 +131,41 @@ def _validate_selected_path(source_type: str, selected_path: str) -> str:
 
 
 def _show_local_file_dialog(source_type: str) -> str:
-    """在本机弹出文件选择框并返回真实路径。"""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except Exception as error:  # pragma: no cover - 仅在 GUI 依赖缺失时触发
-        raise RuntimeError(
-            "当前环境无法使用本机文件选择框，请手动输入本地文件路径。"
-        ) from error
+    """在独立子进程中弹出系统文件选择框并返回真实路径。
 
-    root: tk.Tk | None = None
+    采用子进程隔离的原因：
+    - tkinter 在长期运行的 uvicorn 主进程里反复创建/销毁 Tk 根窗口，
+      容易在 Windows 上残留焦点抢占与 Tcl 资源，进而引发后续请求被卡住。
+    - 子进程方案让每次选择都在干净环境里创建并销毁 GUI，事件循环不会被
+      阻塞，前端连续选择文件也不会越用越慢。
+    """
+
+    config = {
+        "title": "选择本地配置文件",
+        "filetypes": _get_pick_filetypes(source_type),
+    }
+
     try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        root.update()
-        selected_path = filedialog.askopenfilename(
-            title="选择本地配置文件",
-            filetypes=_get_pick_filetypes(source_type),
+        completed = subprocess.run(
+            [sys.executable, "-c", _PICKER_SUBPROCESS_SCRIPT, json.dumps(config)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_PICKER_SUBPROCESS_TIMEOUT_SECONDS,
+            check=False,
         )
-        return selected_path.strip()
-    except Exception as error:  # pragma: no cover - 真实桌面环境问题
-        raise RuntimeError(f"系统文件选择框打开失败：{error}") from error
-    finally:
-        if root is not None:
-            root.destroy()
+    except FileNotFoundError as error:  # pragma: no cover - 缺少 Python 解释器
+        raise RuntimeError(
+            "当前环境无法启动本机文件选择子进程，请手动输入本地文件路径。"
+        ) from error
+    except subprocess.TimeoutExpired as error:  # pragma: no cover - 用户长时间未操作
+        raise RuntimeError("系统文件选择框等待超时，请重试。") from error
+
+    if completed.returncode != 0:  # pragma: no cover - 真实桌面环境问题
+        stderr_text = (completed.stderr or "").strip() or "未知错误"
+        raise RuntimeError(f"系统文件选择框打开失败：{stderr_text}")
+
+    return (completed.stdout or "").strip()
 
 
 @router.get("/capabilities")

@@ -33,8 +33,11 @@ defineProps<{
 :deep(td) {
   padding: 12px 16px;
   vertical-align: middle;
+  text-align: left;
 }
 :deep(th) {
   padding: 12px 16px;
+  vertical-align: middle;
+  text-align: left;
 }
 </style>

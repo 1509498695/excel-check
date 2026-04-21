@@ -307,7 +307,7 @@ defineExpose({
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="170" align="right">
+      <el-table-column label="操作" width="170" align="left">
         <template #default="{ row }">
           <div class="table-actions">
             <button type="button" class="ec-action-link" @click="openEditDialog(row)">编辑</button>

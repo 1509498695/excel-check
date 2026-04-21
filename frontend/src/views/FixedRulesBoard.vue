@@ -1553,7 +1553,7 @@ async function handleSvnUpdate(): Promise<void> {
                         <th class="w-[28%]">规则名称</th>
                         <th>目标变量</th>
                         <th class="w-[20%]">规则选择</th>
-                        <th class="w-[120px] text-right">操作</th>
+                        <th class="w-[20%] text-left align-middle">操作</th>
                       </tr>
                     </template>
                     <template #body>
@@ -1610,7 +1610,7 @@ async function handleSvnUpdate(): Promise<void> {
                               <template v-else>—</template>
                             </div>
                           </td>
-                          <td class="align-top text-right">
+                          <td class="text-left align-top">
                             <div class="table-actions">
                               <button
                                 type="button"

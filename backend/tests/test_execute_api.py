@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -267,6 +270,73 @@ async def test_local_pick_returns_cancelled_when_user_closes_dialog(
     assert payload["code"] == 204
     assert payload["msg"] == "cancelled"
     assert payload["data"]["selected_path"] == ""
+
+
+def test_show_local_file_dialog_returns_subprocess_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证子进程方案下，正常返回时取真实路径并去除两端空白。"""
+
+    captured_args: dict[str, Any] = {}
+
+    def fake_run(args: list[str], **kwargs: Any) -> SimpleNamespace:
+        captured_args["args"] = args
+        captured_args["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout=" C:/tmp/example.xlsx \n", stderr="")
+
+    monkeypatch.setattr(source_api.subprocess, "run", fake_run)
+
+    result = source_api._show_local_file_dialog("local_excel")
+
+    assert result == "C:/tmp/example.xlsx"
+    assert captured_args["args"][0] == source_api.sys.executable
+    assert captured_args["kwargs"]["timeout"] == source_api._PICKER_SUBPROCESS_TIMEOUT_SECONDS
+    assert captured_args["kwargs"]["capture_output"] is True
+
+
+def test_show_local_file_dialog_returns_empty_when_user_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证用户在子进程弹窗中取消时，函数返回空串。"""
+
+    monkeypatch.setattr(
+        source_api.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+
+    assert source_api._show_local_file_dialog("local_csv") == ""
+
+
+def test_show_local_file_dialog_raises_runtime_error_on_subprocess_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证子进程超时会被转换为 RuntimeError，由路由层映射成 500。"""
+
+    def raise_timeout(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        raise subprocess.TimeoutExpired(cmd="python", timeout=1)
+
+    monkeypatch.setattr(source_api.subprocess, "run", raise_timeout)
+
+    with pytest.raises(RuntimeError, match="超时"):
+        source_api._show_local_file_dialog("local_excel")
+
+
+def test_show_local_file_dialog_raises_runtime_error_on_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证子进程异常退出时，会带上 stderr 抛出 RuntimeError。"""
+
+    monkeypatch.setattr(
+        source_api.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="tk init failed",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="tk init failed"):
+        source_api._show_local_file_dialog("local_excel")
 
 
 @pytest.mark.anyio

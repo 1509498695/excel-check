@@ -607,35 +607,40 @@ function getMemberRoleLabel(member: ProjectMember): string {
               <div>当前没有可管理项目</div>
             </div>
 
-            <div v-else class="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-4">
-              <div>
-                <div class="mb-1.5 text-[12px] font-medium text-ink-500">项目名称</div>
-                <div class="rounded-md border border-gray-200 bg-white px-4 py-2 text-[14px] font-semibold text-ink-900">
-                  {{ selectedProject.name }}
+            <div
+              v-else-if="selectedProject"
+              class="overflow-hidden rounded-lg border border-gray-200 bg-white"
+            >
+              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left md:border-r">
+                  <div class="text-[12px] font-medium text-ink-500">项目名称</div>
+                  <div class="mt-3 text-[14px] font-semibold text-ink-900">
+                    {{ selectedProject.name }}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div class="mb-1.5 text-[12px] font-medium text-ink-500">归属类型</div>
-                <div class="rounded-md border border-gray-200 bg-white px-4 py-2 text-[14px] text-ink-900">
-                  {{ isDefaultProject(selectedProject) ? '系统保留' : '自定义项目' }}
+                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left xl:border-r">
+                  <div class="text-[12px] font-medium text-ink-500">归属类型</div>
+                  <div class="mt-3 text-[14px] text-ink-900">
+                    {{ isDefaultProject(selectedProject) ? '系统保留' : '自定义项目' }}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div class="mb-1.5 text-[12px] font-medium text-ink-500">成员数</div>
-                <div class="rounded-md border border-gray-200 bg-white px-4 py-2 font-mono text-[14px] text-ink-900">
-                  {{ selectedProject.member_count ?? members.length }}
+                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left md:border-r xl:border-r">
+                  <div class="text-[12px] font-medium text-ink-500">成员数</div>
+                  <div class="mt-3 font-mono text-[14px] text-ink-900">
+                    {{ selectedProject.member_count ?? members.length }}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div class="mb-1.5 text-[12px] font-medium text-ink-500">创建时间</div>
-                <div class="rounded-md border border-gray-200 bg-white px-4 py-2 font-mono text-[13px] text-ink-700">
-                  {{ formatDate(selectedProject.created_at) }}
+                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left">
+                  <div class="text-[12px] font-medium text-ink-500">创建时间</div>
+                  <div class="mt-3 font-mono text-[13px] text-ink-700">
+                    {{ formatDate(selectedProject.created_at) }}
+                  </div>
                 </div>
-              </div>
-              <div class="md:col-span-2 xl:col-span-4">
-                <div class="mb-1.5 text-[12px] font-medium text-ink-500">项目描述</div>
-                <div class="min-h-[64px] whitespace-pre-wrap rounded-md border border-gray-200 bg-white px-4 py-2.5 text-[13px] leading-relaxed text-ink-700">
-                  {{ selectedProject.description || '无项目描述' }}
+                <div class="flex min-h-[112px] flex-col items-start px-6 py-4 text-left md:col-span-2 xl:col-span-4">
+                  <div class="text-[12px] font-medium text-ink-500">项目描述</div>
+                  <div class="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-700">
+                    {{ selectedProject.description || '无项目描述' }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -679,22 +684,22 @@ function getMemberRoleLabel(member: ProjectMember): string {
 
             <!-- 成员表（极浅完整网格线） -->
             <div v-else class="overflow-hidden rounded-md border border-gray-200">
-              <table class="admin-member-table w-full border-collapse text-[13px]">
+              <table class="admin-member-table w-full table-fixed border-collapse text-[13px]">
                 <thead class="bg-gray-50">
                   <tr>
-                    <th class="w-[220px] border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       用户名
                     </th>
-                    <th class="w-[160px] border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       角色
                     </th>
-                    <th class="w-[200px] border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       归属项目
                     </th>
-                    <th class="w-[220px] border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       加入时间
                     </th>
-                    <th class="border border-gray-100 px-4 py-2.5 text-right text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       操作
                     </th>
                   </tr>
@@ -706,10 +711,10 @@ function getMemberRoleLabel(member: ProjectMember): string {
                     :key="row.user_id"
                     class="bg-white transition hover:bg-gray-50"
                   >
-                    <td class="border border-gray-100 px-4 py-3 align-middle truncate font-medium text-ink-900">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle truncate font-medium text-ink-900">
                       {{ row.username }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
                       <span
                         class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium"
                         :class="getMemberRoleClass(row)"
@@ -717,13 +722,13 @@ function getMemberRoleLabel(member: ProjectMember): string {
                         {{ getMemberRoleLabel(row) }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle truncate text-ink-700">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle truncate text-ink-700">
                       {{ row.primary_project_name ?? '-' }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle font-mono text-[12px] text-ink-500">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle font-mono text-[12px] text-ink-500">
                       {{ formatDate(row.joined_at) }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle text-right">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
                       <div class="table-actions">
                         <button
                           v-if="auth.isSuperAdmin && row.user_id !== auth.user?.id"

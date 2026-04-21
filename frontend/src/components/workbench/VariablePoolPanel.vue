@@ -674,7 +674,7 @@ defineExpose({
           <el-table-column label="期望类型" min-width="120">
             <template #default="{ row }">{{ getExpectedTypeLabel(row.expected_type) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="210" align="right">
+          <el-table-column label="操作" width="210" align="left">
             <template #default="{ row }">
               <div class="table-actions">
                 <button type="button" class="ec-action-link" @click="chooseTag(row.tag)">查看详情</button>

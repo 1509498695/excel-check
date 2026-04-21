@@ -1105,13 +1105,13 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
           </div>
 
           <div v-else class="overflow-hidden rounded-field border border-line">
-            <table class="w-full text-[13px]">
+            <table class="w-full table-fixed text-[13px]">
               <thead class="bg-canvas text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
                 <tr>
-                  <th class="px-4 py-3 w-[28%]">规则名称</th>
-                  <th class="px-4 py-3">目标变量</th>
-                  <th class="px-4 py-3 w-[20%]">规则选择</th>
-                  <th class="px-4 py-3 w-[110px] text-right">操作</th>
+                  <th class="px-4 py-3 w-[28%] text-left align-middle">规则名称</th>
+                  <th class="px-4 py-3 text-left align-middle">目标变量</th>
+                  <th class="px-4 py-3 w-[20%] text-left align-middle">规则选择</th>
+                  <th class="px-4 py-3 w-[20%] text-left align-middle">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -1141,7 +1141,7 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                       {{ buildRuleCompareValueSummary(row) }}
                     </div>
                   </td>
-                  <td class="px-4 py-3 align-top text-right text-[12px]">
+                  <td class="px-4 py-3 text-left align-top text-[12px]">
                     <div class="table-actions">
                       <button
                         type="button"

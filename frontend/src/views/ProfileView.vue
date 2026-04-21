@@ -280,7 +280,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
                     <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       状态
                     </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-right text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
                       操作
                     </th>
                   </tr>
@@ -330,7 +330,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
                       </span>
                       <span v-else class="text-[12px] text-ink-500">未启用</span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle text-right">
+                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
                       <button
                         v-if="project.project_id !== auth.currentProjectId"
                         type="button"
