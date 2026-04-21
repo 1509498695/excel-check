@@ -18,6 +18,22 @@ from backend.app.rules.engine_core import (
 from backend.app.rules.infrastructure.tag_extractor import by_dict_and_target_tag
 
 
+def _get_rule_display_name(rule: ValidationRule) -> str:
+    """优先使用规则自定义展示名，否则回退到 rule_type。"""
+    display_name = rule.params.get("rule_name")
+    if isinstance(display_name, str) and display_name.strip():
+        return display_name.strip()
+    return rule.rule_type
+
+
+def _get_rule_location(rule: ValidationRule, *, tag: str, column_name: str) -> str:
+    """优先使用规则传入的展示定位，避免固定规则页退化成 tag 定位。"""
+    location = rule.params.get("location")
+    if isinstance(location, str) and location.strip():
+        return location.strip()
+    return f"{tag} -> {column_name}"
+
+
 @register_rule("cross_table_mapping", dependent_tags=by_dict_and_target_tag)
 def check_cross_table_mapping(
     rule: ValidationRule, context: RuleExecutionContext
@@ -45,15 +61,20 @@ def check_cross_table_mapping(
         missing_mapping_mask, [target_column, "_row_index"]
     ].iterrows():
         abnormal_results.append(
-            build_basic_result(
-                level="error",
-                rule_name=rule.rule_type,
-                tag=target_tag,
-                column_name=target_column,
-                row_index=row["_row_index"],
-                raw_value=row[target_column],
-                message="在基础字典中未命中该映射值。",
+                build_basic_result(
+                    level="error",
+                    rule_name=_get_rule_display_name(rule),
+                    tag=target_tag,
+                    column_name=target_column,
+                    row_index=row["_row_index"],
+                    raw_value=row[target_column],
+                    message="在基础字典中未命中该映射值。",
+                    location=_get_rule_location(
+                        rule,
+                        tag=target_tag,
+                        column_name=target_column,
+                    ),
+                )
             )
-        )
 
     return abnormal_results

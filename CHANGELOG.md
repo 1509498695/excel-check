@@ -6,6 +6,8 @@
 ## [Unreleased]
 
 - 文档重整：根 `README.md` 收口为 6 节骨架；新建 `docs/ARCHITECTURE.md`、`docs/MODULES.md` 集中沉淀稳定文档；`PROJECT_RECORD.md` 与 `需求文档.md` 归档到 `docs/archive/`。
+- 管理后台修复：超级管理员在成员表中调整自己的归属项目后，前端会立即调用现有项目切换接口，同步 JWT 与当前项目上下文，不再停留在旧项目。
+- 工作台规则弹窗新增单变量选项 `包含 (in)`；前端以变量池中的单个变量作为基础字典下拉，保存时复用现有 `cross_table_mapping` 执行语义。
 
 ## [0.5.0] - 2026-04-20
 

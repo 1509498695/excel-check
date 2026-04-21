@@ -12,8 +12,9 @@ export type FixedRuleType =
   | 'fixed_value_compare'
   | 'not_null'
   | 'unique'
+  | 'cross_table_mapping'
   | 'composite_condition_check'
-export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique'
+export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique' | 'in'
 
 export interface CompositeCondition {
   condition_id: string
@@ -49,6 +50,7 @@ export interface FixedRuleDefinition {
   rule_type: FixedRuleType
   operator?: FixedRuleOperator
   expected_value?: string
+  reference_variable_tag?: string
   composite_config?: CompositeRuleConfig
 }
 

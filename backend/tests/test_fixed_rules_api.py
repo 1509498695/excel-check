@@ -333,6 +333,60 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_cross_table_mapping_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证固定规则页可保存并读取“包含 (in)”映射后的 cross_table_mapping 规则。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_in.xlsx",
+        {"INT_ID": [1, 2, 4], "DICT_ID": [1, 2, 3]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    dict_tag = _build_single_tag("items-source", "items", "DICT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            },
+            {
+                "tag": dict_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DICT_ID",
+                "expected_type": "str",
+            },
+        ],
+        rules=[
+            {
+                "rule_id": "rule-int-id-in-dict",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 必须包含于 DICT_ID",
+                "target_variable_tag": target_tag,
+                "rule_type": "cross_table_mapping",
+                "reference_variable_tag": dict_tag,
+            }
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    get_payload = get_response.json()["data"]
+    assert get_payload["rules"][0]["rule_type"] == "cross_table_mapping"
+    assert get_payload["rules"][0]["reference_variable_tag"] == dict_tag
+
+
+@pytest.mark.anyio
 async def test_get_fixed_rules_config_migrates_legacy_payload(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -806,6 +860,63 @@ async def test_execute_fixed_rules_reports_unique_with_warning_level(
     assert all(item["level"] == "warning" for item in abnormal_results)
     assert all(item["rule_name"] == "INT_ID 必须唯一" for item in abnormal_results)
     assert all(item["location"] == "items -> INT_ID" for item in abnormal_results)
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_cross_table_mapping(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证固定规则页保存的“包含 (in)”规则会复用 cross_table_mapping 执行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "cross_table_mapping.xlsx",
+        {"INT_ID": [1, 2, 4], "DICT_ID": [1, 2, 3]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    dict_tag = _build_single_tag("items-source", "items", "DICT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            },
+            {
+                "tag": dict_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DICT_ID",
+                "expected_type": "str",
+            },
+        ],
+        rules=[
+            {
+                "rule_id": "rule-int-id-in-dict",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 必须包含于 DICT_ID",
+                "target_variable_tag": target_tag,
+                "rule_type": "cross_table_mapping",
+                "reference_variable_tag": dict_tag,
+            }
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["level"] == "error"
+    assert abnormal_results[0]["rule_name"] == "INT_ID 必须包含于 DICT_ID"
+    assert abnormal_results[0]["raw_value"] == 4
+    assert "未命中该映射值" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio

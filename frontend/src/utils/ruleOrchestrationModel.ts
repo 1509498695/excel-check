@@ -162,7 +162,11 @@ export function pruneRulesByRemovedTags(
     return rules
   }
 
-  return rules.filter((rule) => !removedTags.has(rule.target_variable_tag))
+  return rules.filter(
+    (rule) =>
+      !removedTags.has(rule.target_variable_tag) &&
+      !removedTags.has(rule.reference_variable_tag?.trim() ?? ''),
+  )
 }
 
 export function collectVariableTagsBySourceIds(

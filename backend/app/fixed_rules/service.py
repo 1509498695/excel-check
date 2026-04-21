@@ -33,6 +33,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
     "not_null",
     "unique",
+    "cross_table_mapping",
     "composite_condition_check",
 }
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
@@ -188,7 +189,12 @@ def run_saved_fixed_rules_svn_update(
 def build_fixed_rules_task_tree(config: FixedRulesConfig) -> TaskTree:
     """????????????????????? TaskTree?"""
     variable_map = {variable.tag: variable for variable in config.variables}
-    needed_tags = {rule.target_variable_tag for rule in config.rules}
+    needed_tags = {
+        tag
+        for rule in config.rules
+        for tag in [rule.target_variable_tag, rule.reference_variable_tag]
+        if tag
+    }
 
     variables = [variable for variable in config.variables if variable.tag in needed_tags]
     source_ids = {variable.source_id for variable in variables}
@@ -371,12 +377,13 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_id=rule.rule_id,
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
-                    target_variable_tag=rule.target_variable_tag,
-                    rule_type=rule.rule_type,
-                    operator=rule.operator,
-                    expected_value=rule.expected_value,
-                    composite_config=rule.composite_config,
-                )
+                target_variable_tag=rule.target_variable_tag,
+                rule_type=rule.rule_type,
+                operator=rule.operator,
+                expected_value=rule.expected_value,
+                reference_variable_tag=rule.reference_variable_tag,
+                composite_config=rule.composite_config,
+            )
             )
             continue
 
@@ -386,12 +393,13 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_id=rule.rule_id,
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
-                    target_variable_tag=rule.target_variable_tag,
-                    rule_type=rule.rule_type,
-                    operator=rule.operator,
-                    expected_value=rule.expected_value,
-                    composite_config=rule.composite_config,
-                )
+                target_variable_tag=rule.target_variable_tag,
+                rule_type=rule.rule_type,
+                operator=rule.operator,
+                expected_value=rule.expected_value,
+                reference_variable_tag=rule.reference_variable_tag,
+                composite_config=rule.composite_config,
+            )
             )
             continue
 
@@ -761,6 +769,7 @@ def _normalize_rules(
         rule_type = str(rule.rule_type).strip()
         operator = rule.operator.strip() if rule.operator else ""
         expected_value = rule.expected_value.strip() if rule.expected_value else ""
+        reference_variable_tag = (rule.reference_variable_tag or "").strip()
 
         if not rule_id:
             raise ValueError("?????? rule_id?")
@@ -783,6 +792,7 @@ def _normalize_rules(
         variable_kind = target_variable.variable_kind or "single"
         normalized_operator: str | None = None
         normalized_expected_value: str | None = None
+        normalized_reference_variable_tag: str | None = None
         normalized_composite_config: CompositeRuleConfig | None = None
 
         if variable_kind == "single" and rule_type == "composite_condition_check":
@@ -810,6 +820,25 @@ def _normalize_rules(
                     ) from exc
             normalized_operator = operator
             normalized_expected_value = expected_value
+        elif rule_type == "cross_table_mapping":
+            if not reference_variable_tag:
+                raise ValueError(
+                    f"规则 '{rule_id}' 缺少 reference_variable_tag。"
+                )
+            if reference_variable_tag == target_variable_tag:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的参考变量不能与目标变量相同。"
+                )
+            if reference_variable_tag not in variable_map:
+                raise ValueError(
+                    f"规则 '{rule_id}' 引用了不存在的参考变量 '{reference_variable_tag}'。"
+                )
+            reference_variable = variable_map[reference_variable_tag]
+            if (reference_variable.variable_kind or "single") != "single":
+                raise ValueError(
+                    f"规则 '{rule_id}' 的参考变量 '{reference_variable_tag}' 必须是单个变量。"
+                )
+            normalized_reference_variable_tag = reference_variable_tag
         elif rule_type == "composite_condition_check":
             normalized_composite_config = _normalize_composite_rule_config(
                 rule_id=rule_id,
@@ -826,6 +855,7 @@ def _normalize_rules(
                 rule_type=rule_type,
                 operator=normalized_operator,
                 expected_value=normalized_expected_value,
+                reference_variable_tag=normalized_reference_variable_tag,
                 composite_config=normalized_composite_config,
             )
         )
@@ -1214,6 +1244,14 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "operator": rule.operator,
             "expected_value": rule.expected_value,
+            "rule_name": rule.rule_name,
+            "location": location,
+        }
+
+    if rule.rule_type == "cross_table_mapping":
+        return {
+            "dict_tag": rule.reference_variable_tag,
+            "target_tag": target_variable.tag,
             "rule_name": rule.rule_name,
             "location": location,
         }

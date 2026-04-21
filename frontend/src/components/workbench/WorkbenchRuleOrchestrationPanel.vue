@@ -36,6 +36,7 @@ const ruleForm = reactive<{
   target_variable_tag: string
   selected_rule: FixedRuleSelection
   expected_value: string
+  reference_variable_tag: string
 }>({
   rule_id: '',
   group_id: 'ungrouped',
@@ -43,6 +44,7 @@ const ruleForm = reactive<{
   target_variable_tag: '',
   selected_rule: 'gt',
   expected_value: '0',
+  reference_variable_tag: '',
 })
 
 const compositeRuleForm = reactive<CompositeRuleConfig>({
@@ -63,6 +65,7 @@ const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> 
   { label: '小于 (<)', value: 'lt' },
   { label: '非空校验', value: 'not_null' },
   { label: '唯一校验', value: 'unique' },
+  { label: '包含 (in)', value: 'in' },
 ]
 
 const compositeFilterOptions: Array<{ label: string; value: CompositeFilterOperator }> = [
@@ -97,6 +100,7 @@ const ruleSelectionNameMap: Record<FixedRuleSelection, string> = {
   lt: '小于',
   not_null: '非空校验',
   unique: '唯一校验',
+  in: '包含',
 }
 const operatorSymbolMap: Record<FixedRuleOperator, string> = {
   eq: '=',
@@ -114,11 +118,17 @@ const sourceMap = computed(
   () => new Map(store.sources.map((source) => [source.id, source] as const)),
 )
 const variableOptions = computed(() => store.variables)
+const singleVariableOptions = computed(() =>
+  store.variables.filter((variable) => (variable.variable_kind ?? 'single') === 'single'),
+)
 const selectedRuleVariable = computed<VariableTag | null>(
   () => variableMap.value.get(ruleForm.target_variable_tag) ?? null,
 )
 const isCompositeRuleTarget = computed(
   () => (selectedRuleVariable.value?.variable_kind ?? 'single') === 'composite',
+)
+const referenceVariableOptions = computed(() =>
+  singleVariableOptions.value.filter((variable) => variable.tag !== ruleForm.target_variable_tag),
 )
 const compositeFieldOptions = computed(() => {
   const variable = selectedRuleVariable.value
@@ -143,6 +153,9 @@ const canCreateRule = computed(() => variableOptions.value.length > 0)
 
 const shouldShowExpectedValue = computed(
   () => !isCompositeRuleTarget.value && isCompareRuleSelection(ruleForm.selected_rule),
+)
+const shouldShowReferenceVariable = computed(
+  () => !isCompositeRuleTarget.value && ruleForm.selected_rule === 'in',
 )
 const expectedValuePlaceholder = computed(() =>
   ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
@@ -170,6 +183,21 @@ const canSubmitGroup = computed(() => groupForm.name.trim().length > 0)
 watch(
   () => ruleForm.selected_rule,
   (selectedRule) => {
+    if (selectedRule === 'in') {
+      ruleForm.expected_value = ''
+      if (
+        ruleForm.reference_variable_tag &&
+        !referenceVariableOptions.value.some(
+          (variable) => variable.tag === ruleForm.reference_variable_tag,
+        )
+      ) {
+        ruleForm.reference_variable_tag = ''
+      }
+      syncRuleNameWithForm()
+      return
+    }
+
+    ruleForm.reference_variable_tag = ''
     if (!isCompareRuleSelection(selectedRule)) {
       ruleForm.expected_value = ''
       syncRuleNameWithForm()
@@ -188,8 +216,17 @@ watch(
   [
     () => ruleForm.target_variable_tag,
     () => ruleForm.expected_value,
+    () => ruleForm.reference_variable_tag,
   ],
   () => {
+    if (
+      ruleForm.reference_variable_tag &&
+      !referenceVariableOptions.value.some(
+        (variable) => variable.tag === ruleForm.reference_variable_tag,
+      )
+    ) {
+      ruleForm.reference_variable_tag = ''
+    }
     syncRuleNameWithForm()
   },
 )
@@ -447,6 +484,9 @@ function getRuleSelectionValue(rule: FixedRuleDefinition): FixedRuleSelection {
   if (rule.rule_type === 'fixed_value_compare') {
     return rule.operator ?? 'gt'
   }
+  if (rule.rule_type === 'cross_table_mapping') {
+    return 'in'
+  }
   return rule.rule_type as FixedRuleSelection
 }
 
@@ -472,6 +512,7 @@ function buildDefaultRuleName(
   variable: VariableTag | null,
   selectedRule: FixedRuleSelection,
   expectedValue: string,
+  referenceVariableTag = '',
 ): string {
   if (!variable) {
     return ''
@@ -487,6 +528,11 @@ function buildDefaultRuleName(
   }
 
   const baseName = `${normalizedSheet}-${normalizedColumn}-${getRuleSelectionName(selectedRule)}`
+  if (selectedRule === 'in') {
+    const referenceVariable = variableMap.value.get(referenceVariableTag.trim())
+    const referenceLabel = referenceVariable?.column?.trim() || referenceVariableTag.trim()
+    return referenceLabel ? `${baseName}+${referenceLabel}` : baseName
+  }
   if (!isCompareRuleSelection(selectedRule)) {
     return baseName
   }
@@ -500,6 +546,7 @@ function buildDefaultRuleNameFromForm(): string {
     selectedRuleVariable.value,
     ruleForm.selected_rule,
     ruleForm.expected_value,
+    ruleForm.reference_variable_tag,
   )
 }
 
@@ -589,6 +636,12 @@ function buildRuleCondition(rule: FixedRuleDefinition): string {
   if (rule.rule_type === 'unique') {
     return `${columnName} 唯一校验`
   }
+  if (rule.rule_type === 'cross_table_mapping') {
+    const referenceVariable = variableMap.value.get(rule.reference_variable_tag?.trim() ?? '')
+    const referenceLabel =
+      referenceVariable?.column?.trim() || rule.reference_variable_tag?.trim() || '未绑定基础字典'
+    return `${columnName} 包含于 ${referenceLabel}`
+  }
   return `${columnName} ${getOperatorLabel(rule.operator ?? 'gt')} ${rule.expected_value ?? ''}`
 }
 
@@ -609,6 +662,20 @@ function buildRuleVariableSummary(rule: FixedRuleDefinition): string {
 
 function buildRuleSourcePathSummary(rule: FixedRuleDefinition): string {
   return getSourcePath(resolveRuleSource(rule)) || '当前数据源未记录路径'
+}
+
+function buildRuleCompareValueSummary(rule: FixedRuleDefinition): string {
+  if (rule.rule_type === 'fixed_value_compare') {
+    return rule.expected_value ?? ''
+  }
+  if (rule.rule_type === 'cross_table_mapping') {
+    const referenceVariable = variableMap.value.get(rule.reference_variable_tag?.trim() ?? '')
+    return referenceVariable?.tag ?? rule.reference_variable_tag ?? '未绑定基础字典变量'
+  }
+  if (rule.rule_type === 'composite_condition_check') {
+    return `${rule.composite_config?.branches.length ?? 0} 个分支`
+  }
+  return '—'
 }
 
 async function persistConfig(successMessage?: string, silent = true): Promise<boolean> {
@@ -689,6 +756,7 @@ function openCreateRuleDialog(): void {
   ruleForm.target_variable_tag = variableOptions.value[0]?.tag ?? ''
   ruleForm.selected_rule = 'gt'
   ruleForm.expected_value = '0'
+  ruleForm.reference_variable_tag = ''
   resetCompositeConfig()
   isRuleNameManuallyEdited.value = false
   lastAutoGeneratedRuleName.value = ''
@@ -707,16 +775,20 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
   if (rule.rule_type === 'composite_condition_check') {
     ruleForm.selected_rule = 'gt'
     ruleForm.expected_value = ''
+    ruleForm.reference_variable_tag = ''
     applyCompositeConfig(rule.composite_config)
   } else {
     ruleForm.selected_rule = getRuleSelectionValue(rule)
-    ruleForm.expected_value = rule.expected_value ?? ''
+    ruleForm.expected_value = rule.rule_type === 'fixed_value_compare' ? rule.expected_value ?? '' : ''
+    ruleForm.reference_variable_tag =
+      rule.rule_type === 'cross_table_mapping' ? rule.reference_variable_tag ?? '' : ''
     resetCompositeConfig()
   }
   const defaultRuleName = buildDefaultRuleName(
     resolveRuleVariable(rule),
     ruleForm.selected_rule,
     ruleForm.expected_value,
+    ruleForm.reference_variable_tag,
   )
   const normalizedRuleName = rule.rule_name.trim()
   isRuleNameManuallyEdited.value =
@@ -797,6 +869,24 @@ function validateRuleForm(): boolean {
   }
 
   if (!shouldShowExpectedValue.value) {
+    if (ruleForm.selected_rule === 'in') {
+      if (!ruleForm.reference_variable_tag.trim()) {
+        ElMessage.warning('请选择基础字典变量。')
+        return false
+      }
+      if (ruleForm.reference_variable_tag === ruleForm.target_variable_tag) {
+        ElMessage.warning('基础字典变量不能与目标变量相同。')
+        return false
+      }
+      if (
+        !referenceVariableOptions.value.some(
+          (variable) => variable.tag === ruleForm.reference_variable_tag,
+        )
+      ) {
+        ElMessage.warning('当前基础字典变量不存在，请重新选择。')
+        return false
+      }
+    }
     return true
   }
   if (!ruleForm.expected_value.trim()) {
@@ -830,7 +920,16 @@ async function handleSaveRule(): Promise<void> {
     })
   } else {
     const selectedRule = ruleForm.selected_rule
-    if (isCompareRuleSelection(selectedRule)) {
+    if (selectedRule === 'in') {
+      store.upsertOrchestrationRule({
+        rule_id: ruleForm.rule_id || undefined,
+        group_id: ruleForm.group_id,
+        rule_name: ruleForm.rule_name,
+        target_variable_tag: ruleForm.target_variable_tag,
+        rule_type: 'cross_table_mapping',
+        reference_variable_tag: ruleForm.reference_variable_tag,
+      })
+    } else if (isCompareRuleSelection(selectedRule)) {
       store.upsertOrchestrationRule({
         rule_id: ruleForm.rule_id || undefined,
         group_id: ruleForm.group_id,
@@ -1039,11 +1138,7 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                   <td class="px-4 py-3 align-top">
                     <div class="text-ink-700">{{ buildRuleSelectionSummary(row) }}</div>
                     <div class="mt-1 font-mono text-[12px] text-ink-500">
-                      <template v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</template>
-                      <template v-else-if="row.rule_type === 'composite_condition_check'">
-                        {{ row.composite_config?.branches.length ?? 0 }} 个分支
-                      </template>
-                      <template v-else>—</template>
+                      {{ buildRuleCompareValueSummary(row) }}
                     </div>
                   </td>
                   <td class="px-4 py-3 align-top text-right text-[12px]">
@@ -1229,6 +1324,27 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
             <div v-if="shouldShowExpectedValue">
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值</label>
               <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
+            </div>
+            <div v-else-if="shouldShowReferenceVariable">
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值</label>
+              <el-select
+                v-model="ruleForm.reference_variable_tag"
+                class="w-full"
+                filterable
+                clearable
+                :disabled="!referenceVariableOptions.length"
+                placeholder="选择基础字典变量"
+              >
+                <el-option
+                  v-for="variable in referenceVariableOptions"
+                  :key="variable.tag"
+                  :label="buildVariableOptionLabel(variable)"
+                  :value="variable.tag"
+                />
+              </el-select>
+              <p class="mt-1 text-[12px] text-ink-500">
+                {{ referenceVariableOptions.length ? '选择变量池中的另一列作为基础字典。' : '当前没有可用于包含校验的单个变量。' }}
+              </p>
             </div>
           </div>
         </section>

@@ -218,6 +218,8 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
     const dictTag = typeof rule.params.dict_tag === 'string' ? rule.params.dict_tag.trim() : ''
     const targetTag =
       typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+    const location = typeof rule.params.location === 'string' ? rule.params.location.trim() : ''
 
     if (!dictTag) {
       throw new Error('规则 "cross_table_mapping" 缺少字典变量。')
@@ -238,7 +240,12 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
     return {
       rule_id: rule.rule_id,
       rule_type: rule.rule_type,
-      params: { dict_tag: dictTag, target_tag: targetTag },
+      params: createCleanObject({
+        dict_tag: dictTag,
+        target_tag: targetTag,
+        rule_name: ruleName || undefined,
+        location: location || undefined,
+      }),
     }
   }
 

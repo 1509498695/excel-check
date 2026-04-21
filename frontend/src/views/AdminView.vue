@@ -299,12 +299,21 @@ async function handleSubmitMoveProject(): Promise<void> {
   }
 
   isMovingMemberProject.value = true
+  const targetProjectId = moveProjectForm.targetProjectId
+  const shouldSyncCurrentProject =
+    auth.isSuperAdmin &&
+    moveProjectForm.userId === auth.user?.id &&
+    auth.currentProjectId !== targetProjectId
   try {
     await apiMoveMemberProject(
       selectedProject.value.id,
       moveProjectForm.userId,
-      moveProjectForm.targetProjectId,
+      targetProjectId,
     )
+    if (shouldSyncCurrentProject) {
+      // 保留原有业务逻辑：仅在超级管理员调整自己的归属项目后，同步当前登录态项目上下文。
+      await auth.switchProject(targetProjectId)
+    }
     ElMessage.success('归属项目已更新')
     closeMoveProjectDialog()
     await loadProjects()

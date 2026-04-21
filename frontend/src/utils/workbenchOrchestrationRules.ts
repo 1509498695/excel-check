@@ -55,6 +55,20 @@ export function orchestrationRulesToValidationRules(
       }
     }
 
+    if (rule.rule_type === 'cross_table_mapping') {
+      const referenceVariable = variableMap.get(rule.reference_variable_tag?.trim() ?? '')
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'cross_table_mapping',
+        params: {
+          dict_tag: referenceVariable?.tag ?? '',
+          target_tag: variable.tag,
+          rule_name: rule.rule_name,
+          location: locationForSingle(variable),
+        },
+      }
+    }
+
     return {
       rule_id: rule.rule_id,
       rule_type: rule.rule_type,

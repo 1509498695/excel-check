@@ -111,9 +111,10 @@ class TaskTree:
   "rules":     [{
     rule_id, group_id, rule_name,
     target_variable_tag,
-    rule_type: "fixed_value_compare" | "not_null" | "unique" | "composite_condition_check",
+    rule_type: "fixed_value_compare" | "not_null" | "unique" | "cross_table_mapping" | "composite_condition_check",
     operator?: "eq" | "ne" | "gt" | "lt",      # 仅 fixed_value_compare
     expected_value?: str,                      # 仅 fixed_value_compare
+    reference_variable_tag?: str,             # 仅 cross_table_mapping，前端“包含 (in)”引用的基础字典变量
     composite_config?: CompositeRuleConfig     # 仅 composite_condition_check
   }, ...]
 }
@@ -182,7 +183,7 @@ class TaskTree:
 | `DELETE` | `/admin/projects/{project_id}` | 删除项目（默认项目禁止删除）；返回 `204`。 |
 | `GET` | `/admin/projects/{id}/members` | 列出成员，含归属项目；项目管理员可查看默认项目成员。 |
 | `PUT` | `/admin/projects/{id}/members/{user_id}/role` | 调整成员在该项目内的角色；默认项目对项目管理员开放该非删除操作。 |
-| `PUT` | `/admin/projects/{id}/members/{user_id}/project` | 调整成员归属项目；普通用户仍按单项目收口，超级管理员仅可调整自己的归属项目并自动补目标项目 `admin` 角色，其他成员不能调整超管归属。 |
+| `PUT` | `/admin/projects/{id}/members/{user_id}/project` | 调整成员归属项目；普通用户仍按单项目收口，超级管理员仅可调整自己的归属项目并自动补目标项目 `admin` 角色，其他成员不能调整超管归属；当前登录超管在管理后台调整本人归属后，前端会自动切换当前项目。 |
 | `DELETE` | `/admin/projects/{id}/members/{user_id}` | 默认项目内 = 删除账号（仅超级管理员）；其他项目内 = 迁回默认项目。 |
 | `POST` | `/admin/users/{user_id}/reset-password` | 重置指定用户密码。 |
 | `GET` | `/admin/projects-public` | 公开的项目列表（注册页选项）。 |
@@ -224,7 +225,7 @@ class TaskTree:
 |:---|:---|:---|
 | 01 数据源 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | CRUD 数据源、本地路径选择 |
 | 02 变量池 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 单变量 / 组合变量、Sheet/列下拉、详情弹窗 |
-| 03 规则编排 | [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 规则组导航 + 规则 CRUD + 弹窗（4 类规则） |
+| 03 规则编排 | [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 规则组导航 + 规则 CRUD + 弹窗（单变量支持 `eq / ne / gt / lt / not_null / unique / 包含(in)`，组合变量支持条件分支） |
 | 04 结果 | [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 4 统计块 + 异常明细表 |
 
 工作台编排不持久化，刷新即丢；`workbench` store 在主要状态变更后 2 秒防抖自动调用 `PUT /workbench/config`。
@@ -281,7 +282,7 @@ def handle_composite(ctx): ...
 | `not_null` | 单变量 | 非空校验，`level=error` |
 | `unique` | 单变量 | 唯一校验，`level=warning` |
 | `fixed_value_compare` | 单变量 | 与常量值的 `eq / ne / gt / lt` 比较 |
-| `cross_table_mapping` | 单变量 | 跨表映射（值需在另一变量集合中） |
+| `cross_table_mapping` | 单变量 | 跨表映射（值需在另一变量集合中）；工作台规则弹窗中的 `包含 (in)` 前端保存时复用该规则 |
 | `composite_condition_check` | 组合变量 | 全局筛选 + 分支筛选 + 分支校验，校验操作符覆盖 `eq / ne / gt / lt / not_null / unique / duplicate_required` |
 
 ## 8. 多用户与项目隔离
@@ -292,6 +293,7 @@ def handle_composite(ctx): ...
 - `UserProjectRole`：多对多关系表，`role ∈ {admin, user}`，描述用户在某项目内的角色。
 - 登录 / `/auth/me` 当前项目按主归属项目优先选择，不再依赖 `roles[0]`。
 - 普通用户始终保持单归属项目，归属调整在管理后台完成；项目管理员的归属项目仍不允许在后台调整；超级管理员仅允许在后台调整自己的归属项目，且会自动补齐目标项目 `admin` 角色记录。
+- 当前登录超级管理员在管理后台调整本人归属项目成功后，前端会立刻调用现有 `switch-project` 接口刷新 JWT 和当前项目，不需要再去个人设置手动切换。
 
 ### 8.2 数据隔离
 

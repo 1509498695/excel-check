@@ -13,6 +13,7 @@ FixedRuleType = Literal[
     "fixed_value_compare",
     "not_null",
     "unique",
+    "cross_table_mapping",
     "composite_condition_check",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
@@ -99,6 +100,7 @@ class FixedRuleDefinition(BaseModel):
     rule_type: FixedRuleType = "fixed_value_compare"
     operator: FixedRuleOperator | None = None
     expected_value: str | None = None
+    reference_variable_tag: str | None = None
     composite_config: CompositeRuleConfig | None = None
 
 

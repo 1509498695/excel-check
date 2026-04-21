@@ -207,6 +207,16 @@ export const useWorkbenchStore = defineStore('workbench', {
               return true
             }
 
+            if (rule.rule_type === 'cross_table_mapping') {
+              const referenceTag = rule.reference_variable_tag?.trim() ?? ''
+              if (!referenceTag) {
+                return true
+              }
+
+              const referenceVariable = variableMap.get(referenceTag)
+              return !isSingleVariable(referenceVariable)
+            }
+
             if (rule.rule_type !== 'fixed_value_compare') {
               return false
             }
@@ -614,6 +624,10 @@ export const useWorkbenchStore = defineStore('workbench', {
           rule.rule_type === 'fixed_value_compare'
             ? normalizeExpectedValue(rule.expected_value)
             : undefined,
+        reference_variable_tag:
+          rule.rule_type === 'cross_table_mapping'
+            ? rule.reference_variable_tag?.trim() || undefined
+            : undefined,
         composite_config: normalizedCompositeConfig,
       }
 
@@ -638,8 +652,19 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     replaceTagInOrchestrationRules(previousTag: string, nextTag: string): void {
       this.orchestrationRules = this.orchestrationRules.map((rule) =>
-        rule.target_variable_tag === previousTag
-          ? { ...rule, target_variable_tag: nextTag }
+        rule.target_variable_tag === previousTag ||
+        rule.reference_variable_tag === previousTag
+          ? {
+              ...rule,
+              target_variable_tag:
+                rule.target_variable_tag === previousTag
+                  ? nextTag
+                  : rule.target_variable_tag,
+              reference_variable_tag:
+                rule.reference_variable_tag === previousTag
+                  ? nextTag
+                  : rule.reference_variable_tag,
+            }
           : rule,
       )
     },

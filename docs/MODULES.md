@@ -8,7 +8,7 @@
 |:---|:---|:---|
 | `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 主工作台四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
 | `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 长期复用：独立 `version=4` 配置（`sources / variables / groups / rules`），支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
-| `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
+| `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，保存后前端会自动切到新的当前项目；项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
 | `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
 | `/login` `/register` | [LoginView.vue](../frontend/src/views/LoginView.vue)、[RegisterView.vue](../frontend/src/views/RegisterView.vue) | 认证入口；默认管理员 `admin / 123456`。 |
 
@@ -31,7 +31,7 @@
 |:---|:---|
 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源 CRUD、本地文件选择、`source_id`-级 `config_issues` 注入。 |
 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量 / 组合变量、Sheet/列下拉、详情弹窗、JSON 预览。 |
-| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗（`fixed_value_compare / not_null / unique / composite_condition_check`）。 |
+| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗（单变量支持 `fixed_value_compare / not_null / unique / 包含(in)`，其中 `in` 保存时复用 `cross_table_mapping`；组合变量支持 `composite_condition_check`）。 |
 | [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
 
 ### 2.3 已废弃 / 未使用组件

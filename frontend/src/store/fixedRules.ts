@@ -203,6 +203,18 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
               return true
             }
 
+            if (rule.rule_type === 'cross_table_mapping') {
+              const referenceTag = rule.reference_variable_tag?.trim() ?? ''
+              if (!referenceTag || referenceTag === targetTag) {
+                return true
+              }
+              const referenceVariable = variableMap.get(referenceTag)
+              if (!referenceVariable || !isSingleVariable(referenceVariable)) {
+                return true
+              }
+              return false
+            }
+
             if (rule.rule_type !== 'fixed_value_compare') {
               return false
             }
@@ -695,6 +707,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         expected_value:
           rule.rule_type === 'fixed_value_compare'
             ? normalizeExpectedValue(rule.expected_value)
+            : undefined,
+        reference_variable_tag:
+          rule.rule_type === 'cross_table_mapping'
+            ? rule.reference_variable_tag?.trim() || undefined
             : undefined,
         composite_config: normalizedCompositeConfig,
       }
