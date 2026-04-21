@@ -21,6 +21,46 @@ function isAuthLoginOrRegisterUrl(url: string): boolean {
   return url.includes('/auth/login') || url.includes('/auth/register')
 }
 
+function extractApiErrorMessage(detail: unknown): string | null {
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+
+  if (!Array.isArray(detail)) {
+    return null
+  }
+
+  const selectedRuleIdsMismatch = detail.find((item) => {
+    if (!item || typeof item !== 'object') {
+      return false
+    }
+
+    const issue = item as {
+      type?: unknown
+      loc?: unknown
+    }
+
+    return (
+      issue.type === 'extra_forbidden' &&
+      Array.isArray(issue.loc) &&
+      issue.loc.join('.') === 'body.selected_rule_ids'
+    )
+  })
+
+  if (selectedRuleIdsMismatch) {
+    return '当前后端服务未升级到支持规则勾选执行的版本，请重启后端服务后重试。'
+  }
+
+  const firstMessage = detail.find((item) => {
+    if (!item || typeof item !== 'object') {
+      return false
+    }
+    return typeof (item as { msg?: unknown }).msg === 'string'
+  }) as { msg?: string } | undefined
+
+  return firstMessage?.msg?.trim() || null
+}
+
 export async function apiFetch<T = unknown>(
   url: string,
   options: RequestInit = {},
@@ -41,9 +81,10 @@ export async function apiFetch<T = unknown>(
   if (!response.ok) {
     let message = '请求失败，请稍后重试。'
     try {
-      const payload = (await response.json()) as { detail?: string }
-      if (typeof payload.detail === 'string') {
-        message = payload.detail
+      const payload = (await response.json()) as { detail?: unknown }
+      const extractedMessage = extractApiErrorMessage(payload.detail)
+      if (extractedMessage) {
+        message = extractedMessage
       }
     } catch {
       message = `${response.status} ${response.statusText}`

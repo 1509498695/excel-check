@@ -121,6 +121,66 @@ async def test_execute_engine_returns_three_rule_results() -> None:
 
 
 @pytest.mark.anyio
+async def test_execute_engine_filters_rules_by_selected_ids() -> None:
+    """验证 selected_rule_ids 只会执行被勾选的规则。"""
+    payload = {
+        "sources": [
+            {
+                "id": "src_test",
+                "type": "local_excel",
+                "path": str(TEST_DATA_PATH),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-id]",
+                "source_id": "src_test",
+                "sheet": "items",
+                "column": "ID",
+            },
+            {
+                "tag": "[drops-ref]",
+                "source_id": "src_test",
+                "sheet": "drops",
+                "column": "RefID",
+            },
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-not-null",
+                "rule_type": "not_null",
+                "params": {"target_tags": ["[items-id]"]},
+            },
+            {
+                "rule_id": "rule-unique",
+                "rule_type": "unique",
+                "params": {"target_tags": ["[items-id]"]},
+            },
+            {
+                "rule_id": "rule-cross",
+                "rule_type": "cross_table_mapping",
+                "params": {
+                    "dict_tag": "[items-id]",
+                    "target_tag": "[drops-ref]",
+                },
+            },
+        ],
+        "selected_rule_ids": ["rule-cross"],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert abnormal_results
+    assert all(item["rule_name"] == "cross_table_mapping" for item in abnormal_results)
+
+
+@pytest.mark.anyio
 async def test_execute_engine_returns_400_for_unsupported_rule() -> None:
     """验证未注册规则类型会返回 400。"""
     payload = {

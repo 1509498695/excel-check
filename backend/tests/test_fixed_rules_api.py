@@ -1022,6 +1022,108 @@ async def test_execute_fixed_rules_supports_mixed_rule_types_in_one_run(
 
 
 @pytest.mark.anyio
+async def test_execute_fixed_rules_filters_by_selected_rule_ids(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验执行接口只运行被勾选的规则。"""
+    workbook_a = _create_fixed_rules_workbook(
+        tmp_path / "selected_items_a.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a-1", "a-2", "a-3"]},
+    )
+    workbook_b = _create_fixed_rules_workbook(
+        tmp_path / "selected_items_b.xlsx",
+        {"INT_ID": [10, 10, 30], "DESC": ["", "b-2", "b-3"]},
+    )
+
+    payload = {
+        "version": 4,
+        "configured": True,
+        "sources": [
+            {
+                "id": "source-a",
+                "type": "local_excel",
+                "path": str(workbook_a),
+                "pathOrUrl": str(workbook_a),
+            },
+            {
+                "id": "source-b",
+                "type": "local_excel",
+                "path": str(workbook_b),
+                "pathOrUrl": str(workbook_b),
+            },
+        ],
+        "variables": [
+            {
+                "tag": "[source-a-items-INT_ID]",
+                "source_id": "source-a",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            },
+            {
+                "tag": "[source-b-items-INT_ID]",
+                "source_id": "source-b",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            },
+            {
+                "tag": "[source-b-items-DESC]",
+                "source_id": "source-b",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DESC",
+                "expected_type": "str",
+            },
+        ],
+        "groups": [
+            {"group_id": "ungrouped", "group_name": "未分组", "builtin": True},
+            {"group_id": "basic-checks", "group_name": "基础校验", "builtin": False},
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-a",
+                "group_id": "basic-checks",
+                "rule_name": "A 文件 INT_ID > 0",
+                "target_variable_tag": "[source-a-items-INT_ID]",
+                "rule_type": "fixed_value_compare",
+                "operator": "gt",
+                "expected_value": "0",
+            },
+            {
+                "rule_id": "rule-b1",
+                "group_id": "basic-checks",
+                "rule_name": "B 文件 DESC 不能为空",
+                "target_variable_tag": "[source-b-items-DESC]",
+                "rule_type": "not_null",
+            },
+            {
+                "rule_id": "rule-b2",
+                "group_id": "basic-checks",
+                "rule_name": "B 文件 INT_ID 必须唯一",
+                "target_variable_tag": "[source-b-items-INT_ID]",
+                "rule_type": "unique",
+            },
+        ],
+    }
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post(
+            "/api/v1/fixed-rules/execute",
+            json={"selected_rule_ids": ["rule-b1"]},
+        )
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "B 文件 DESC 不能为空"
+
+
+@pytest.mark.anyio
 async def test_fixed_rules_svn_update_deduplicates_working_copies_from_saved_sources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

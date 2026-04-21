@@ -42,6 +42,7 @@ export interface TaskTree {
   sources: DataSource[]
   variables: VariableTag[]
   rules: ValidationRule[]
+  selected_rule_ids?: string[]
 }
 
 export interface ExecutionMeta {

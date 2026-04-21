@@ -19,9 +19,12 @@ export async function saveFixedRulesConfig(
   })
 }
 
-export async function executeFixedRules(): Promise<FixedRulesExecuteResponse> {
+export async function executeFixedRules(payload?: {
+  selected_rule_ids?: string[]
+}): Promise<FixedRulesExecuteResponse> {
   return apiFetch<FixedRulesExecuteResponse>('/api/v1/fixed-rules/execute', {
     method: 'POST',
+    body: payload ? JSON.stringify(payload) : undefined,
   })
 }
 

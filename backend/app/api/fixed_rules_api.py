@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.fixed_rules_schemas import FixedRulesConfig
+from backend.app.api.fixed_rules_schemas import FixedRulesConfig, FixedRulesExecuteRequest
 from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.database import get_db
 from backend.app.fixed_rules.db_service import (
@@ -122,6 +122,7 @@ async def trigger_fixed_rules_svn_update(
 
 @router.post("/execute")
 async def execute_fixed_rules_endpoint(
+    payload: FixedRulesExecuteRequest | None = Body(default=None),
     ctx: CurrentUserContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -135,6 +136,9 @@ async def execute_fixed_rules_endpoint(
     try:
         parsed = parse_raw_fixed_rules_config(raw)
         config = validate_and_normalize_fixed_rules_config(parsed)
-        return execute_saved_fixed_rules(config)
+        return execute_saved_fixed_rules(
+            config,
+            selected_rule_ids=payload.selected_rule_ids if payload else None,
+        )
     except (FileNotFoundError, ValueError, ImportError, NotImplementedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

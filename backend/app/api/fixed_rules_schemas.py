@@ -127,3 +127,11 @@ class FixedRulesConfig(BaseModel):
     variables: list[VariableTag] = Field(default_factory=list)
     groups: list[FixedRuleGroup] = Field(default_factory=list)
     rules: list[FixedRuleDefinition] = Field(default_factory=list)
+
+
+class FixedRulesExecuteRequest(BaseModel):
+    """描述固定规则执行时允许传入的可选规则筛选参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_rule_ids: list[str] | None = None

@@ -496,13 +496,15 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       }
     },
 
-    async executeConfig(): Promise<void> {
+    async executeConfig(selectedRuleIds?: string[]): Promise<void> {
       this.isExecuting = true
       this.pageError = ''
 
       try {
         await this.saveConfig()
-        const response = await executeFixedRules()
+        const response = await executeFixedRules(
+          selectedRuleIds ? { selected_rule_ids: selectedRuleIds } : undefined,
+        )
         this.executionMeta = response.meta
         this.abnormalResults = response.data.abnormal_results
       } catch (error) {

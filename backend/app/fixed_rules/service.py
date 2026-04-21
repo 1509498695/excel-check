@@ -130,13 +130,17 @@ def save_fixed_rules_config(config: FixedRulesConfig) -> FixedRulesConfig:
 
 def execute_saved_fixed_rules(
     config: FixedRulesConfig | None = None,
+    selected_rule_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """执行固定规则。如果传入 config 则直接使用，否则从文件加载。"""
     if config is None:
         config = load_fixed_rules_config()
-    if not config.rules:
+    ordered_rules = _get_ordered_rules(config, selected_rule_ids=selected_rule_ids)
+    if not ordered_rules:
         raise ValueError("当前没有可执行的固定规则，请先配置规则再执行。")
-    return execute_engine(build_fixed_rules_task_tree(config))
+    return execute_engine(
+        build_fixed_rules_task_tree(config, selected_rule_ids=selected_rule_ids)
+    )
 
 
 def run_saved_fixed_rules_svn_update(
@@ -186,12 +190,16 @@ def run_saved_fixed_rules_svn_update(
     }
 
 
-def build_fixed_rules_task_tree(config: FixedRulesConfig) -> TaskTree:
+def build_fixed_rules_task_tree(
+    config: FixedRulesConfig,
+    selected_rule_ids: list[str] | None = None,
+) -> TaskTree:
     """????????????????????? TaskTree?"""
+    ordered_rules = _get_ordered_rules(config, selected_rule_ids=selected_rule_ids)
     variable_map = {variable.tag: variable for variable in config.variables}
     needed_tags = {
         tag
-        for rule in config.rules
+        for rule in ordered_rules
         for tag in [rule.target_variable_tag, rule.reference_variable_tag]
         if tag
     }
@@ -206,13 +214,14 @@ def build_fixed_rules_task_tree(config: FixedRulesConfig) -> TaskTree:
             rule_type=rule.rule_type,
             params=_build_fixed_rule_params(rule, variable_map[rule.target_variable_tag]),
         )
-        for rule in _get_ordered_rules(config)
+        for rule in ordered_rules
     ]
 
     return TaskTree(
         sources=sources,
         variables=variables,
         rules=task_rules,
+        selected_rule_ids=selected_rule_ids,
     )
 
 
@@ -1170,17 +1179,35 @@ def _collect_working_copies(sources: list[DataSource]) -> list[Path]:
     return working_copies
 
 
-def _get_ordered_rules(config: FixedRulesConfig) -> list[FixedRuleDefinition]:
+def _get_ordered_rules(
+    config: FixedRulesConfig,
+    *,
+    selected_rule_ids: list[str] | None = None,
+) -> list[FixedRuleDefinition]:
     """?????????????????????"""
     group_order = {group.group_id: index for index, group in enumerate(config.groups)}
     rule_order = {rule.rule_id: index for index, rule in enumerate(config.rules)}
-    return sorted(
+    ordered_rules = sorted(
         config.rules,
         key=lambda rule: (
             group_order.get(rule.group_id, len(group_order)),
             rule_order[rule.rule_id],
         ),
     )
+    if selected_rule_ids is None:
+        return ordered_rules
+
+    selected_rule_id_set = {
+        rule_id.strip()
+        for rule_id in selected_rule_ids
+        if isinstance(rule_id, str) and rule_id.strip()
+    }
+    if not selected_rule_id_set:
+        return []
+
+    return [
+        rule for rule in ordered_rules if rule.rule_id.strip() in selected_rule_id_set
+    ]
 
 
 def _build_default_group() -> FixedRuleGroup:

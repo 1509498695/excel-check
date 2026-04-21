@@ -51,3 +51,4 @@ class TaskTree(BaseModel):
     sources: list[DataSource] = Field(default_factory=list)
     variables: list[VariableTag] = Field(default_factory=list)
     rules: list[ValidationRule] = Field(default_factory=list)
+    selected_rule_ids: list[str] | None = None

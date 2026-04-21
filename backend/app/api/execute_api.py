@@ -52,7 +52,7 @@ def _run_execution_pipeline(task_tree: TaskTree) -> dict[str, Any]:
     grouped_variables = _group_variables_by_source(task_tree.variables, source_map)
     load_result = _load_sources_concurrently(source_map, grouped_variables)
     executable_rules = _filter_executable_rules(
-        task_tree.rules,
+        _filter_rules_by_selected_ids(task_tree.rules, task_tree.selected_rule_ids),
         grouped_variables=grouped_variables,
         loaded_variables=load_result["loaded_variables"],
         failed_sources=set(load_result["failed_sources"]),
@@ -69,6 +69,27 @@ def _run_execution_pipeline(task_tree: TaskTree) -> dict[str, Any]:
         "failed_sources": load_result["failed_sources"],
         "abnormal_results": abnormal_results,
     }
+
+
+def _filter_rules_by_selected_ids(
+    rules: list[ValidationRule],
+    selected_rule_ids: list[str] | None,
+) -> list[ValidationRule]:
+    """按传入的 rule_id 子集过滤本次需要执行的规则。"""
+    if selected_rule_ids is None:
+        return rules
+
+    selected_rule_id_set = {
+        rule_id.strip() for rule_id in selected_rule_ids if isinstance(rule_id, str) and rule_id.strip()
+    }
+    if not selected_rule_id_set:
+        return []
+
+    return [
+        rule
+        for rule in rules
+        if isinstance(rule.rule_id, str) and rule.rule_id.strip() in selected_rule_id_set
+    ]
 
 
 def _build_source_map(sources: list[DataSource]) -> dict[str, DataSource]:

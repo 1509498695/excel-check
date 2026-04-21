@@ -256,6 +256,7 @@ export function buildTaskTreePayload(
   sources: DataSource[],
   variables: VariableTag[],
   rules: ValidationRule[],
+  selectedRuleIds?: string[],
 ): TaskTree {
   const normalizedSources = sources.map(normalizeSource)
   const sourceIds = new Set<string>()
@@ -281,11 +282,18 @@ export function buildTaskTreePayload(
     .filter((rule) => rule.mode !== 'dynamic')
     .map((rule) => normalizeKnownRule(rule, variableTags))
 
-  return {
+  const payload: TaskTree = {
     sources: normalizedSources,
     variables: normalizedVariables,
     rules: normalizedRules,
   }
+
+  if (selectedRuleIds) {
+    const normalizedSelectedRuleIds = [...new Set(selectedRuleIds.map(trimValue).filter(Boolean))]
+    payload.selected_rule_ids = normalizedSelectedRuleIds
+  }
+
+  return payload
 }
 
 export function createRuleId(prefix: string): string {

@@ -59,6 +59,7 @@ const collapsedSections = reactive<Record<SectionKey, boolean>>({
   rule: false,
   result: false,
 })
+const selectedRuleIds = ref<string[]>([])
 
 const ruleForm = reactive<{
   rule_id: string
@@ -317,6 +318,22 @@ const stepperItems = computed(() => [
 const currentGroupCount = computed(
   () => store.groupRuleCounts[store.selectedGroup.group_id] ?? 0,
 )
+const selectedRuleIdSet = computed(() => new Set(selectedRuleIds.value))
+const visibleRuleIds = computed(() => store.pagedCurrentGroupRules.map((rule) => rule.rule_id))
+const allVisibleRulesSelected = computed(
+  () =>
+    visibleRuleIds.value.length > 0 &&
+    visibleRuleIds.value.every((ruleId) => selectedRuleIdSet.value.has(ruleId)),
+)
+const partiallySelectedVisibleRules = computed(() => {
+  if (!visibleRuleIds.value.length) {
+    return false
+  }
+  const selectedVisibleCount = visibleRuleIds.value.filter((ruleId) =>
+    selectedRuleIdSet.value.has(ruleId),
+  ).length
+  return selectedVisibleCount > 0 && selectedVisibleCount < visibleRuleIds.value.length
+})
 const currentGroupVariableCount = computed(() => {
   const tags = new Set(
     store.currentGroupRules
@@ -417,6 +434,28 @@ watch(
     if (!hasManuallySelectedGuideStep.value) {
       selectedGuideStep.value = step
     }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => store.rules.map((rule) => rule.rule_id),
+  (nextRuleIds, previousRuleIds = []) => {
+    const validRuleIds = new Set(nextRuleIds)
+    const previousRuleIdSet = new Set(previousRuleIds)
+    const nextSelectedRuleIdSet = new Set(
+      selectedRuleIds.value.filter((ruleId) => validRuleIds.has(ruleId)),
+    )
+
+    nextRuleIds.forEach((ruleId) => {
+      if (!previousRuleIdSet.has(ruleId)) {
+        nextSelectedRuleIdSet.add(ruleId)
+      }
+    })
+
+    selectedRuleIds.value = nextRuleIds.filter((ruleId) =>
+      nextSelectedRuleIdSet.has(ruleId),
+    )
   },
   { immediate: true },
 )
@@ -1240,9 +1279,14 @@ async function handleSaveConfig(): Promise<void> {
 }
 
 async function handleExecute(): Promise<void> {
+  if (!selectedRuleIds.value.length) {
+    ElMessage.warning('请至少勾选一条需要校验的规则')
+    return
+  }
+
   try {
     // 保留原有业务逻辑：固定规则执行仍走原有 executeConfig 链路与结果消费模型。
-    await store.executeConfig()
+    await store.executeConfig(selectedRuleIds.value)
     await ensureStepExpanded(4)
     await scrollToStep(4)
     if (store.abnormalResults.length) {
@@ -1255,6 +1299,34 @@ async function handleExecute(): Promise<void> {
     await ensureStepExpanded(4)
     await scrollToStep(4)
   }
+}
+
+function buildOrderedSelectedRuleIds(nextSelectedRuleIdSet: Set<string>): string[] {
+  return store.rules
+    .map((rule) => rule.rule_id)
+    .filter((ruleId) => nextSelectedRuleIdSet.has(ruleId))
+}
+
+function handleToggleRuleSelection(ruleId: string): void {
+  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
+  if (nextSelectedRuleIdSet.has(ruleId)) {
+    nextSelectedRuleIdSet.delete(ruleId)
+  } else {
+    nextSelectedRuleIdSet.add(ruleId)
+  }
+  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
+}
+
+function handleToggleVisibleRuleSelection(checked: string | number | boolean): void {
+  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
+  visibleRuleIds.value.forEach((ruleId) => {
+    if (checked) {
+      nextSelectedRuleIdSet.add(ruleId)
+      return
+    }
+    nextSelectedRuleIdSet.delete(ruleId)
+  })
+  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
 }
 
 async function handleSvnUpdate(): Promise<void> {
@@ -1302,7 +1374,7 @@ async function handleSvnUpdate(): Promise<void> {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z" />
           </svg>
-          {{ store.isExecuting ? '执行中…' : '执行全部规则' }}
+          {{ store.isExecuting ? '执行中…' : '执行校验' }}
         </button>
       </template>
     </PageHeader>
@@ -1581,11 +1653,19 @@ async function handleSvnUpdate(): Promise<void> {
                       <th>目标变量</th>
                       <th class="w-[20%]">规则选择</th>
                       <th class="w-[20%] text-left align-middle">操作</th>
+                      <th class="w-[72px] text-left align-middle">
+                        <el-checkbox
+                          :model-value="allVisibleRulesSelected"
+                          :indeterminate="partiallySelectedVisibleRules"
+                          :disabled="!visibleRuleIds.length"
+                          @change="handleToggleVisibleRuleSelection"
+                        />
+                      </th>
                     </tr>
                   </template>
                   <template #body>
                     <tr v-if="!canCreateRule">
-                      <td colspan="4" class="bg-card">
+                      <td colspan="5" class="bg-card">
                         <EmptyState title="请先在上方变量池添加变量" description="至少需要一个变量后才能开始新增规则。">
                           <template #icon>
                             <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1596,7 +1676,7 @@ async function handleSvnUpdate(): Promise<void> {
                       </td>
                     </tr>
                     <tr v-else-if="!store.currentGroupRules.length">
-                      <td colspan="4" class="bg-card">
+                      <td colspan="5" class="bg-card">
                         <EmptyState title="当前组还没有规则" description="点击右上角“新增规则”开始编排。">
                           <template #icon>
                             <Plus class="h-4 w-4 text-ink-500" />
@@ -1655,6 +1735,13 @@ async function handleSvnUpdate(): Promise<void> {
                             </button>
                           </div>
                         </td>
+                        <td class="text-left align-top">
+                          <el-checkbox
+                            :model-value="selectedRuleIdSet.has(row.rule_id)"
+                            @change="handleToggleRuleSelection(row.rule_id)"
+                            @click.stop
+                          />
+                        </td>
                       </tr>
                     </template>
                   </template>
@@ -1686,7 +1773,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
                     </svg>
-                    {{ store.isExecuting ? '执行中…' : '执行全部规则' }}
+                    {{ store.isExecuting ? '执行中…' : '执行校验' }}
                   </button>
                 </div>
               </div>

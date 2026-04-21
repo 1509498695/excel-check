@@ -19,6 +19,13 @@ import type { DataSource, VariableTag } from '../../types/workbench'
 type ConditionMode = 'filter' | 'assertion'
 
 const KEY_FIELD = '__key__'
+const props = defineProps<{
+  selectedRuleIds: string[]
+}>()
+const emit = defineEmits<{
+  (e: 'toggle-rule-selection', ruleId: string): void
+  (e: 'toggle-visible-rule-selection', payload: { ruleIds: string[]; checked: boolean }): void
+}>()
 
 // 保留原有业务逻辑：规则编排面板的状态管理、保存、删除等行为完全沿用 store。
 const store = useWorkbenchStore()
@@ -150,6 +157,24 @@ const compositeFieldOptions = computed(() => {
 })
 
 const canCreateRule = computed(() => variableOptions.value.length > 0)
+const selectedRuleIdSet = computed(() => new Set(props.selectedRuleIds))
+const visibleRuleIds = computed(() =>
+  store.pagedCurrentOrchestrationGroupRules.map((rule) => rule.rule_id),
+)
+const allVisibleRulesSelected = computed(
+  () =>
+    visibleRuleIds.value.length > 0 &&
+    visibleRuleIds.value.every((ruleId) => selectedRuleIdSet.value.has(ruleId)),
+)
+const partiallySelectedVisibleRules = computed(() => {
+  if (!visibleRuleIds.value.length) {
+    return false
+  }
+  const selectedVisibleCount = visibleRuleIds.value.filter((ruleId) =>
+    selectedRuleIdSet.value.has(ruleId),
+  ).length
+  return selectedVisibleCount > 0 && selectedVisibleCount < visibleRuleIds.value.length
+})
 
 const shouldShowExpectedValue = computed(
   () => !isCompositeRuleTarget.value && isCompareRuleSelection(ruleForm.selected_rule),
@@ -972,6 +997,17 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
     // 用户取消时不提示。
   }
 }
+
+function handleToggleVisibleSelection(checked: string | number | boolean): void {
+  emit('toggle-visible-rule-selection', {
+    ruleIds: visibleRuleIds.value,
+    checked: Boolean(checked),
+  })
+}
+
+function handleToggleSingleSelection(ruleId: string): void {
+  emit('toggle-rule-selection', ruleId)
+}
 </script>
 
 <template>
@@ -1112,6 +1148,14 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                   <th class="px-4 py-3 text-left align-middle">目标变量</th>
                   <th class="px-4 py-3 w-[20%] text-left align-middle">规则选择</th>
                   <th class="px-4 py-3 w-[20%] text-left align-middle">操作</th>
+                  <th class="px-4 py-3 w-[72px] text-left align-middle">
+                    <el-checkbox
+                      :model-value="allVisibleRulesSelected"
+                      :indeterminate="partiallySelectedVisibleRules"
+                      :disabled="!visibleRuleIds.length"
+                      @change="handleToggleVisibleSelection"
+                    />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1158,6 +1202,13 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
                         删除
                       </button>
                     </div>
+                  </td>
+                  <td class="px-4 py-3 text-left align-top">
+                    <el-checkbox
+                      :model-value="selectedRuleIdSet.has(row.rule_id)"
+                      @change="handleToggleSingleSelection(row.rule_id)"
+                      @click.stop
+                    />
                   </td>
                 </tr>
               </tbody>

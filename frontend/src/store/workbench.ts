@@ -669,11 +669,16 @@ export const useWorkbenchStore = defineStore('workbench', {
       )
     },
 
-    buildTaskTreePayload(): TaskTree {
-      return buildTaskTreePayload(this.sources, this.variables, this.engineValidationRules)
+    buildTaskTreePayload(selectedRuleIds?: string[]): TaskTree {
+      return buildTaskTreePayload(
+        this.sources,
+        this.variables,
+        this.engineValidationRules,
+        selectedRuleIds,
+      )
     },
 
-    async executeValidation(): Promise<void> {
+    async executeValidation(selectedRuleIds?: string[]): Promise<void> {
       this.pageError = ''
       if (!this.orchestrationRules.length) {
         this.pageError = '请先在步骤 3 添加至少一条规则。'
@@ -687,7 +692,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.isExecuting = true
 
       try {
-        const payload = this.buildTaskTreePayload()
+        const payload = this.buildTaskTreePayload(selectedRuleIds)
         const response = await executeTaskTree(payload)
         this.executionMeta = response.meta
         this.abnormalResults = response.data.abnormal_results

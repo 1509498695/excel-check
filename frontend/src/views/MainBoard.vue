@@ -21,6 +21,7 @@ type SectionKey = 'source' | 'variable' | 'rule' | 'result'
 
 const selectedGuideStep = ref<StepIndex | null>(null)
 const hasManuallySelectedGuideStep = ref(false)
+const selectedRuleIds = ref<string[]>([])
 
 onMounted(async () => {
   // 保留原有业务逻辑：工作台初始化仍并行读取能力与服务端配置。
@@ -33,6 +34,28 @@ watch(
     store.triggerAutoSave()
   },
   { deep: true },
+)
+
+watch(
+  () => store.orchestrationRules.map((rule) => rule.rule_id),
+  (nextRuleIds, previousRuleIds = []) => {
+    const validRuleIds = new Set(nextRuleIds)
+    const previousRuleIdSet = new Set(previousRuleIds)
+    const nextSelectedRuleIdSet = new Set(
+      selectedRuleIds.value.filter((ruleId) => validRuleIds.has(ruleId)),
+    )
+
+    nextRuleIds.forEach((ruleId) => {
+      if (!previousRuleIdSet.has(ruleId)) {
+        nextSelectedRuleIdSet.add(ruleId)
+      }
+    })
+
+    selectedRuleIds.value = nextRuleIds.filter((ruleId) =>
+      nextSelectedRuleIdSet.has(ruleId),
+    )
+  },
+  { immediate: true },
 )
 
 const sourceStepRef = ref<HTMLElement | null>(null)
@@ -255,9 +278,14 @@ async function scrollToStep(step: StepIndex): Promise<void> {
 }
 
 async function runExecution(): Promise<void> {
+  if (!selectedRuleIds.value.length) {
+    ElMessage.warning('请至少勾选一条需要校验的规则')
+    return
+  }
+
   try {
     // 保留原有业务逻辑：执行入口仍调用原有校验接口并沿用原结果刷新流程。
-    await store.executeValidation()
+    await store.executeValidation(selectedRuleIds.value)
     await ensureStepExpanded(4)
     await scrollToStep(4)
     ElMessage.success('校验完成，结果已刷新。')
@@ -294,6 +322,37 @@ async function handleSourceSaved(_sourceId: string): Promise<void> {
 async function handleVariableSaved(_tag: string): Promise<void> {
   await ensureStepExpanded(2)
   await scrollToStep(2)
+}
+
+function buildOrderedSelectedRuleIds(nextSelectedRuleIdSet: Set<string>): string[] {
+  return store.orchestrationRules
+    .map((rule) => rule.rule_id)
+    .filter((ruleId) => nextSelectedRuleIdSet.has(ruleId))
+}
+
+function handleToggleRuleSelection(ruleId: string): void {
+  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
+  if (nextSelectedRuleIdSet.has(ruleId)) {
+    nextSelectedRuleIdSet.delete(ruleId)
+  } else {
+    nextSelectedRuleIdSet.add(ruleId)
+  }
+  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
+}
+
+function handleToggleVisibleRuleSelection(payload: {
+  ruleIds: string[]
+  checked: boolean
+}): void {
+  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
+  payload.ruleIds.forEach((ruleId) => {
+    if (payload.checked) {
+      nextSelectedRuleIdSet.add(ruleId)
+      return
+    }
+    nextSelectedRuleIdSet.delete(ruleId)
+  })
+  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
 }
 </script>
 
@@ -454,7 +513,11 @@ async function handleVariableSaved(_tag: string): Promise<void> {
           content-class="pt-3"
           @toggle="toggleSection(3)"
         >
-          <WorkbenchRuleOrchestrationPanel />
+          <WorkbenchRuleOrchestrationPanel
+            :selected-rule-ids="selectedRuleIds"
+            @toggle-rule-selection="handleToggleRuleSelection"
+            @toggle-visible-rule-selection="handleToggleVisibleRuleSelection"
+          />
           <div class="mt-6 flex justify-end">
             <button
               type="button"
