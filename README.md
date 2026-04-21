@@ -2,17 +2,17 @@
 
 > 历史变更与早期 SDD 已搬到 [docs/archive/](docs/archive/)；本 README、[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、[docs/MODULES.md](docs/MODULES.md) 与 [CHANGELOG.md](CHANGELOG.md) 是当前唯一稳定文档。
 
-面向配置表校验场景的多用户 Web 工作台：把数据源、变量池、规则编排和执行结果统一在同一个 `TaskTree` 上，支持「主工作台临时编排」与「固定规则页长期复用」两条业务线。
+面向配置表校验场景的多用户 Web 应用：把数据源、变量池、规则编排和执行结果统一在同一个 `TaskTree` 上，支持「个人校验临时编排」与「项目校验长期复用」两条业务线。
 
 ## 1. 当前关键能力
 
 - JWT 认证 + 三级角色（超级管理员 / 项目管理员 / 普通用户），默认超级管理员 `admin / 123456`。
-- 多项目数据隔离：固定规则按 `project_id`、工作台配置按 `project_id + user_id`。
-- 主工作台 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。
-- 固定规则页 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
+- 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
+- 个人校验 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。
+- 项目校验 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
 - 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，保存后前端会自动切换当前项目到新的归属项目。
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
-- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`cross_table_mapping`、`composite_condition_check`；其中工作台单变量规则弹窗额外提供 `包含 (in)` 选项，保存时复用 `cross_table_mapping`。
+- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`cross_table_mapping`、`composite_condition_check`；其中个人校验单变量规则弹窗额外提供 `包含 (in)` 选项，保存时复用 `cross_table_mapping`。
 - 数据源能力：本地 Excel（`.xlsx` / `.xls`）、本地 CSV；飞书与 SVN 作为独立 source 类型当前为占位。
 
 ## 2. 技术栈与默认地址
@@ -67,7 +67,7 @@ npm run build
 
 1. 启动后端 + 前端。
 2. 浏览器打开 <http://127.0.0.1:5173/login>，使用 `admin / 123456` 登录。
-3. 进入主工作台 `/`，按 01 → 02 → 03 顺序：
+3. 进入个人校验 `/`，按 01 → 02 → 03 顺序：
    - 01 新增本地 Excel 数据源（建议 `backend/tests/data/minimal_rules.xlsx`）。
    - 02 添加变量（来源 → Sheet → 列名 → 期望类型）。
    - 03 在规则组里新增规则（`fixed_value_compare` / `not_null` / `unique` / `包含 (in)` / `composite_condition_check`）。
@@ -83,8 +83,8 @@ npm run build
 | 健康检查 | `GET /health` |
 | 认证 | `POST /api/v1/auth/{register,login,change-password}`、`GET /api/v1/auth/me`、`POST /api/v1/auth/switch-project/{project_id}` |
 | 数据源 | `GET /api/v1/sources/capabilities`、`POST /api/v1/sources/{local-pick,metadata,column-preview,composite-preview}` |
-| 主工作台 | `POST /api/v1/engine/execute`、`GET/PUT /api/v1/workbench/config` |
-| 固定规则 | `GET/PUT /api/v1/fixed-rules/config`、`POST /api/v1/fixed-rules/{svn-update,execute}` |
+| 个人校验 | `POST /api/v1/engine/execute`、`GET/PUT /api/v1/workbench/config` |
+| 项目校验 | `GET/PUT /api/v1/fixed-rules/config`、`POST /api/v1/fixed-rules/{svn-update,execute}` |
 | 管理后台 | `/api/v1/admin/projects*`、`/api/v1/admin/projects/{id}/members*`、`POST /api/v1/admin/users/{id}/reset-password` |
 
 ## 6. 相关文档

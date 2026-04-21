@@ -1,11 +1,12 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
+import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
 import DataTable from '../components/shell/DataTable.vue'
 import EmptyState from '../components/shell/EmptyState.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
@@ -27,6 +28,7 @@ import type { DataSource, VariableTag } from '../types/workbench'
 type ConditionMode = 'filter' | 'assertion'
 type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
+type SectionKey = 'source' | 'variable' | 'rule' | 'result'
 
 const KEY_FIELD = '__key__'
 
@@ -51,6 +53,12 @@ const sourceStepRef = ref<HTMLElement | null>(null)
 const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)
 const resultStepRef = ref<HTMLElement | null>(null)
+const collapsedSections = reactive<Record<SectionKey, boolean>>({
+  source: false,
+  variable: false,
+  rule: false,
+  result: false,
+})
 
 const ruleForm = reactive<{
   rule_id: string
@@ -426,7 +434,35 @@ function getStepRef(step: StepIndex): HTMLElement | null {
   return resultStepRef.value
 }
 
+function getSectionKey(step: StepIndex): SectionKey {
+  if (step === 1) {
+    return 'source'
+  }
+  if (step === 2) {
+    return 'variable'
+  }
+  if (step === 3) {
+    return 'rule'
+  }
+  return 'result'
+}
+
+function toggleSection(step: StepIndex): void {
+  const key = getSectionKey(step)
+  collapsedSections[key] = !collapsedSections[key]
+}
+
+async function ensureStepExpanded(step: StepIndex): Promise<void> {
+  const key = getSectionKey(step)
+  if (!collapsedSections[key]) {
+    return
+  }
+  collapsedSections[key] = false
+  await nextTick()
+}
+
 async function scrollToStep(step: StepIndex): Promise<void> {
+  await nextTick()
   getStepRef(step)?.scrollIntoView({
     behavior: 'smooth',
     block: 'start',
@@ -436,6 +472,7 @@ async function scrollToStep(step: StepIndex): Promise<void> {
 async function handleStepperClick(step: StepIndex): Promise<void> {
   hasManuallySelectedGuideStep.value = true
   selectedGuideStep.value = step
+  await ensureStepExpanded(step)
   await scrollToStep(step)
 }
 
@@ -895,7 +932,7 @@ async function persistConfig(successMessage?: string, silent = true): Promise<bo
     }
     return true
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '固定规则配置保存失败。')
+    ElMessage.error(error instanceof Error ? error.message : '项目校验配置保存失败。')
     return false
   }
 }
@@ -1199,13 +1236,14 @@ async function handleRemoveRule(rule: FixedRuleDefinition): Promise<void> {
 }
 
 async function handleSaveConfig(): Promise<void> {
-  await persistConfig('固定规则配置已保存。', false)
+  await persistConfig('项目校验配置已保存。', false)
 }
 
 async function handleExecute(): Promise<void> {
   try {
     // 保留原有业务逻辑：固定规则执行仍走原有 executeConfig 链路与结果消费模型。
     await store.executeConfig()
+    await ensureStepExpanded(4)
     await scrollToStep(4)
     if (store.abnormalResults.length) {
       ElMessage.warning(`执行完成，发现 ${store.abnormalResults.length} 条异常结果。`)
@@ -1214,6 +1252,7 @@ async function handleExecute(): Promise<void> {
     ElMessage.success('执行完成，当前没有命中异常。')
   } catch {
     // 页面级错误由 store 托管。
+    await ensureStepExpanded(4)
     await scrollToStep(4)
   }
 }
@@ -1222,10 +1261,12 @@ async function handleSvnUpdate(): Promise<void> {
   try {
     // 保留原有业务逻辑：SVN 更新继续复用原有工作副本更新接口。
     await store.runSvnUpdate()
+    await ensureStepExpanded(4)
     await scrollToStep(4)
     ElMessage.success(store.svnUpdateSummary || 'SVN 更新完成。')
   } catch {
     // 页面级错误由 store 托管。
+    await ensureStepExpanded(4)
     await scrollToStep(4)
   }
 }
@@ -1234,7 +1275,7 @@ async function handleSvnUpdate(): Promise<void> {
 <template>
   <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
     <!-- TopBar -->
-    <PageHeader breadcrumb="主菜单 / 固定规则" title="固定规则">
+    <PageHeader breadcrumb="主菜单 / 项目校验" title="项目校验">
       <template #actions>
         <button
           type="button"
@@ -1357,366 +1398,349 @@ async function handleSvnUpdate(): Promise<void> {
       </div>
 
       <!-- 数据源 -->
-      <section ref="sourceStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 1 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="01"
-              title="数据源"
-              description="接入 Excel、CSV、飞书或 SVN 来源"
-              :status-label="getSectionStatusLabel(1)"
-              :status-tone="getSectionStatusTone(1)"
-            />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                @click="openDataSourceCreate"
-              >
-                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                新增数据源
-              </button>
-              <button
-                type="button"
-                class="ec-btn-text-collapse"
-                aria-disabled="true"
-              >
-                收起
-                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="m18 15-6-6-6 6" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="pt-1">
-            <DataSourcePanel
-              ref="dataSourcePanelRef"
-              :store="store"
-              variant="fixed-rules"
-              toolbar-mode="hidden"
-              :source-issues="sourceIssueMap"
-              @changed="handlePanelChanged"
-            />
-          </div>
-        </div>
-      </section>
+      <div ref="sourceStepRef">
+        <CollapsibleSection
+          step="01"
+          title="数据源"
+          description="接入 Excel、CSV、飞书或 SVN 来源"
+          :status-label="getSectionStatusLabel(1)"
+          :status-tone="getSectionStatusTone(1)"
+          :active="activeGuideStep === 1"
+          :collapsed="collapsedSections.source"
+          content-class="pt-1"
+          @toggle="toggleSection(1)"
+        >
+          <template #actions>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              @click="openDataSourceCreate"
+            >
+              <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              新增数据源
+            </button>
+          </template>
+
+          <DataSourcePanel
+            ref="dataSourcePanelRef"
+            :store="store"
+            variant="fixed-rules"
+            toolbar-mode="hidden"
+            :source-issues="sourceIssueMap"
+            @changed="handlePanelChanged"
+          />
+        </CollapsibleSection>
+      </div>
 
       <!-- 变量池 -->
-      <section ref="variableStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 2 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="02"
-              title="变量池"
-              description="沉淀后续规则编排会复用的字段与组合变量"
-              :status-label="getSectionStatusLabel(2)"
-              :status-tone="getSectionStatusTone(2)"
-            />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                :disabled="!store.sources.length"
-                @click="openSingleVariableCreate"
-              >
-                添加单个变量
-              </button>
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                :disabled="!store.sources.length"
-                @click="openCompositeVariableCreate"
-              >
-                添加组合变量
-              </button>
-            </div>
-          </div>
-          <div class="pt-1">
-            <VariablePoolPanel
-              ref="variablePoolPanelRef"
-              :store="store"
-              variant="fixed-rules"
-              toolbar-mode="hidden"
-              @changed="handlePanelChanged"
-            />
-          </div>
-        </div>
-      </section>
+      <div ref="variableStepRef">
+        <CollapsibleSection
+          step="02"
+          title="变量池"
+          description="沉淀后续规则编排会复用的字段与组合变量"
+          :status-label="getSectionStatusLabel(2)"
+          :status-tone="getSectionStatusTone(2)"
+          :active="activeGuideStep === 2"
+          :collapsed="collapsedSections.variable"
+          content-class="pt-1"
+          @toggle="toggleSection(2)"
+        >
+          <template #actions>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              :disabled="!store.sources.length"
+              @click="openSingleVariableCreate"
+            >
+              添加单个变量
+            </button>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              :disabled="!store.sources.length"
+              @click="openCompositeVariableCreate"
+            >
+              添加组合变量
+            </button>
+          </template>
+
+          <VariablePoolPanel
+            ref="variablePoolPanelRef"
+            :store="store"
+            variant="fixed-rules"
+            toolbar-mode="hidden"
+            @changed="handlePanelChanged"
+          />
+        </CollapsibleSection>
+      </div>
 
       <!-- 规则 -->
-      <section ref="ruleStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 3 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="03"
-              title="规则"
-              description="按组组织比较、非空、唯一和组合变量规则"
-              :status-label="getSectionStatusLabel(3)"
-              :status-tone="getSectionStatusTone(3)"
-            />
-          </div>
-
-          <div class="pt-3">
-            <div class="workbench-rule-shell">
-              <div class="workbench-rule-layout">
-                <!-- 左侧规则组列表 -->
-                <aside class="workbench-rule-sidebar">
-                  <div class="workbench-rule-sidebar-toolbar">
-                    <el-input
-                      v-model="store.groupKeyword"
-                      placeholder="搜索规则组"
-                      :prefix-icon="Search"
-                      clearable
-                      size="default"
-                    />
-                    <button
-                      type="button"
-                      class="ec-btn ec-btn-secondary ec-btn-sm shrink-0"
-                      @click="handleCreateGroup"
-                    >
-                      <Plus class="h-3 w-3" />
-                      新建
-                    </button>
-                  </div>
-
-                  <nav class="workbench-rule-menu">
-                    <!-- 保留原有业务逻辑：规则组导航仍基于 store.filteredGroups 遍历并复用原选中逻辑 -->
-                    <button
-                      v-for="group in store.filteredGroups"
-                      :key="group.group_id"
-                      type="button"
-                      class="workbench-rule-menu-item"
-                      :class="group.group_id === store.selectedGroup.group_id ? 'is-active' : ''"
-                      @click="store.setSelectedGroup(group.group_id)"
-                    >
-                      <span class="workbench-rule-menu-item__label">{{ group.group_name }}</span>
-                      <span
-                        v-if="invalidGroupIdSet.has(group.group_id)"
-                        class="workbench-rule-menu-item__dot"
-                        title="待修复"
-                      ></span>
-                      <span class="workbench-rule-menu-item__count">
-                        {{ store.groupRuleCounts[group.group_id] ?? 0 }}
-                      </span>
-                    </button>
-                  </nav>
-                </aside>
-
-                <!-- 右侧规则区 -->
-                <div class="workbench-rule-main">
-                  <div class="workbench-rule-header">
-                    <div class="min-w-0">
-                      <div class="truncate text-[14px] font-semibold text-ink-900">
-                        {{ store.selectedGroup.group_name }}
-                      </div>
-                      <div class="text-[12px] text-ink-500">
-                        共 {{ currentGroupCount }} 条规则 · {{ currentGroupVariableCount }} 个变量
-                      </div>
-                    </div>
-                    <div class="workbench-rule-header__actions">
-                      <button
-                        type="button"
-                        class="ec-btn ec-btn-secondary ec-btn-sm"
-                        :disabled="store.selectedGroup.builtin"
-                        @click="handleRenameGroup"
-                      >
-                        重命名
-                      </button>
-                      <button
-                        type="button"
-                        class="ec-btn ec-btn-secondary ec-btn-sm"
-                        :disabled="store.selectedGroup.builtin"
-                        @click="handleRemoveGroup"
-                      >
-                        删除组
-                      </button>
-                      <button
-                        type="button"
-                        class="ec-btn ec-btn-primary ec-btn-sm"
-                        :disabled="!canCreateRule"
-                        @click="openCreateRuleDialog"
-                      >
-                        <Plus class="h-3.5 w-3.5" />
-                        新增规则
-                      </button>
-                    </div>
-                  </div>
-
-                  <DataTable aria-label="固定规则列表">
-                    <template #head>
-                      <tr>
-                        <th class="w-[28%]">规则名称</th>
-                        <th>目标变量</th>
-                        <th class="w-[20%]">规则选择</th>
-                        <th class="w-[20%] text-left align-middle">操作</th>
-                      </tr>
-                    </template>
-                    <template #body>
-                      <tr v-if="!canCreateRule">
-                        <td colspan="4" class="bg-card">
-                          <EmptyState title="请先在上方变量池添加变量" description="至少需要一个变量后才能开始新增规则。">
-                            <template #icon>
-                              <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M9 12h6 M12 9v6 M5 5h14v14H5z" />
-                              </svg>
-                            </template>
-                          </EmptyState>
-                        </td>
-                      </tr>
-                      <tr v-else-if="!store.currentGroupRules.length">
-                        <td colspan="4" class="bg-card">
-                          <EmptyState title="当前组还没有规则" description="点击右上角“新增规则”开始编排。">
-                            <template #icon>
-                              <Plus class="h-4 w-4 text-ink-500" />
-                            </template>
-                          </EmptyState>
-                        </td>
-                      </tr>
-                      <template v-else>
-                        <tr
-                          v-for="row in store.pagedCurrentGroupRules"
-                          :key="row.rule_id"
-                          class="bg-card text-ink-700"
-                        >
-                          <td class="align-top">
-                            <div
-                              class="truncate font-medium"
-                              :class="invalidRuleIdSet.has(row.rule_id) ? 'text-danger' : 'text-ink-900'"
-                            >
-                              {{ row.rule_name }}
-                            </div>
-                            <div class="mt-1 line-clamp-2 text-[12px] text-ink-500">{{ buildRuleCondition(row) }}</div>
-                          </td>
-                          <td class="align-top">
-                            <div class="truncate font-mono text-[12px] text-ink-900">{{ row.target_variable_tag }}</div>
-                            <div class="mt-1 truncate text-[12px] text-ink-500">{{ buildRuleVariableSummary(row) }}</div>
-                            <div class="truncate text-[11px] text-ink-500">{{ buildRuleSourcePathSummary(row) }}</div>
-                          </td>
-                          <td class="align-top">
-                            <div class="text-ink-700">{{ buildRuleSelectionSummary(row) }}</div>
-                            <div class="mt-1 font-mono text-[12px] text-ink-500">
-                              <template v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</template>
-                              <template v-else-if="row.rule_type === 'cross_table_mapping'">
-                                {{ row.reference_variable_tag || '未绑定基础字典' }}
-                              </template>
-                              <template v-else-if="row.rule_type === 'composite_condition_check'">
-                                {{ row.composite_config?.branches.length ?? 0 }} 个分支
-                              </template>
-                              <template v-else>—</template>
-                            </div>
-                          </td>
-                          <td class="text-left align-top">
-                            <div class="table-actions">
-                              <button
-                                type="button"
-                                class="ec-action-link"
-                                @click="openEditRuleDialog(row)"
-                              >
-                                编辑
-                              </button>
-                              <button
-                                type="button"
-                                class="ec-action-link-danger"
-                                @click="handleRemoveRule(row)"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      </template>
-                    </template>
-                  </DataTable>
-
-                  <div
-                    v-if="store.currentGroupRuleTotal > 20"
-                    class="flex items-center justify-between gap-3 pt-2"
+      <div ref="ruleStepRef">
+        <CollapsibleSection
+          step="03"
+          title="规则"
+          description="按组组织比较、非空、唯一和组合变量规则"
+          :status-label="getSectionStatusLabel(3)"
+          :status-tone="getSectionStatusTone(3)"
+          :active="activeGuideStep === 3"
+          :collapsed="collapsedSections.rule"
+          content-class="pt-3"
+          @toggle="toggleSection(3)"
+        >
+          <div class="workbench-rule-shell">
+            <div class="workbench-rule-layout">
+              <!-- 左侧规则组列表 -->
+              <aside class="workbench-rule-sidebar">
+                <div class="workbench-rule-sidebar-toolbar">
+                  <el-input
+                    v-model="store.groupKeyword"
+                    placeholder="搜索规则组"
+                    :prefix-icon="Search"
+                    clearable
+                    size="default"
+                  />
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm shrink-0"
+                    @click="handleCreateGroup"
                   >
-                    <span class="text-[12px] text-ink-500">
-                      第 {{ store.currentPage }} 页 / 共 {{ store.currentGroupRuleTotal }} 条
-                    </span>
-                    <el-pagination
-                      layout="prev, pager, next"
-                      :page-size="20"
-                      :total="store.currentGroupRuleTotal"
-                      :current-page="store.currentPage"
-                      @current-change="store.setCurrentPage"
-                    />
-                  </div>
+                    <Plus class="h-3 w-3" />
+                    新建
+                  </button>
+                </div>
 
-                  <div class="mt-6 flex justify-end">
+                <nav class="workbench-rule-menu">
+                  <!-- 保留原有业务逻辑：规则组导航仍基于 store.filteredGroups 遍历并复用原选中逻辑 -->
+                  <button
+                    v-for="group in store.filteredGroups"
+                    :key="group.group_id"
+                    type="button"
+                    class="workbench-rule-menu-item"
+                    :class="group.group_id === store.selectedGroup.group_id ? 'is-active' : ''"
+                    @click="store.setSelectedGroup(group.group_id)"
+                  >
+                    <span class="workbench-rule-menu-item__label">{{ group.group_name }}</span>
+                    <span
+                      v-if="invalidGroupIdSet.has(group.group_id)"
+                      class="workbench-rule-menu-item__dot"
+                      title="待修复"
+                    ></span>
+                    <span class="workbench-rule-menu-item__count">
+                      {{ store.groupRuleCounts[group.group_id] ?? 0 }}
+                    </span>
+                  </button>
+                </nav>
+              </aside>
+
+              <!-- 右侧规则区 -->
+              <div class="workbench-rule-main">
+                <div class="workbench-rule-header">
+                  <div class="min-w-0">
+                    <div class="truncate text-[14px] font-semibold text-ink-900">
+                      {{ store.selectedGroup.group_name }}
+                    </div>
+                    <div class="text-[12px] text-ink-500">
+                      共 {{ currentGroupCount }} 条规则 · {{ currentGroupVariableCount }} 个变量
+                    </div>
+                  </div>
+                  <div class="workbench-rule-header__actions">
                     <button
                       type="button"
-                      class="ec-btn ec-btn-primary"
-                      :disabled="store.isExecuting || !store.canExecute"
-                      @click="handleExecute"
+                      class="ec-btn ec-btn-secondary ec-btn-sm"
+                      :disabled="store.selectedGroup.builtin"
+                      @click="handleRenameGroup"
                     >
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                      {{ store.isExecuting ? '执行中…' : '执行全部规则' }}
+                      重命名
+                    </button>
+                    <button
+                      type="button"
+                      class="ec-btn ec-btn-secondary ec-btn-sm"
+                      :disabled="store.selectedGroup.builtin"
+                      @click="handleRemoveGroup"
+                    >
+                      删除组
+                    </button>
+                    <button
+                      type="button"
+                      class="ec-btn ec-btn-primary ec-btn-sm"
+                      :disabled="!canCreateRule"
+                      @click="openCreateRuleDialog"
+                    >
+                      <Plus class="h-3.5 w-3.5" />
+                      新增规则
                     </button>
                   </div>
+                </div>
+
+                <DataTable aria-label="项目校验规则列表">
+                  <template #head>
+                    <tr>
+                      <th class="w-[28%]">规则名称</th>
+                      <th>目标变量</th>
+                      <th class="w-[20%]">规则选择</th>
+                      <th class="w-[20%] text-left align-middle">操作</th>
+                    </tr>
+                  </template>
+                  <template #body>
+                    <tr v-if="!canCreateRule">
+                      <td colspan="4" class="bg-card">
+                        <EmptyState title="请先在上方变量池添加变量" description="至少需要一个变量后才能开始新增规则。">
+                          <template #icon>
+                            <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <path d="M9 12h6 M12 9v6 M5 5h14v14H5z" />
+                            </svg>
+                          </template>
+                        </EmptyState>
+                      </td>
+                    </tr>
+                    <tr v-else-if="!store.currentGroupRules.length">
+                      <td colspan="4" class="bg-card">
+                        <EmptyState title="当前组还没有规则" description="点击右上角“新增规则”开始编排。">
+                          <template #icon>
+                            <Plus class="h-4 w-4 text-ink-500" />
+                          </template>
+                        </EmptyState>
+                      </td>
+                    </tr>
+                    <template v-else>
+                      <tr
+                        v-for="row in store.pagedCurrentGroupRules"
+                        :key="row.rule_id"
+                        class="bg-card text-ink-700"
+                      >
+                        <td class="align-top">
+                          <div
+                            class="truncate font-medium"
+                            :class="invalidRuleIdSet.has(row.rule_id) ? 'text-danger' : 'text-ink-900'"
+                          >
+                            {{ row.rule_name }}
+                          </div>
+                          <div class="mt-1 line-clamp-2 text-[12px] text-ink-500">{{ buildRuleCondition(row) }}</div>
+                        </td>
+                        <td class="align-top">
+                          <div class="truncate font-mono text-[12px] text-ink-900">{{ row.target_variable_tag }}</div>
+                          <div class="mt-1 truncate text-[12px] text-ink-500">{{ buildRuleVariableSummary(row) }}</div>
+                          <div class="truncate text-[11px] text-ink-500">{{ buildRuleSourcePathSummary(row) }}</div>
+                        </td>
+                        <td class="align-top">
+                          <div class="text-ink-700">{{ buildRuleSelectionSummary(row) }}</div>
+                          <div class="mt-1 font-mono text-[12px] text-ink-500">
+                            <template v-if="row.rule_type === 'fixed_value_compare'">{{ row.expected_value }}</template>
+                            <template v-else-if="row.rule_type === 'cross_table_mapping'">
+                              {{ row.reference_variable_tag || '未绑定基础字典' }}
+                            </template>
+                            <template v-else-if="row.rule_type === 'composite_condition_check'">
+                              {{ row.composite_config?.branches.length ?? 0 }} 个分支
+                            </template>
+                            <template v-else>—</template>
+                          </div>
+                        </td>
+                        <td class="text-left align-top">
+                          <div class="table-actions">
+                            <button
+                              type="button"
+                              class="ec-action-link"
+                              @click="openEditRuleDialog(row)"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              class="ec-action-link-danger"
+                              @click="handleRemoveRule(row)"
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </template>
+                </DataTable>
+
+                <div
+                  v-if="store.currentGroupRuleTotal > 20"
+                  class="flex items-center justify-between gap-3 pt-2"
+                >
+                  <span class="text-[12px] text-ink-500">
+                    第 {{ store.currentPage }} 页 / 共 {{ store.currentGroupRuleTotal }} 条
+                  </span>
+                  <el-pagination
+                    layout="prev, pager, next"
+                    :page-size="20"
+                    :total="store.currentGroupRuleTotal"
+                    :current-page="store.currentPage"
+                    @current-change="store.setCurrentPage"
+                  />
+                </div>
+
+                <div class="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-primary"
+                    :disabled="store.isExecuting || !store.canExecute"
+                    @click="handleExecute"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    {{ store.isExecuting ? '执行中…' : '执行全部规则' }}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </CollapsibleSection>
+      </div>
 
       <!-- 执行结果 -->
-      <section ref="resultStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 4 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-4">
-            <SectionHeader
-              variant="workbench"
-              step="04"
-              title="结果"
-              description="查看扫描统计、SVN 输出和异常明细"
-              :status-label="getSectionStatusLabel(4)"
-              :status-tone="getSectionStatusTone(4)"
-            />
-          </div>
+      <div ref="resultStepRef">
+        <CollapsibleSection
+          step="04"
+          title="结果"
+          description="查看扫描统计、SVN 输出和异常明细"
+          :status-label="getSectionStatusLabel(4)"
+          :status-tone="getSectionStatusTone(4)"
+          :active="activeGuideStep === 4"
+          :collapsed="collapsedSections.result"
+          header-class="border-b border-line pb-4"
+          content-class="pt-4"
+          @toggle="toggleSection(4)"
+        >
+          <ResultBoardPanel :store="store" :rule-count="store.totalRuleCount">
+            <template #extra>
+              <div
+                v-if="store.svnUpdateSummary"
+                class="rounded-card border border-line border-l-4 border-l-accent bg-accent-soft/40 px-5 py-3"
+              >
+                <div class="text-[13px] font-medium text-ink-900">{{ store.svnUpdateSummary }}</div>
+                <div class="mt-1 text-[12px] text-ink-500">
+                  成功 {{ svnResultStats.successCount }} 个，失败 {{ svnResultStats.failedCount }} 个
+                </div>
+              </div>
 
-          <div class="pt-4">
-            <ResultBoardPanel :store="store" :rule-count="store.totalRuleCount">
-              <template #extra>
-                <div
-                  v-if="store.svnUpdateSummary"
-                  class="rounded-card border border-line border-l-4 border-l-accent bg-accent-soft/40 px-5 py-3"
+              <div v-if="store.svnUpdateResults.length" class="flex flex-col gap-2">
+                <article
+                  v-for="item in store.svnUpdateResults"
+                  :key="item.working_copy"
+                  class="rounded-field border border-line px-4 py-3"
+                  :class="item.status === 'error' ? 'border-l-4 border-l-danger bg-danger-soft/30' : 'bg-canvas'"
                 >
-                  <div class="text-[13px] font-medium text-ink-900">{{ store.svnUpdateSummary }}</div>
-                  <div class="mt-1 text-[12px] text-ink-500">
-                    成功 {{ svnResultStats.successCount }} 个，失败 {{ svnResultStats.failedCount }} 个
+                  <div class="truncate font-mono text-[12px] text-ink-900">{{ item.working_copy }}</div>
+                  <div class="mt-1 text-[12px]" :class="item.status === 'error' ? 'text-danger' : 'text-success'">
+                    {{ item.status === 'success' ? '更新成功' : '更新失败' }}
                   </div>
-                </div>
-
-                <div v-if="store.svnUpdateResults.length" class="flex flex-col gap-2">
-                  <article
-                    v-for="item in store.svnUpdateResults"
-                    :key="item.working_copy"
-                    class="rounded-field border border-line px-4 py-3"
-                    :class="item.status === 'error' ? 'border-l-4 border-l-danger bg-danger-soft/30' : 'bg-canvas'"
-                  >
-                    <div class="truncate font-mono text-[12px] text-ink-900">{{ item.working_copy }}</div>
-                    <div class="mt-1 text-[12px]" :class="item.status === 'error' ? 'text-danger' : 'text-success'">
-                      {{ item.status === 'success' ? '更新成功' : '更新失败' }}
-                    </div>
-                    <div class="mt-1 whitespace-pre-wrap break-all text-[12px] text-ink-500">
-                      {{ item.output || item.error || '无额外输出' }}
-                    </div>
-                  </article>
-                </div>
-              </template>
-            </ResultBoardPanel>
-          </div>
-        </div>
-      </section>
+                  <div class="mt-1 whitespace-pre-wrap break-all text-[12px] text-ink-500">
+                    {{ item.output || item.error || '无额外输出' }}
+                  </div>
+                </article>
+              </div>
+            </template>
+          </ResultBoardPanel>
+        </CollapsibleSection>
+      </div>
     </div>
 
     <!-- 新增/编辑规则弹窗 -->

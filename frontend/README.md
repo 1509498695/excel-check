@@ -30,7 +30,7 @@ frontend/src
 ├── api/                # HTTP 封装：apiFetch、auth、admin、workbench、fixedRules
 ├── components
 │   ├── shell/          # 共享展示组件：PageHeader / SectionHeader / StatPill / StatusDot / EmptyState / DataTable
-│   └── workbench/      # 工作台业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
+│   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
 ├── router/             # vue-router：/login /register / /fixed-rules /admin /profile
 ├── store/              # Pinia：auth / workbench / fixedRules
 ├── types/              # TypeScript 类型：workbench / fixedRules / auth
@@ -57,7 +57,7 @@ frontend/src
 
 规则编排补充：
 
-- 主工作台步骤 3 的单变量规则弹窗现已支持 `包含 (in)`。
+- 个人校验步骤 3 的单变量规则弹窗现已支持 `包含 (in)`。
 - 选择 `包含 (in)` 后，“比较值”会从文本输入切换为变量池中的单个变量下拉。
 - 该规则前端保存时会复用现有 `cross_table_mapping` 执行语义，不新增后端接口。
 

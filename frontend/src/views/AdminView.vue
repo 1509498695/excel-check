@@ -260,7 +260,7 @@ async function handleDeleteProject(project: ProjectDetail): Promise<void> {
 
   try {
     await ElMessageBox.confirm(
-      `确认永久删除项目「${project.name}」？该项目下的成员关系、固定规则配置和工作台配置都会一并清理，且无法恢复。`,
+      `确认永久删除项目「${project.name}」？该项目下的成员关系、项目校验配置和个人校验配置都会一并清理，且无法恢复。`,
       '删除项目',
       {
         confirmButtonText: '永久删除',
@@ -419,19 +419,7 @@ function getMemberRoleLabel(member: ProjectMember): string {
 
 <template>
   <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
-    <PageHeader breadcrumb="主菜单 / 管理后台" title="管理后台">
-      <template #actions>
-        <button
-          v-if="canCreateProject"
-          type="button"
-          class="ec-btn ec-btn-primary"
-          @click="openCreateProjectDialog"
-        >
-          <Plus class="h-3.5 w-3.5" />
-          创建项目
-        </button>
-      </template>
-    </PageHeader>
+    <PageHeader breadcrumb="主菜单 / 管理后台" title="管理后台" />
 
     <div class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6">
       <!-- KPI -->

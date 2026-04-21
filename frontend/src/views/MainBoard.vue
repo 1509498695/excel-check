@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
+import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
-import SectionHeader from '../components/shell/SectionHeader.vue'
 import StatPill from '../components/shell/StatPill.vue'
 import { useWorkbenchStore } from '../store/workbench'
 
@@ -17,6 +17,7 @@ const store = useWorkbenchStore()
 type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
 type StatTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
+type SectionKey = 'source' | 'variable' | 'rule' | 'result'
 
 const selectedGuideStep = ref<StepIndex | null>(null)
 const hasManuallySelectedGuideStep = ref(false)
@@ -43,6 +44,12 @@ const variablePoolPanelRef = ref<{
   openSingleCreateTab: () => Promise<void>
   openCompositeCreateTab: () => Promise<void>
 } | null>(null)
+const collapsedSections = reactive<Record<SectionKey, boolean>>({
+  source: false,
+  variable: false,
+  rule: false,
+  result: false,
+})
 
 const overviewItems = computed<
   Array<{
@@ -212,6 +219,33 @@ function getStepRef(step: StepIndex): HTMLElement | null {
   return resultStepRef.value
 }
 
+function getSectionKey(step: StepIndex): SectionKey {
+  if (step === 1) {
+    return 'source'
+  }
+  if (step === 2) {
+    return 'variable'
+  }
+  if (step === 3) {
+    return 'rule'
+  }
+  return 'result'
+}
+
+function toggleSection(step: StepIndex): void {
+  const key = getSectionKey(step)
+  collapsedSections[key] = !collapsedSections[key]
+}
+
+async function ensureStepExpanded(step: StepIndex): Promise<void> {
+  const key = getSectionKey(step)
+  if (!collapsedSections[key]) {
+    return
+  }
+  collapsedSections[key] = false
+  await nextTick()
+}
+
 async function scrollToStep(step: StepIndex): Promise<void> {
   await nextTick()
   getStepRef(step)?.scrollIntoView({
@@ -224,9 +258,11 @@ async function runExecution(): Promise<void> {
   try {
     // 保留原有业务逻辑：执行入口仍调用原有校验接口并沿用原结果刷新流程。
     await store.executeValidation()
+    await ensureStepExpanded(4)
     await scrollToStep(4)
     ElMessage.success('校验完成，结果已刷新。')
   } catch {
+    await ensureStepExpanded(4)
     await scrollToStep(4)
   }
 }
@@ -246,14 +282,17 @@ function openCompositeVariableCreate(): void {
 async function handleStepperClick(step: StepIndex): Promise<void> {
   hasManuallySelectedGuideStep.value = true
   selectedGuideStep.value = step
+  await ensureStepExpanded(step)
   await scrollToStep(step)
 }
 
 async function handleSourceSaved(_sourceId: string): Promise<void> {
+  await ensureStepExpanded(2)
   await scrollToStep(2)
 }
 
 async function handleVariableSaved(_tag: string): Promise<void> {
+  await ensureStepExpanded(2)
   await scrollToStep(2)
 }
 </script>
@@ -261,7 +300,7 @@ async function handleVariableSaved(_tag: string): Promise<void> {
 <template>
   <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
-    <PageHeader breadcrumb="主菜单 / 工作台" title="配置表校验工作台">
+    <PageHeader breadcrumb="主菜单 / 个人校验" title="配置表个人校验">
       <template #actions>
         <button
           v-if="store.pageError"
@@ -339,130 +378,115 @@ async function handleVariableSaved(_tag: string): Promise<void> {
       </section>
 
       <!-- 4 个步骤工作区 -->
-      <section ref="sourceStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 1 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="01"
-              title="数据源"
-              description="接入 Excel、CSV、飞书或 SVN 来源"
-              :status-label="getSectionStatusLabel(1)"
-              :status-tone="getSectionStatusTone(1)"
-            />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                @click="openDataSourceCreate"
-              >
-                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                新增数据源
-              </button>
-              <button
-                type="button"
-                class="ec-btn-text-collapse"
-                aria-disabled="true"
-              >
-                收起
-                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="m18 15-6-6-6 6" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="pt-1">
-            <DataSourcePanel ref="dataSourcePanelRef" toolbar-mode="hidden" @saved="handleSourceSaved" />
-          </div>
-        </div>
-      </section>
+      <div ref="sourceStepRef">
+        <CollapsibleSection
+          step="01"
+          title="数据源"
+          description="接入 Excel、CSV、飞书或 SVN 来源"
+          :status-label="getSectionStatusLabel(1)"
+          :status-tone="getSectionStatusTone(1)"
+          :active="activeGuideStep === 1"
+          :collapsed="collapsedSections.source"
+          content-class="pt-1"
+          @toggle="toggleSection(1)"
+        >
+          <template #actions>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              @click="openDataSourceCreate"
+            >
+              <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              新增数据源
+            </button>
+          </template>
 
-      <section ref="variableStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 2 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="02"
-              title="变量池"
-              description="沉淀后续规则编排会复用的字段与组合变量"
-              :status-label="getSectionStatusLabel(2)"
-              :status-tone="getSectionStatusTone(2)"
-            />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                :disabled="!store.sources.length"
-                @click="openSingleVariableCreate"
-              >
-                添加单个变量
-              </button>
-              <button
-                type="button"
-                class="ec-btn-outline-compact"
-                :disabled="!store.sources.length"
-                @click="openCompositeVariableCreate"
-              >
-                添加组合变量
-              </button>
-            </div>
-          </div>
-          <div class="pt-1">
-            <VariablePoolPanel ref="variablePoolPanelRef" toolbar-mode="hidden" @saved="handleVariableSaved" />
-          </div>
-        </div>
-      </section>
+          <DataSourcePanel ref="dataSourcePanelRef" toolbar-mode="hidden" @saved="handleSourceSaved" />
+        </CollapsibleSection>
+      </div>
 
-      <section ref="ruleStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 3 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-center justify-between gap-4 border-b border-line pb-3">
-            <SectionHeader
-              variant="workbench"
-              step="03"
-              title="规则"
-              description="按组组织比较、非空、唯一和组合变量规则"
-              :status-label="getSectionStatusLabel(3)"
-              :status-tone="getSectionStatusTone(3)"
-            />
-          </div>
-          <div class="pt-3">
-            <WorkbenchRuleOrchestrationPanel />
-            <div class="mt-6 flex justify-end">
-              <button
-                type="button"
-                class="ec-btn ec-btn-primary"
-                :disabled="store.isExecuting"
-                @click="runExecution"
-              >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                执行校验
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <div ref="variableStepRef">
+        <CollapsibleSection
+          step="02"
+          title="变量池"
+          description="沉淀后续规则编排会复用的字段与组合变量"
+          :status-label="getSectionStatusLabel(2)"
+          :status-tone="getSectionStatusTone(2)"
+          :active="activeGuideStep === 2"
+          :collapsed="collapsedSections.variable"
+          content-class="pt-1"
+          @toggle="toggleSection(2)"
+        >
+          <template #actions>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              :disabled="!store.sources.length"
+              @click="openSingleVariableCreate"
+            >
+              添加单个变量
+            </button>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
+              :disabled="!store.sources.length"
+              @click="openCompositeVariableCreate"
+            >
+              添加组合变量
+            </button>
+          </template>
 
-      <section ref="resultStepRef" class="rounded-card border border-line bg-card shadow-card-1">
-        <div class="border-t-2 px-5 py-4" :class="activeGuideStep === 4 ? 'border-accent' : 'border-transparent'">
-          <div class="flex items-start justify-between gap-4 border-b border-line pb-4">
-            <SectionHeader
-              variant="workbench"
-              step="04"
-              title="结果"
-              description="查看扫描统计、失败来源和异常明细"
-              :status-label="getSectionStatusLabel(4)"
-              :status-tone="getSectionStatusTone(4)"
-            />
+          <VariablePoolPanel ref="variablePoolPanelRef" toolbar-mode="hidden" @saved="handleVariableSaved" />
+        </CollapsibleSection>
+      </div>
+
+      <div ref="ruleStepRef">
+        <CollapsibleSection
+          step="03"
+          title="规则"
+          description="按组组织比较、非空、唯一和组合变量规则"
+          :status-label="getSectionStatusLabel(3)"
+          :status-tone="getSectionStatusTone(3)"
+          :active="activeGuideStep === 3"
+          :collapsed="collapsedSections.rule"
+          content-class="pt-3"
+          @toggle="toggleSection(3)"
+        >
+          <WorkbenchRuleOrchestrationPanel />
+          <div class="mt-6 flex justify-end">
+            <button
+              type="button"
+              class="ec-btn ec-btn-primary"
+              :disabled="store.isExecuting"
+              @click="runExecution"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              执行校验
+            </button>
           </div>
-          <div class="pt-4">
-            <ResultBoardPanel :rule-count="store.orchestrationRuleCount" />
-          </div>
-        </div>
-      </section>
+        </CollapsibleSection>
+      </div>
+
+      <div ref="resultStepRef">
+        <CollapsibleSection
+          step="04"
+          title="结果"
+          description="查看扫描统计、失败来源和异常明细"
+          :status-label="getSectionStatusLabel(4)"
+          :status-tone="getSectionStatusTone(4)"
+          :active="activeGuideStep === 4"
+          :collapsed="collapsedSections.result"
+          header-class="border-b border-line pb-4"
+          content-class="pt-4"
+          @toggle="toggleSection(4)"
+        >
+          <ResultBoardPanel :rule-count="store.orchestrationRuleCount" />
+        </CollapsibleSection>
+      </div>
     </div>
   </div>
 </template>

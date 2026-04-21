@@ -44,7 +44,7 @@ async function handleLogin(): Promise<void> {
       </div>
       <div class="text-center">
         <div class="text-[18px] font-semibold tracking-tight text-ink-900">Excel Check</div>
-        <div class="text-[12px] text-ink-500">配置表校验工作台</div>
+          <div class="text-[12px] text-ink-500">配置表个人校验</div>
       </div>
     </div>
 
@@ -55,7 +55,7 @@ async function handleLogin(): Promise<void> {
     >
       <div class="mb-5">
         <h1 class="text-[15px] font-semibold tracking-tight text-ink-900">登录</h1>
-        <p class="mt-1 text-[12px] text-ink-500">使用账户名与密码进入工作台</p>
+            <p class="mt-1 text-[12px] text-ink-500">使用账户名与密码进入个人校验</p>
       </div>
 
       <div class="flex flex-col gap-4">

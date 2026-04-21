@@ -34,14 +34,14 @@ const navItems = computed(() => {
   }> = [
     {
       to: '/',
-      label: '工作台',
+      label: '个人校验',
       routeName: 'main-board',
       show: true,
       icon: 'M3 12l9-9 9 9 M5 10v10h14V10',
     },
     {
       to: '/fixed-rules',
-      label: '固定规则',
+      label: '项目校验',
       routeName: 'fixed-rules-board',
       show: true,
       icon: 'M5 5h14v14H5z M9 11h6 M9 15h6',
@@ -110,7 +110,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
         </div>
         <div class="leading-tight">
           <div class="text-[15px] font-semibold text-ink-900">Excel Check</div>
-          <div class="text-[12px] text-ink-500">配置表校验工作台</div>
+          <div class="text-[12px] text-ink-500">配置表个人校验</div>
         </div>
       </div>
 

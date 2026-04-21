@@ -6,8 +6,8 @@
 
 | 入口 | 视图 | 作用 |
 |:---|:---|:---|
-| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 主工作台四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
-| `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 长期复用：独立 `version=4` 配置（`sources / variables / groups / rules`），支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
+| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
+| `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 项目校验：独立 `version=4` 配置（`sources / variables / groups / rules`），支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
 | `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，保存后前端会自动切到新的当前项目；项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
 | `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
 | `/login` `/register` | [LoginView.vue](../frontend/src/views/LoginView.vue)、[RegisterView.vue](../frontend/src/views/RegisterView.vue) | 认证入口；默认管理员 `admin / 123456`。 |
@@ -19,13 +19,13 @@
 | 组件 | 作用 |
 |:---|:---|
 | [PageHeader.vue](../frontend/src/components/shell/PageHeader.vue) | 顶栏：面包屑 + h1 标题 + 右侧 actions 槽。 |
-| [SectionHeader.vue](../frontend/src/components/shell/SectionHeader.vue) | 模块头：默认极简标题 + 描述；`variant="workbench"` 时切到「序号方块 + 标题 + 状态胶囊 + 副说明」工作台样式。 |
+| [SectionHeader.vue](../frontend/src/components/shell/SectionHeader.vue) | 模块头：默认极简标题 + 描述；`variant="workbench"` 时切到「序号方块 + 标题 + 状态胶囊 + 副说明」个人校验样式。 |
 | [StatPill.vue](../frontend/src/components/shell/StatPill.vue) | KPI 卡：caption + 等宽大数字 + StatusDot。 |
 | [StatusDot.vue](../frontend/src/components/shell/StatusDot.vue) | 5 色状态胶囊：`pending / active / done / warn / error`。 |
 | [EmptyState.vue](../frontend/src/components/shell/EmptyState.vue) | 空态：圆底 icon + 标题 + 副文案 + 可选 CTA。 |
 | [DataTable.vue](../frontend/src/components/shell/DataTable.vue) | 数据表壳：极简表头 + 行 hover；空态调用方自填。 |
 
-### 2.2 工作台业务组件 `components/workbench/`
+### 2.2 个人校验业务组件 `components/workbench/`
 
 | 组件 | 作用 |
 |:---|:---|
@@ -39,25 +39,25 @@
 以下组件留在仓库中但当前未被任何视图引用，待统一清理：
 
 - [components/workbench/WorkbenchSectionHeader.vue](../frontend/src/components/workbench/WorkbenchSectionHeader.vue)：薄包装到 `shell/SectionHeader.vue variant="workbench"`，新代码统一直用后者。
-- [components/workbench/SectionBlock.vue](../frontend/src/components/workbench/SectionBlock.vue)、[components/workbench/WorkbenchStepCard.vue](../frontend/src/components/workbench/WorkbenchStepCard.vue)：早期工作台折叠卡，已被全展开模块结构取代。
-- [components/fixed-rules/FixedRulesResultPanel.vue](../frontend/src/components/fixed-rules/FixedRulesResultPanel.vue)：原固定规则结果区，已被 `ResultBoardPanel.vue` 复用替代。
+- [components/workbench/SectionBlock.vue](../frontend/src/components/workbench/SectionBlock.vue)、[components/workbench/WorkbenchStepCard.vue](../frontend/src/components/workbench/WorkbenchStepCard.vue)：早期个人校验折叠卡，已被全展开模块结构取代。
+- [components/fixed-rules/FixedRulesResultPanel.vue](../frontend/src/components/fixed-rules/FixedRulesResultPanel.vue)：原项目校验结果区，已被 `ResultBoardPanel.vue` 复用替代。
 
 ### 2.4 状态、路由、API、工具
 
 | 路径 | 作用 |
 |:---|:---|
 | [store/auth.ts](../frontend/src/store/auth.ts) | Pinia：JWT、用户、当前项目、可访问项目。 |
-| [store/workbench.ts](../frontend/src/store/workbench.ts) | Pinia：主工作台数据源、变量、规则编排、执行结果。 |
-| [store/fixedRules.ts](../frontend/src/store/fixedRules.ts) | Pinia：固定规则页独立状态，与主工作台隔离。 |
+| [store/workbench.ts](../frontend/src/store/workbench.ts) | Pinia：个人校验数据源、变量、规则编排、执行结果。 |
+| [store/fixedRules.ts](../frontend/src/store/fixedRules.ts) | Pinia：项目校验页独立状态，与个人校验隔离。 |
 | [api/auth.ts](../frontend/src/api/auth.ts) | 注册 / 登录 / `me` / 切换项目 / 修改密码。 |
 | [api/admin.ts](../frontend/src/api/admin.ts) | 项目 CRUD、成员管理、密码重置。 |
-| [api/workbench.ts](../frontend/src/api/workbench.ts) | 数据源能力 / 元数据 / 列预览 / 引擎执行 / 工作台配置持久化。 |
-| [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 固定规则配置 CRUD / SVN 更新 / 执行。 |
+| [api/workbench.ts](../frontend/src/api/workbench.ts) | 数据源能力 / 元数据 / 列预览 / 引擎执行 / 个人校验配置持久化。 |
+| [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 项目校验配置 CRUD / SVN 更新 / 执行。 |
 | [utils/apiFetch.ts](../frontend/src/utils/apiFetch.ts) | 统一注入 JWT、`401` 跳登录、空响应体兼容。 |
 | [utils/taskTree.ts](../frontend/src/utils/taskTree.ts) | `TaskTree` 组装与归一化。 |
-| [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 工作台 / 固定规则共享的规则模型工具。 |
+| [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 个人校验 / 项目校验共享的规则模型工具。 |
 | [utils/workbenchOrchestrationRules.ts](../frontend/src/utils/workbenchOrchestrationRules.ts) | 编排规则映射为引擎 `ValidationRule[]`。 |
-| [utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 工作台元数据辅助（来源类型、规则类型、列预览限制等）。 |
+| [utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 个人校验元数据辅助（来源类型、规则类型、列预览限制等）。 |
 | [router/index.ts](../frontend/src/router/index.ts) | vue-router：路由表与全局认证守卫。 |
 | [App.vue](../frontend/src/App.vue) | 应用壳：左固定边栏 + 右独立滚动工作区；项目卡 + 用户菜单。 |
 | [style.css](../frontend/src/style.css) | 全局 token、Element Plus 校准、共享 utility class（`ec-btn-*` / `workbench-*` / `table-actions` 等）。 |
@@ -86,17 +86,17 @@
 | 模块 | 作用 |
 |:---|:---|
 | [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、metadata、列预览、组合预览。 |
-| [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config`：工作台配置按 `project_id + user_id` 隔离持久化。 |
+| [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config`：个人校验配置按 `project_id + user_id` 隔离持久化。 |
 | [app/api/execute_api.py](../backend/app/api/execute_api.py) | `/api/v1/engine/execute`：消费 `TaskTree`，调用规则引擎，返回统一结果。 |
 | [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、SVN 更新、执行。 |
 | [app/api/schemas.py](../backend/app/api/schemas.py)、[app/api/fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py) | Pydantic 入参 / 出参模型。 |
 
-### 3.4 固定规则服务
+### 3.4 项目校验服务
 
 | 模块 | 作用 |
 |:---|:---|
 | [app/fixed_rules/service.py](../backend/app/fixed_rules/service.py) | 配置读写、`version 2/3 → 4` 自动迁移、`config_issues` 非阻断加载、临时 `TaskTree` 聚合并复用主引擎。 |
-| [app/fixed_rules/schemas.py](../backend/app/fixed_rules/schemas.py) | 固定规则域内数据结构。 |
+| [app/fixed_rules/schemas.py](../backend/app/fixed_rules/schemas.py) | 项目校验域内数据结构。 |
 
 ### 3.5 数据加载
 

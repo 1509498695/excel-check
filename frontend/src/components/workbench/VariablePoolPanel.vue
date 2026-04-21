@@ -82,10 +82,10 @@ const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 const panelCopy = computed(() => ({
   emptyText: '请先添加单个变量或组合变量。',
   sourceTypeError: isFixedRulesVariant.value
-    ? '当前固定规则页的字段映射提取先支持本地 Excel。'
+    ? '当前项目校验页的字段映射提取先支持本地 Excel。'
     : '当前步骤 2 的字段映射提取先支持本地 Excel。',
   compositeTypeError: isFixedRulesVariant.value
-    ? '当前固定规则页的组合变量提取先支持本地 Excel。'
+    ? '当前项目校验页的组合变量提取先支持本地 Excel。'
     : '当前步骤 2 的组合变量提取先支持本地 Excel。',
 }))
 const singleSource = computed<DataSource | null>(

@@ -468,7 +468,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         this.configIssues = response.meta?.config_issues ?? []
       } catch (error) {
         this.configIssues = []
-        this.pageError = error instanceof Error ? error.message : '读取固定规则配置失败。'
+      this.pageError = error instanceof Error ? error.message : '读取项目校验配置失败。'
         throw error
       } finally {
         this.isLoading = false
@@ -489,7 +489,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         this.configIssues = []
         return response.data
       } catch (error) {
-        this.pageError = error instanceof Error ? error.message : '保存固定规则配置失败。'
+      this.pageError = error instanceof Error ? error.message : '保存项目校验配置失败。'
         throw error
       } finally {
         this.isSaving = false
@@ -508,7 +508,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       } catch (error) {
         this.executionMeta = null
         this.abnormalResults = []
-        this.pageError = error instanceof Error ? error.message : '执行固定规则失败。'
+      this.pageError = error instanceof Error ? error.message : '执行项目校验失败。'
         throw error
       } finally {
         this.isExecuting = false

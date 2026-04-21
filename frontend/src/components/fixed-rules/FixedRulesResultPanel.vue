@@ -29,14 +29,14 @@ const resultSummary = computed(() => {
     return '保存配置后点击“执行全部规则”，结果会在这里展示。'
   }
 
-  return `本轮共执行 ${store.totalRuleCount} 条固定规则，已扫描 ${resultStats.value.scanned} 行数据。`
+  return `本轮共执行 ${store.totalRuleCount} 条项目校验规则，已扫描 ${resultStats.value.scanned} 行数据。`
 })
 
 const resultState = computed(() => {
   if (store.isExecuting) {
     return {
       type: 'info' as const,
-      title: '正在执行固定规则',
+      title: '正在执行项目校验',
       description: '系统正在读取固定文件、执行全部规则组并刷新结果看板，请稍候。',
     }
   }
@@ -52,7 +52,7 @@ const resultState = computed(() => {
   if (!store.totalRuleCount) {
     return {
       type: 'info' as const,
-      title: '还没有可执行的固定规则',
+      title: '还没有可执行的项目校验规则',
       description: '先完成文件配置、规则组和规则录入，再在这里查看执行结果。',
     }
   }
@@ -68,14 +68,14 @@ const resultState = computed(() => {
   if (!store.abnormalResults.length) {
     return {
       type: 'success' as const,
-      title: '本轮固定规则校验已完成，未发现异常',
+      title: '本轮项目校验已完成，未发现异常',
       description: `已扫描 ${resultStats.value.scanned} 行数据，可继续补充规则组或调整阈值。`,
     }
   }
 
   return {
     type: 'warning' as const,
-    title: '本轮固定规则校验已完成，已返回异常明细',
+    title: '本轮项目校验已完成，已返回异常明细',
     description: `已扫描 ${resultStats.value.scanned} 行数据，共返回 ${resultStats.value.total} 条异常结果。`,
   }
 })
@@ -122,7 +122,7 @@ function displayRawValue(value: unknown): string {
           <CircleCheckFilled />
         </div>
         <div>
-          <strong>固定规则结果总览</strong>
+          <strong>项目校验结果总览</strong>
           <p>{{ resultSummary }}</p>
         </div>
       </div>
