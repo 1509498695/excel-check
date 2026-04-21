@@ -34,6 +34,21 @@ def _create_fixed_rules_workbook(
     return target_path
 
 
+def _create_fixed_rules_paged_workbook(target_path: Path) -> Path:
+    """创建用于项目校验结果分页测试的 Excel 文件。"""
+    dict_values = list(range(1, 11))
+    repeated_dict_values = [dict_values[index % len(dict_values)] for index in range(45)]
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": list(range(1, 46)),
+                "DICT_ID": repeated_dict_values,
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    return target_path
+
+
 def _build_single_tag(source_id: str, sheet: str, column: str) -> str:
     return f"[{source_id}-{sheet}-{column}]"
 
@@ -1121,6 +1136,84 @@ async def test_execute_fixed_rules_filters_by_selected_rule_ids(
     abnormal_results = execute_response.json()["data"]["abnormal_results"]
     assert len(abnormal_results) == 1
     assert abnormal_results[0]["rule_name"] == "B 文件 DESC 不能为空"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_returns_first_page_and_supports_result_pagination(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验执行后只返回第一页，并可按 result_id 翻页。"""
+    workbook_path = _create_fixed_rules_paged_workbook(
+        tmp_path / "fixed_rules_paged.xlsx",
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    dict_tag = _build_single_tag("items-source", "items", "DICT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            },
+            {
+                "tag": dict_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DICT_ID",
+                "expected_type": "str",
+            },
+        ],
+        rules=[
+            {
+                "rule_id": "rule-int-id-in-dict",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 必须包含于 DICT_ID",
+                "target_variable_tag": target_tag,
+                "rule_type": "cross_table_mapping",
+                "reference_variable_tag": dict_tag,
+            }
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        assert save_response.status_code == 200
+
+        execute_response = await client.post(
+            "/api/v1/fixed-rules/execute",
+            json={"page": 1, "size": 20},
+        )
+
+        assert execute_response.status_code == 200
+        execute_payload = execute_response.json()
+        assert execute_payload["msg"] == "Execution Completed"
+        assert execute_payload["meta"]["result_id"] > 0
+        assert execute_payload["data"]["page"] == 1
+        assert execute_payload["data"]["size"] == 20
+        assert execute_payload["data"]["total"] == 35
+        assert len(execute_payload["data"]["list"]) == 20
+        assert execute_payload["data"]["abnormal_results"] == execute_payload["data"]["list"]
+
+        result_id = execute_payload["meta"]["result_id"]
+        page_two_response = await client.get(
+            f"/api/v1/fixed-rules/results/{result_id}",
+            params={"page": 2, "size": 20},
+        )
+
+    assert page_two_response.status_code == 200
+    page_two_payload = page_two_response.json()
+    assert page_two_payload["meta"]["result_id"] == result_id
+    assert page_two_payload["data"]["page"] == 2
+    assert page_two_payload["data"]["size"] == 20
+    assert page_two_payload["data"]["total"] == 35
+    assert len(page_two_payload["data"]["list"]) == 15
+    assert page_two_payload["data"]["list"][0]["raw_value"] == 31
 
 
 @pytest.mark.anyio

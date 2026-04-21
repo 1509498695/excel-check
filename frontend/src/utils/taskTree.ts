@@ -257,6 +257,8 @@ export function buildTaskTreePayload(
   variables: VariableTag[],
   rules: ValidationRule[],
   selectedRuleIds?: string[],
+  page?: number,
+  size?: number,
 ): TaskTree {
   const normalizedSources = sources.map(normalizeSource)
   const sourceIds = new Set<string>()
@@ -291,6 +293,14 @@ export function buildTaskTreePayload(
   if (selectedRuleIds) {
     const normalizedSelectedRuleIds = [...new Set(selectedRuleIds.map(trimValue).filter(Boolean))]
     payload.selected_rule_ids = normalizedSelectedRuleIds
+  }
+
+  if (page) {
+    payload.page = page
+  }
+
+  if (size) {
+    payload.size = size
   }
 
   return payload

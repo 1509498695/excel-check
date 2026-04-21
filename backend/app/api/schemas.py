@@ -52,3 +52,5 @@ class TaskTree(BaseModel):
     variables: list[VariableTag] = Field(default_factory=list)
     rules: list[ValidationRule] = Field(default_factory=list)
     selected_rule_ids: list[str] | None = None
+    page: int | None = Field(default=None, ge=1)
+    size: int | None = Field(default=None, ge=1, le=200)

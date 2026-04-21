@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import {
   executeFixedRules,
+  fetchFixedRulesResults,
   fetchFixedRulesConfig,
   saveFixedRulesConfig,
   triggerFixedRulesSvnUpdate,
@@ -58,11 +59,16 @@ interface FixedRulesState {
   isLoading: boolean
   isSaving: boolean
   isExecuting: boolean
+  isResultPageLoading: boolean
   isUpdatingSvn: boolean
   pageError: string
   configIssues: FixedRulesConfigIssue[]
   executionMeta: ExecutionMeta | null
   abnormalResults: AbnormalResult[]
+  abnormalResultTotal: number
+  resultId: number | null
+  resultCurrentPage: number
+  resultPageSize: number
   svnUpdateResults: FixedRulesSvnUpdateItem[]
   svnUpdateSummary: string
 }
@@ -92,11 +98,16 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     isLoading: false,
     isSaving: false,
     isExecuting: false,
+    isResultPageLoading: false,
     isUpdatingSvn: false,
     pageError: '',
     configIssues: [],
     executionMeta: null,
     abnormalResults: [],
+    abnormalResultTotal: 0,
+    resultId: null,
+    resultCurrentPage: 1,
+    resultPageSize: 20,
     svnUpdateResults: [],
     svnUpdateSummary: '',
   }),
@@ -169,6 +180,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
 
     totalRuleCount(): number {
       return this.rules.length
+    },
+
+    resultPageCount(state): number {
+      return Math.max(1, Math.ceil(state.abnormalResultTotal / state.resultPageSize))
     },
 
     sourceCount(): number {
@@ -291,11 +306,15 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       this.isLoading = false
       this.isSaving = false
       this.isExecuting = false
+      this.isResultPageLoading = false
       this.isUpdatingSvn = false
       this.pageError = ''
       this.configIssues = []
       this.executionMeta = null
       this.abnormalResults = []
+      this.abnormalResultTotal = 0
+      this.resultId = null
+      this.resultCurrentPage = 1
       this.svnUpdateResults = []
       this.svnUpdateSummary = ''
     },
@@ -307,6 +326,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     clearExecutionResult(): void {
       this.executionMeta = null
       this.abnormalResults = []
+      this.abnormalResultTotal = 0
+      this.resultId = null
+      this.resultCurrentPage = 1
+      this.isResultPageLoading = false
     },
 
     setSelectedGroup(groupId: string): void {
@@ -503,17 +526,54 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       try {
         await this.saveConfig()
         const response = await executeFixedRules(
-          selectedRuleIds ? { selected_rule_ids: selectedRuleIds } : undefined,
+          {
+            selected_rule_ids: selectedRuleIds,
+            page: 1,
+            size: this.resultPageSize,
+          },
         )
         this.executionMeta = response.meta
-        this.abnormalResults = response.data.abnormal_results
+        this.resultId = response.meta.result_id ?? null
+        this.resultCurrentPage = response.data.page ?? 1
+        this.abnormalResultTotal =
+          response.data.total ?? response.data.abnormal_results.length
+        this.abnormalResults = response.data.list ?? response.data.abnormal_results
       } catch (error) {
         this.executionMeta = null
+        this.resultId = null
+        this.resultCurrentPage = 1
+        this.abnormalResultTotal = 0
         this.abnormalResults = []
-      this.pageError = error instanceof Error ? error.message : '执行项目校验失败。'
+        this.pageError = error instanceof Error ? error.message : '执行项目校验失败。'
         throw error
       } finally {
         this.isExecuting = false
+      }
+    },
+
+    async loadResultPage(page: number): Promise<void> {
+      if (!this.resultId || !this.executionMeta) {
+        return
+      }
+
+      this.isResultPageLoading = true
+      this.pageError = ''
+      try {
+        const response = await fetchFixedRulesResults(
+          this.resultId,
+          page,
+          this.resultPageSize,
+        )
+        this.executionMeta = response.meta
+        this.resultCurrentPage = response.data.page ?? page
+        this.abnormalResultTotal =
+          response.data.total ?? response.data.abnormal_results.length
+        this.abnormalResults = response.data.list ?? response.data.abnormal_results
+      } catch (error) {
+        this.pageError = error instanceof Error ? error.message : '读取结果分页失败。'
+        throw error
+      } finally {
+        this.isResultPageLoading = false
       }
     },
 

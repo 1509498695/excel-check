@@ -57,6 +57,14 @@ export async function executeTaskTree(taskTree: TaskTree): Promise<ExecuteRespon
   })
 }
 
+export async function fetchExecutionResults(
+  resultId: number,
+  page: number,
+  size: number,
+): Promise<ExecuteResponse> {
+  return apiFetch<ExecuteResponse>(`/api/v1/engine/results/${resultId}?page=${page}&size=${size}`)
+}
+
 export async function fetchWorkbenchConfig(): Promise<{ code: number; msg: string; data: Record<string, unknown> }> {
   return apiFetch('/api/v1/workbench/config')
 }

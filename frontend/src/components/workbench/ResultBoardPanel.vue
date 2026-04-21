@@ -10,8 +10,14 @@ import { getRuleTitle } from '../../utils/workbenchMeta'
 type ResultBoardStoreLike = {
   pageError: string
   isExecuting: boolean
+  isResultPageLoading: boolean
   executionMeta: ExecutionMeta | null
   abnormalResults: AbnormalResult[]
+  abnormalResultTotal: number
+  resultCurrentPage: number
+  resultPageSize: number
+  resultPageCount: number
+  loadResultPage: (page: number) => Promise<void>
 }
 
 const props = defineProps<{
@@ -23,7 +29,7 @@ const defaultStore = useWorkbenchStore()
 const store = computed<ResultBoardStoreLike>(() => props.store ?? defaultStore)
 
 const resultStats = computed(() => {
-  const total = store.value.abnormalResults.length
+  const total = store.value.abnormalResultTotal
   const scanned = store.value.executionMeta?.total_rows_scanned ?? 0
   const failedSources = store.value.executionMeta?.failed_sources.length ?? 0
   const durationMs = store.value.executionMeta?.execution_time_ms ?? 0
@@ -35,6 +41,10 @@ const resultStats = computed(() => {
     durationMs,
   }
 })
+
+const shouldShowPagination = computed(
+  () => !!store.value.executionMeta && store.value.abnormalResultTotal > store.value.resultPageSize,
+)
 
 const summaryCards = computed(() => [
   { label: '扫描总行数', value: resultStats.value.scanned },
@@ -66,6 +76,10 @@ function displayRawValue(value: unknown): string {
   }
 
   return String(value)
+}
+
+function handlePageChange(page: number): void {
+  void store.value.loadResultPage(page)
 }
 </script>
 
@@ -111,7 +125,12 @@ function displayRawValue(value: unknown): string {
 
       <slot name="extra" />
 
-      <DataTable aria-label="执行结果表">
+      <div
+        v-loading="store.isResultPageLoading"
+        element-loading-text="正在加载结果页"
+        class="flex flex-col gap-4"
+      >
+        <DataTable aria-label="执行结果表">
         <template #head>
           <tr>
             <th class="w-[18%]">命中规则</th>
@@ -139,7 +158,7 @@ function displayRawValue(value: unknown): string {
               <EmptyState title="等待执行结果" description="执行完成后，异常结果会在这里展示。" />
             </td>
           </tr>
-          <tr v-else-if="!store.abnormalResults.length">
+          <tr v-else-if="!store.abnormalResultTotal">
             <td colspan="6" class="bg-card">
               <EmptyState title="本轮未发现异常结果" description="扫描统计已完成，当前没有命中异常数据。">
                 <template #icon>
@@ -179,7 +198,26 @@ function displayRawValue(value: unknown): string {
             </tr>
           </template>
         </template>
-      </DataTable>
+        </DataTable>
+
+        <div
+          v-if="store.executionMeta"
+          class="flex items-center justify-between gap-4"
+        >
+          <div class="text-[13px] text-ink-500">
+            共 {{ store.abnormalResultTotal }} 条异常
+          </div>
+          <el-pagination
+            v-if="shouldShowPagination"
+            background
+            layout="prev, pager, next"
+            :current-page="store.resultCurrentPage"
+            :page-size="store.resultPageSize"
+            :total="store.abnormalResultTotal"
+            @current-change="handlePageChange"
+          />
+        </div>
+      </div>
     </template>
   </div>
 </template>

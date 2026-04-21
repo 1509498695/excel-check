@@ -239,7 +239,7 @@ const overviewItems = computed<
   },
   {
     label: '最近异常',
-    value: store.abnormalResults.length,
+    value: store.abnormalResultTotal,
     pendingHint: '尚未执行',
     readyHint: '需关注',
     pendingTone: 'pending',
@@ -1278,19 +1278,14 @@ async function handleSaveConfig(): Promise<void> {
   await persistConfig('项目校验配置已保存。', false)
 }
 
-async function handleExecute(): Promise<void> {
-  if (!selectedRuleIds.value.length) {
-    ElMessage.warning('请至少勾选一条需要校验的规则')
-    return
-  }
-
+async function runRuleExecution(ruleIds: string[]): Promise<void> {
   try {
     // 保留原有业务逻辑：固定规则执行仍走原有 executeConfig 链路与结果消费模型。
-    await store.executeConfig(selectedRuleIds.value)
+    await store.executeConfig(ruleIds)
     await ensureStepExpanded(4)
     await scrollToStep(4)
-    if (store.abnormalResults.length) {
-      ElMessage.warning(`执行完成，发现 ${store.abnormalResults.length} 条异常结果。`)
+    if (store.abnormalResultTotal) {
+      ElMessage.warning(`执行完成，发现 ${store.abnormalResultTotal} 条异常结果。`)
       return
     }
     ElMessage.success('执行完成，当前没有命中异常。')
@@ -1299,6 +1294,25 @@ async function handleExecute(): Promise<void> {
     await ensureStepExpanded(4)
     await scrollToStep(4)
   }
+}
+
+async function handleExecute(): Promise<void> {
+  if (!selectedRuleIds.value.length) {
+    ElMessage.warning('请至少勾选一条需要校验的规则')
+    return
+  }
+
+  await runRuleExecution(selectedRuleIds.value)
+}
+
+async function handleExecuteAll(): Promise<void> {
+  if (!store.rules.length) {
+    ElMessage.warning('当前暂无规则，请先新增规则后再执行校验')
+    return
+  }
+
+  const allRuleIds = store.rules.map((rule) => rule.rule_id)
+  await runRuleExecution(allRuleIds)
 }
 
 function buildOrderedSelectedRuleIds(nextSelectedRuleIdSet: Set<string>): string[] {
@@ -1368,13 +1382,13 @@ async function handleSvnUpdate(): Promise<void> {
         <button
           type="button"
           class="ec-btn ec-btn-primary"
-          :disabled="store.isExecuting || !store.canExecute"
-          @click="handleExecute"
+          :disabled="store.isExecuting || (store.rules.length > 0 && !store.canExecute)"
+          @click="handleExecuteAll"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z" />
           </svg>
-          {{ store.isExecuting ? '执行中…' : '执行校验' }}
+          {{ store.isExecuting ? '执行中…' : '执行全部校验' }}
         </button>
       </template>
     </PageHeader>

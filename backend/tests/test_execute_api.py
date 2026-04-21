@@ -37,6 +37,23 @@ def _create_composite_test_workbook(target_path: Path) -> Path:
     return target_path
 
 
+def _create_paginated_test_workbook(target_path: Path) -> Path:
+    """创建用于执行结果分页测试的 Excel 文件。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame({"ID": list(range(1, 11))}).to_excel(
+            writer,
+            sheet_name="items",
+            index=False,
+        )
+        pd.DataFrame({"RefID": list(range(1, 46))}).to_excel(
+            writer,
+            sheet_name="drops",
+            index=False,
+        )
+
+    return target_path
+
+
 @pytest.mark.anyio
 async def test_execute_engine_returns_three_rule_results() -> None:
     """验证一次请求能同时覆盖空值、重复值和跨表映射缺失。"""
@@ -645,3 +662,80 @@ async def test_execute_engine_accepts_composite_variable_without_breaking_rules(
         item["rule_name"] == "cross_table_mapping" and item["raw_value"] == 9
         for item in response_payload["data"]["abnormal_results"]
     )
+
+
+@pytest.mark.anyio
+async def test_execute_engine_persists_latest_result_and_supports_server_side_pagination(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证个人校验执行后会返回第一页结果，并支持按 result_id 翻页。"""
+    workbook_path = _create_paginated_test_workbook(tmp_path / "paged_execute.xlsx")
+    payload = {
+        "sources": [
+            {
+                "id": "src_test",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-id]",
+                "source_id": "src_test",
+                "sheet": "items",
+                "column": "ID",
+            },
+            {
+                "tag": "[drops-ref]",
+                "source_id": "src_test",
+                "sheet": "drops",
+                "column": "RefID",
+            },
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-cross",
+                "rule_type": "cross_table_mapping",
+                "params": {
+                    "dict_tag": "[items-id]",
+                    "target_tag": "[drops-ref]",
+                },
+            }
+        ],
+        "selected_rule_ids": ["rule-cross"],
+        "page": 1,
+        "size": 20,
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=auth_headers,
+    ) as client:
+        execute_response = await client.post("/api/v1/engine/execute", json=payload)
+
+        assert execute_response.status_code == 200
+        execute_payload = execute_response.json()
+        assert execute_payload["msg"] == "Execution Completed"
+        assert execute_payload["meta"]["result_id"] > 0
+        assert execute_payload["data"]["page"] == 1
+        assert execute_payload["data"]["size"] == 20
+        assert execute_payload["data"]["total"] == 35
+        assert len(execute_payload["data"]["list"]) == 20
+        assert execute_payload["data"]["abnormal_results"] == execute_payload["data"]["list"]
+
+        result_id = execute_payload["meta"]["result_id"]
+        page_two_response = await client.get(
+            f"/api/v1/engine/results/{result_id}",
+            params={"page": 2, "size": 20},
+        )
+
+    assert page_two_response.status_code == 200
+    page_two_payload = page_two_response.json()
+    assert page_two_payload["meta"]["result_id"] == result_id
+    assert page_two_payload["data"]["page"] == 2
+    assert page_two_payload["data"]["size"] == 20
+    assert page_two_payload["data"]["total"] == 35
+    assert len(page_two_payload["data"]["list"]) == 15
+    assert page_two_payload["data"]["list"][0]["raw_value"] == 31

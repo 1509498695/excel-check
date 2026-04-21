@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
-from backend.app.api.execute_api import execute_engine
 from backend.app.api.fixed_rules_schemas import (
     CompositeAssertionOperator,
     CompositeBranch,
@@ -22,8 +22,10 @@ from backend.app.api.fixed_rules_schemas import (
     UNGROUPED_GROUP_NAME,
 )
 from backend.app.api.schemas import DataSource, TaskTree, ValidationRule, VariableTag
+from backend.app.execution_pipeline import run_execution_pipeline
 from backend.app.loaders.local_reader import read_source_metadata
 from backend.app.loaders.svn_manager import update_svn_working_copy
+from backend.app.utils.formatter import build_execution_response
 from backend.config import settings
 
 
@@ -138,8 +140,19 @@ def execute_saved_fixed_rules(
     ordered_rules = _get_ordered_rules(config, selected_rule_ids=selected_rule_ids)
     if not ordered_rules:
         raise ValueError("当前没有可执行的固定规则，请先配置规则再执行。")
-    return execute_engine(
-        build_fixed_rules_task_tree(config, selected_rule_ids=selected_rule_ids)
+    task_tree = build_fixed_rules_task_tree(config, selected_rule_ids=selected_rule_ids)
+    start = time.perf_counter()
+    execution_artifacts = run_execution_pipeline(task_tree)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    total_rows_scanned = sum(
+        len(frame) for frame in execution_artifacts["loaded_variables"].values()
+    )
+    return build_execution_response(
+        abnormal_results=execution_artifacts["abnormal_results"],
+        execution_time_ms=elapsed_ms,
+        total_rows_scanned=total_rows_scanned,
+        failed_sources=execution_artifacts["failed_sources"],
+        msg="Execution Completed",
     )
 
 

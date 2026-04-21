@@ -43,12 +43,15 @@ export interface TaskTree {
   variables: VariableTag[]
   rules: ValidationRule[]
   selected_rule_ids?: string[]
+  page?: number
+  size?: number
 }
 
 export interface ExecutionMeta {
   execution_time_ms: number
   total_rows_scanned: number
   failed_sources: string[]
+  result_id?: number
 }
 
 export interface AbnormalResult {
@@ -65,6 +68,10 @@ export interface ExecuteResponse {
   msg: string
   meta: ExecutionMeta
   data: {
+    total?: number
+    list?: AbnormalResult[]
+    page?: number
+    size?: number
     abnormal_results: AbnormalResult[]
   }
 }

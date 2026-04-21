@@ -100,3 +100,49 @@ class WorkbenchConfigRecord(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ExecutionRunRecord(Base):
+    """最近一次执行结果记录。"""
+
+    __tablename__ = "execution_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    total_results: Mapped[int] = mapped_column(default=0)
+    execution_time_ms: Mapped[int] = mapped_column(default=0)
+    total_rows_scanned: Mapped[int] = mapped_column(default=0)
+    failed_sources_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    items: Mapped[list["ExecutionResultItemRecord"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class ExecutionResultItemRecord(Base):
+    """单条异常结果记录。"""
+
+    __tablename__ = "execution_result_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("execution_runs.id", ondelete="CASCADE"), index=True
+    )
+    sort_index: Mapped[int] = mapped_column(index=True)
+    level: Mapped[str] = mapped_column(String(32), default="info")
+    rule_name: Mapped[str] = mapped_column(String(255), default="")
+    location: Mapped[str] = mapped_column(Text, default="")
+    row_index: Mapped[int] = mapped_column(default=0)
+    raw_value_json: Mapped[str] = mapped_column(Text, default="null")
+    message: Mapped[str] = mapped_column(Text, default="")
+
+    run: Mapped[ExecutionRunRecord] = relationship(back_populates="items")

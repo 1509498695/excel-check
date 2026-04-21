@@ -4,6 +4,7 @@ import {
   executeTaskTree,
   fetchColumnPreview,
   fetchCompositePreview,
+  fetchExecutionResults,
   fetchSourceCapabilities,
   fetchSourceMetadata,
   fetchWorkbenchConfig,
@@ -48,9 +49,14 @@ interface WorkbenchState {
   orchestrationCurrentPage: number
   capabilities: SourceType[]
   isExecuting: boolean
+  isResultPageLoading: boolean
   pageError: string
   abnormalResults: AbnormalResult[]
+  abnormalResultTotal: number
   executionMeta: ExecutionMeta | null
+  resultId: number | null
+  resultCurrentPage: number
+  resultPageSize: number
   activeTag: string | null
   preferredSourceId: string | null
   sourceMetadataMap: Record<string, SourceMetadata>
@@ -106,9 +112,14 @@ export const useWorkbenchStore = defineStore('workbench', {
     orchestrationCurrentPage: 1,
     capabilities: [],
     isExecuting: false,
+    isResultPageLoading: false,
     pageError: '',
     abnormalResults: [],
+    abnormalResultTotal: 0,
     executionMeta: null,
+    resultId: null,
+    resultCurrentPage: 1,
+    resultPageSize: 20,
     activeTag: null,
     preferredSourceId: null,
     sourceMetadataMap: {},
@@ -275,7 +286,11 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     resultCount(state): number {
-      return state.abnormalResults.length
+      return state.abnormalResultTotal
+    },
+
+    resultPageCount(state): number {
+      return Math.max(1, Math.ceil(state.abnormalResultTotal / state.resultPageSize))
     },
   },
 
@@ -543,6 +558,10 @@ export const useWorkbenchStore = defineStore('workbench', {
     applyDemoScenario(): void {
       this.pageError = ''
       this.executionMeta = null
+      this.resultId = null
+      this.resultCurrentPage = 1
+      this.abnormalResultTotal = 0
+      this.isResultPageLoading = false
       this.abnormalResults = []
       this.activeTag = '[items-id]'
       this.sourceMetadataMap = {}
@@ -669,12 +688,18 @@ export const useWorkbenchStore = defineStore('workbench', {
       )
     },
 
-    buildTaskTreePayload(selectedRuleIds?: string[]): TaskTree {
+    buildTaskTreePayload(
+      selectedRuleIds?: string[],
+      page?: number,
+      size?: number,
+    ): TaskTree {
       return buildTaskTreePayload(
         this.sources,
         this.variables,
         this.engineValidationRules,
         selectedRuleIds,
+        page,
+        size,
       )
     },
 
@@ -692,17 +717,54 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.isExecuting = true
 
       try {
-        const payload = this.buildTaskTreePayload(selectedRuleIds)
+        const payload = this.buildTaskTreePayload(
+          selectedRuleIds,
+          1,
+          this.resultPageSize,
+        )
         const response = await executeTaskTree(payload)
         this.executionMeta = response.meta
-        this.abnormalResults = response.data.abnormal_results
+        this.resultId = response.meta.result_id ?? null
+        this.resultCurrentPage = response.data.page ?? 1
+        this.abnormalResultTotal =
+          response.data.total ?? response.data.abnormal_results.length
+        this.abnormalResults = response.data.list ?? response.data.abnormal_results
       } catch (error) {
         this.executionMeta = null
+        this.resultId = null
+        this.resultCurrentPage = 1
+        this.abnormalResultTotal = 0
         this.abnormalResults = []
         this.pageError = error instanceof Error ? error.message : '执行校验失败。'
         throw error
       } finally {
         this.isExecuting = false
+      }
+    },
+
+    async loadResultPage(page: number): Promise<void> {
+      if (!this.resultId || !this.executionMeta) {
+        return
+      }
+
+      this.isResultPageLoading = true
+      this.pageError = ''
+      try {
+        const response = await fetchExecutionResults(
+          this.resultId,
+          page,
+          this.resultPageSize,
+        )
+        this.executionMeta = response.meta
+        this.resultCurrentPage = response.data.page ?? page
+        this.abnormalResultTotal =
+          response.data.total ?? response.data.abnormal_results.length
+        this.abnormalResults = response.data.list ?? response.data.abnormal_results
+      } catch (error) {
+        this.pageError = error instanceof Error ? error.message : '读取结果分页失败。'
+        throw error
+      } finally {
+        this.isResultPageLoading = false
       }
     },
 
@@ -740,7 +802,11 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.ruleGroups = [{ ...UNGROUPED_GROUP }]
         this.orchestrationRules = []
         this.abnormalResults = []
+        this.abnormalResultTotal = 0
         this.executionMeta = null
+        this.resultId = null
+        this.resultCurrentPage = 1
+        this.isResultPageLoading = false
         this.sourceMetadataMap = {}
         this.variablePreviewMap = {}
         this.activeTag = null

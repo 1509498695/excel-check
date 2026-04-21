@@ -110,7 +110,7 @@ const overviewItems = computed<
   },
   {
     label: '最近异常',
-    value: store.abnormalResults.length,
+    value: store.abnormalResultTotal,
     pendingHint: '尚未执行',
     readyHint: '需关注',
     pendingTone: 'pending',

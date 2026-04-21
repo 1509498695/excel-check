@@ -135,3 +135,5 @@ class FixedRulesExecuteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     selected_rule_ids: list[str] | None = None
+    page: int | None = Field(default=None, ge=1)
+    size: int | None = Field(default=None, ge=1, le=200)

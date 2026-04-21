@@ -21,11 +21,23 @@ export async function saveFixedRulesConfig(
 
 export async function executeFixedRules(payload?: {
   selected_rule_ids?: string[]
+  page?: number
+  size?: number
 }): Promise<FixedRulesExecuteResponse> {
   return apiFetch<FixedRulesExecuteResponse>('/api/v1/fixed-rules/execute', {
     method: 'POST',
     body: payload ? JSON.stringify(payload) : undefined,
   })
+}
+
+export async function fetchFixedRulesResults(
+  resultId: number,
+  page: number,
+  size: number,
+): Promise<FixedRulesExecuteResponse> {
+  return apiFetch<FixedRulesExecuteResponse>(
+    `/api/v1/fixed-rules/results/${resultId}?page=${page}&size=${size}`,
+  )
 }
 
 export async function triggerFixedRulesSvnUpdate(): Promise<FixedRulesSvnUpdateResponse> {

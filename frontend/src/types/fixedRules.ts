@@ -85,6 +85,10 @@ export interface FixedRulesExecuteResponse {
   msg: string
   meta: ExecutionMeta
   data: {
+    total?: number
+    list?: AbnormalResult[]
+    page?: number
+    size?: number
     abnormal_results: AbnormalResult[]
   }
 }
