@@ -57,6 +57,38 @@ def matches_compare_filter(
     return actual_number > expected_number if operator == "gt" else actual_number < expected_number
 
 
+def matches_contains_filter(
+    *,
+    actual_value: Any,
+    expected_value: Any,
+) -> bool:
+    """筛选语义：True 表示左侧文本包含右侧片段。"""
+    if is_empty_value(actual_value):
+        return False
+
+    actual_text = str(actual_value).strip()
+    expected_text = str(expected_value).strip()
+    if not expected_text:
+        return False
+    return expected_text in actual_text
+
+
+def matches_not_contains_filter(
+    *,
+    actual_value: Any,
+    expected_value: Any,
+) -> bool:
+    """筛选语义：True 表示左侧文本不包含右侧片段。"""
+    if is_empty_value(actual_value):
+        return False
+
+    actual_text = str(actual_value).strip()
+    expected_text = str(expected_value).strip()
+    if not expected_text:
+        return False
+    return expected_text not in actual_text
+
+
 def evaluate_compare_assertion(
     *,
     actual_value: Any,

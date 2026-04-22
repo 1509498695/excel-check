@@ -168,6 +168,7 @@ def preview_composite_variable(
     sheet_name: str,
     columns: list[str],
     key_column: str,
+    append_index_to_key: bool = False,
 ) -> dict[str, Any]:
     """返回同一数据源同一 Sheet 内多列组合后的 JSON 映射预览。"""
     _ensure_excel_metadata_source(source)
@@ -206,11 +207,19 @@ def preview_composite_variable(
             f"{cleaned_columns} 失败：{exc}"
         ) from exc
 
-    mapping, loaded_rows = _build_composite_mapping(
-        dataframe,
-        columns=cleaned_columns,
-        key_column=cleaned_key_column,
-    )
+    duplicate_keys_preview = _find_duplicate_composite_keys(dataframe[cleaned_key_column])
+    has_duplicate_keys = bool(duplicate_keys_preview)
+
+    if has_duplicate_keys and not append_index_to_key:
+        mapping: dict[str, dict[str, Any]] = {}
+        loaded_rows = 0
+    else:
+        mapping, loaded_rows = _build_composite_mapping(
+            dataframe,
+            columns=cleaned_columns,
+            key_column=cleaned_key_column,
+            append_index_to_key=append_index_to_key,
+        )
 
     return {
         "variable_kind": "composite",
@@ -220,6 +229,8 @@ def preview_composite_variable(
         "sheet": cleaned_sheet,
         "columns": cleaned_columns,
         "key_column": cleaned_key_column,
+        "has_duplicate_keys": has_duplicate_keys,
+        "duplicate_keys_preview": duplicate_keys_preview,
         "mapping": mapping,
         "total_rows": int(len(dataframe)),
         "loaded_rows": loaded_rows,
@@ -445,6 +456,7 @@ def _merge_loaded_variables(
                 dataframe,
                 columns=columns,
                 key_column=key_column,
+                append_index_to_key=variable.append_index_to_key,
             )
             continue
 
@@ -469,12 +481,15 @@ def _build_composite_variable_frame(
     *,
     columns: list[str],
     key_column: str,
+    append_index_to_key: bool = False,
 ) -> pd.DataFrame:
     """把组合变量展开为可执行的行集，并注入内部 `__key__` 字段。"""
     frame = dataframe[columns].copy()
-    frame["__key__"] = frame[key_column].apply(_normalize_preview_value)
-    frame = frame.loc[~frame["__key__"].apply(_is_empty_preview_value)].copy()
-    frame["__key__"] = frame["__key__"].astype(str)
+    frame["__key__"] = _build_composite_runtime_keys(
+        frame[key_column],
+        append_index_to_key=append_index_to_key,
+    )
+    frame = frame.loc[frame["__key__"].notna()].copy()
     frame = frame.drop(columns=[key_column])
     frame["_row_index"] = frame.index + 2
     ordered_columns = [
@@ -490,18 +505,21 @@ def _build_composite_mapping(
     *,
     columns: list[str],
     key_column: str,
+    append_index_to_key: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], int]:
     """基于 key 列把多列聚合成字典结构，并排除 key 列本身。"""
     mapping: dict[str, dict[str, Any]] = {}
     loaded_rows = 0
 
-    for _, row in dataframe[columns].iterrows():
-        raw_key = row[key_column]
-        normalized_key = _normalize_preview_value(raw_key)
-        if _is_empty_preview_value(normalized_key):
-            continue
+    composite_keys = _build_composite_runtime_keys(
+        dataframe[key_column],
+        append_index_to_key=append_index_to_key,
+    )
 
-        key = str(normalized_key)
+    for row_index, row in dataframe[columns].iterrows():
+        key = composite_keys.loc[row_index]
+        if key is None:
+            continue
         if key in mapping:
             raise ValueError(
                 f"组合变量的 key 列 '{key_column}' 存在重复值 '{key}'，无法生成唯一映射。"
@@ -515,6 +533,50 @@ def _build_composite_mapping(
         loaded_rows += 1
 
     return mapping, loaded_rows
+
+
+def _build_composite_runtime_keys(
+    source_series: pd.Series,
+    *,
+    append_index_to_key: bool,
+) -> pd.Series:
+    """按统一口径生成组合变量运行时 key。"""
+    normalized_values = source_series.apply(_normalize_preview_value)
+    runtime_keys: list[str | None] = []
+
+    for row_position, value in enumerate(normalized_values.tolist()):
+        if _is_empty_preview_value(value):
+            runtime_keys.append(None)
+            continue
+
+        key = str(value)
+        runtime_keys.append(f"{key}_{row_position}" if append_index_to_key else key)
+
+    return pd.Series(runtime_keys, index=source_series.index, dtype=object)
+
+
+def _has_duplicate_composite_keys(source_series: pd.Series) -> bool:
+    """判断原始 key 列在未追加序号前是否存在重复值。"""
+    return bool(_find_duplicate_composite_keys(source_series))
+
+
+def _find_duplicate_composite_keys(source_series: pd.Series) -> list[str]:
+    """返回原始 key 列在未追加序号前的重复值预览。"""
+    normalized_values = source_series.apply(_normalize_preview_value)
+    seen_values: set[str] = set()
+    duplicate_values: list[str] = []
+
+    for value in normalized_values.tolist():
+        if value is None:
+            continue
+
+        key = str(value)
+        if key in seen_values and key not in duplicate_values:
+            duplicate_values.append(key)
+            continue
+        seen_values.add(key)
+
+    return duplicate_values[:5]
 
 
 def _get_excel_engine(source_path: Path) -> str:

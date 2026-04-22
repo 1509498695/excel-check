@@ -599,6 +599,8 @@ async def test_composite_preview_returns_json_mapping_for_same_sheet(
     assert payload["data"]["sheet"] == "items"
     assert payload["data"]["columns"] == ["ID", "ItemName", "Desc"]
     assert payload["data"]["key_column"] == "ID"
+    assert payload["data"]["has_duplicate_keys"] is False
+    assert payload["data"]["duplicate_keys_preview"] == []
     assert payload["data"]["total_rows"] == 3
     assert payload["data"]["loaded_rows"] == 3
     assert payload["data"]["mapping"] == {
@@ -606,6 +608,93 @@ async def test_composite_preview_returns_json_mapping_for_same_sheet(
         "2": {"ItemName": "Wood", "Desc": "木头+200"},
         "3": {"ItemName": "Stone", "Desc": "石头+300"},
     }
+
+
+@pytest.mark.anyio
+async def test_composite_preview_supports_appending_index_to_duplicate_keys(
+    tmp_path: Path,
+) -> None:
+    """验证组合变量预览可将重复 key 生成为原值_序号。"""
+    workbook_path = tmp_path / "composite_duplicate_keys.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": ["A", "A", "B"],
+                "INT_Group": [1, 2, 3],
+                "INT_Faction": [0, 1, 1],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/composite-preview",
+            json={
+                "source": {
+                    "id": "src_combo",
+                    "type": "local_excel",
+                    "path": str(workbook_path),
+                },
+                "sheet": "items",
+                "columns": ["INT_ID", "INT_Group", "INT_Faction"],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["has_duplicate_keys"] is True
+    assert payload["duplicate_keys_preview"] == ["A"]
+    assert payload["mapping"] == {
+        "A_0": {"INT_Group": 1, "INT_Faction": 0},
+        "A_1": {"INT_Group": 2, "INT_Faction": 1},
+        "B_2": {"INT_Group": 3, "INT_Faction": 1},
+    }
+
+
+@pytest.mark.anyio
+async def test_composite_preview_reports_duplicate_keys_without_append_mode(
+    tmp_path: Path,
+) -> None:
+    """验证重复 key 且未开启追加序号时，预览仍返回重复标记供前端提示。"""
+    workbook_path = tmp_path / "composite_duplicate_keys_without_append.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "STR_ParamType": ["list", "list", "other"],
+                "INT_Group": [1, 2, 3],
+                "INT_Faction": [0, 1, 1],
+            }
+        ).to_excel(writer, sheet_name="switch", index=False)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/composite-preview",
+            json={
+                "source": {
+                    "id": "src_combo",
+                    "type": "local_excel",
+                    "path": str(workbook_path),
+                },
+                "sheet": "switch",
+                "columns": ["STR_ParamType", "INT_Group", "INT_Faction"],
+                "key_column": "STR_ParamType",
+                "append_index_to_key": False,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["has_duplicate_keys"] is True
+    assert payload["duplicate_keys_preview"] == ["list"]
+    assert payload["mapping"] == {}
+    assert payload["loaded_rows"] == 0
 
 
 @pytest.mark.anyio
@@ -757,6 +846,73 @@ async def test_execute_engine_supports_dual_composite_compare(tmp_path: Path) ->
     assert len(abnormal_results) == 1
     assert abnormal_results[0]["rule_name"] == "双组合变量比对"
     assert "Key 10001" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_uses_appended_composite_keys_during_runtime(tmp_path: Path) -> None:
+    """验证执行链路中的组合变量 __key__ 与预览使用相同的原值_序号口径。"""
+    workbook_path = _create_dual_composite_test_workbook(tmp_path / "dual_composite_suffix_keys.xlsx")
+
+    payload = {
+        "sources": [
+            {
+                "id": "src_dual",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[left-json]",
+                "source_id": "src_dual",
+                "sheet": "left_items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+                "expected_type": "json",
+            },
+            {
+                "tag": "[right-json]",
+                "source_id": "src_dual",
+                "sheet": "right_items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+                "expected_type": "json",
+            },
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-dual",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[left-json]",
+                    "reference_tag": "[right-json]",
+                    "key_check_mode": "baseline_only",
+                    "rule_name": "双组合变量比对",
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-suffixed-key",
+                            "left_field": "__key__",
+                            "operator": "eq",
+                            "right_field": "__key__",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["abnormal_results"] == []
 
 
 @pytest.mark.anyio

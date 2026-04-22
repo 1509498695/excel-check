@@ -43,7 +43,15 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "dual_composite_compare",
 }
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
-SUPPORTED_COMPOSITE_FILTER_OPERATORS = {"eq", "ne", "gt", "lt", "not_null"}
+SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "not_null",
+    "contains",
+    "not_contains",
+}
 SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
     "eq",
     "ne",
@@ -780,6 +788,7 @@ def _normalize_variables(
                     variable_kind="composite",
                     columns=columns,
                     key_column=key_column,
+                    append_index_to_key=variable.append_index_to_key,
                     expected_type="json",
                 )
             )
@@ -1216,6 +1225,19 @@ def _normalize_composite_conditions(
                 raise ValueError(
                     f"???? '{rule_id}' ?{section_label}??????? value_source '{value_source}'?"
                 )
+        elif operator in {"contains", "not_contains"}:
+            normalized_value_source = "literal"
+            if value_source == "field":
+                raise ValueError(
+                    f"规则 '{rule_id}' 的{section_label}操作符 '{operator}' 只支持固定值。"
+                )
+            if not expected_value:
+                raise ValueError(f"规则 '{rule_id}' 的{section_label}缺少比较值。")
+            if expected_field:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的{section_label}操作符 '{operator}' 不支持右侧字段。"
+                )
+            normalized_expected_value = expected_value
         elif operator == "not_null":
             normalized_value_source = None
             if value_source or expected_value or expected_field:

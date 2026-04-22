@@ -18,6 +18,7 @@ import type {
 import type { DataSource, VariableTag } from '../../types/workbench'
 
 type ConditionMode = 'filter' | 'assertion'
+type RuleEntryType = 'single' | 'composite' | 'dual_composite'
 
 const KEY_FIELD = '__key__'
 const props = defineProps<{
@@ -41,6 +42,7 @@ const ruleForm = reactive<{
   rule_id: string
   group_id: string
   rule_name: string
+  rule_entry_type: RuleEntryType
   target_variable_tag: string
   selected_rule: FixedRuleSelection
   expected_value: string
@@ -54,6 +56,7 @@ const ruleForm = reactive<{
   rule_id: '',
   group_id: 'ungrouped',
   rule_name: '',
+  rule_entry_type: 'single',
   target_variable_tag: '',
   selected_rule: 'gt',
   expected_value: '0',
@@ -87,9 +90,10 @@ const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> 
   { label: '顺序校验', value: 'sequence_order_check' },
   { label: '包含 (in)', value: 'in' },
 ]
-const compositeRuleTypeOptions: Array<{ label: string; value: FixedRuleSelection }> = [
-  { label: '组合变量校验', value: 'composite_condition_check' },
-  { label: '双组合变量比对', value: 'dual_composite_compare' },
+const ruleEntryTypeOptions: Array<{ label: string; value: RuleEntryType }> = [
+  { label: '单变量校验', value: 'single' },
+  { label: '组合条件校验', value: 'composite' },
+  { label: '双组合变量比对', value: 'dual_composite' },
 ]
 const dualCompositeOperatorOptions: Array<{ label: string; value: FixedRuleOperator | 'not_null' }> = [
   { label: '等于 (=)', value: 'eq' },
@@ -105,6 +109,8 @@ const compositeFilterOptions: Array<{ label: string; value: CompositeFilterOpera
   { label: '大于 (>)', value: 'gt' },
   { label: '小于 (<)', value: 'lt' },
   { label: '非空校验', value: 'not_null' },
+  { label: '包含', value: 'contains' },
+  { label: '不包含', value: 'not_contains' },
 ]
 
 const compositeAssertionOptions: Array<{ label: string; value: CompositeAssertionOperator }> = [
@@ -133,7 +139,7 @@ const ruleSelectionNameMap: Record<FixedRuleSelection, string> = {
   unique: '唯一校验',
   sequence_order_check: '顺序校验',
   in: '包含',
-  composite_condition_check: '组合变量校验',
+  composite_condition_check: '组合条件校验',
   dual_composite_compare: '双组合变量比对',
 }
 const operatorSymbolMap: Record<FixedRuleOperator, string> = {
@@ -155,19 +161,24 @@ const variableOptions = computed(() => store.variables)
 const singleVariableOptions = computed(() =>
   store.variables.filter((variable) => (variable.variable_kind ?? 'single') === 'single'),
 )
+const compositeVariableOptions = computed(() =>
+  store.variables.filter((variable) => (variable.variable_kind ?? 'single') === 'composite'),
+)
+const isSingleRuleEntry = computed(() => ruleForm.rule_entry_type === 'single')
+const isCompositeRuleEntry = computed(() => !isSingleRuleEntry.value)
 const selectedRuleVariable = computed<VariableTag | null>(
   () => variableMap.value.get(ruleForm.target_variable_tag) ?? null,
 )
-const isCompositeRuleTarget = computed(
-  () => (selectedRuleVariable.value?.variable_kind ?? 'single') === 'composite',
+const filteredTargetVariableOptions = computed(() =>
+  isSingleRuleEntry.value ? singleVariableOptions.value : compositeVariableOptions.value,
 )
 const referenceVariableOptions = computed(() =>
   singleVariableOptions.value.filter((variable) => variable.tag !== ruleForm.target_variable_tag),
 )
 const compositeReferenceVariableOptions = computed(() =>
-  store.variables.filter(
+  compositeVariableOptions.value.filter(
     (variable) =>
-      (variable.variable_kind ?? 'single') === 'composite' && variable.tag !== ruleForm.target_variable_tag,
+      variable.tag !== ruleForm.target_variable_tag,
   ),
 )
 const selectedReferenceVariable = computed<VariableTag | null>(
@@ -231,22 +242,22 @@ const partiallySelectedVisibleRules = computed(() => {
 })
 
 const shouldShowExpectedValue = computed(
-  () => !isCompositeRuleTarget.value && isCompareRuleSelection(ruleForm.selected_rule),
+  () => isSingleRuleEntry.value && isCompareRuleSelection(ruleForm.selected_rule),
 )
 const shouldShowReferenceVariable = computed(
-  () => !isCompositeRuleTarget.value && ruleForm.selected_rule === 'in',
+  () => isSingleRuleEntry.value && ruleForm.selected_rule === 'in',
 )
 const shouldShowSequenceConfig = computed(
-  () => !isCompositeRuleTarget.value && ruleForm.selected_rule === 'sequence_order_check',
+  () => isSingleRuleEntry.value && ruleForm.selected_rule === 'sequence_order_check',
 )
 const shouldShowManualSequenceStartValue = computed(
   () => shouldShowSequenceConfig.value && ruleForm.sequence_start_mode === 'manual',
 )
 const isCompositeBranchRule = computed(
-  () => isCompositeRuleTarget.value && ruleForm.selected_rule === 'composite_condition_check',
+  () => ruleForm.rule_entry_type === 'composite',
 )
 const isDualCompositeRule = computed(
-  () => isCompositeRuleTarget.value && ruleForm.selected_rule === 'dual_composite_compare',
+  () => ruleForm.rule_entry_type === 'dual_composite',
 )
 const expectedValuePlaceholder = computed(() =>
   ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
@@ -335,7 +346,56 @@ watch(
 )
 
 watch(
+  () => ruleForm.rule_entry_type,
+  (entryType) => {
+    if (entryType === 'single') {
+      if (
+        ruleForm.selected_rule === 'composite_condition_check' ||
+        ruleForm.selected_rule === 'dual_composite_compare'
+      ) {
+        ruleForm.selected_rule = 'gt'
+      }
+      ruleForm.key_check_mode = 'baseline_only'
+      resetCompositeConfig()
+      resetDualCompositeComparisons()
+    } else if (entryType === 'composite') {
+      ruleForm.selected_rule = 'composite_condition_check'
+      ruleForm.expected_value = ''
+      ruleForm.reference_variable_tag = ''
+      ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeComparisons()
+      resetCompositeConfig()
+    } else {
+      ruleForm.selected_rule = 'dual_composite_compare'
+      ruleForm.expected_value = ''
+      ruleForm.key_check_mode = 'baseline_only'
+      resetCompositeConfig()
+      resetDualCompositeComparisons()
+    }
+
+    if (
+      ruleForm.target_variable_tag &&
+      !filteredTargetVariableOptions.value.some(
+        (variable) => variable.tag === ruleForm.target_variable_tag,
+      )
+    ) {
+      ruleForm.target_variable_tag = filteredTargetVariableOptions.value[0]?.tag ?? ''
+    }
+
+    if (
+      ruleForm.reference_variable_tag &&
+      !compositeReferenceVariableOptions.value.some(
+        (variable) => variable.tag === ruleForm.reference_variable_tag,
+      )
+    ) {
+      ruleForm.reference_variable_tag = ''
+    }
+  },
+)
+
+watch(
   [
+    () => ruleForm.rule_entry_type,
     () => ruleForm.target_variable_tag,
     () => ruleForm.expected_value,
     () => ruleForm.reference_variable_tag,
@@ -347,6 +407,14 @@ watch(
     () => dualCompositeComparisons.value.length,
   ],
   () => {
+    if (
+      ruleForm.target_variable_tag &&
+      !filteredTargetVariableOptions.value.some(
+        (variable) => variable.tag === ruleForm.target_variable_tag,
+      )
+    ) {
+      ruleForm.target_variable_tag = filteredTargetVariableOptions.value[0]?.tag ?? ''
+    }
     if (
       ruleForm.reference_variable_tag &&
       ((isDualCompositeRule.value &&
@@ -362,29 +430,6 @@ watch(
     }
     syncRuleNameWithForm()
   },
-)
-
-watch(
-  () => isCompositeRuleTarget.value,
-  (isComposite) => {
-    if (isComposite) {
-      if (
-        ruleForm.selected_rule !== 'composite_condition_check' &&
-        ruleForm.selected_rule !== 'dual_composite_compare'
-      ) {
-        ruleForm.selected_rule = 'composite_condition_check'
-      }
-      return
-    }
-
-    if (
-      ruleForm.selected_rule === 'composite_condition_check' ||
-      ruleForm.selected_rule === 'dual_composite_compare'
-    ) {
-      ruleForm.selected_rule = 'gt'
-    }
-  },
-  { immediate: true },
 )
 
 watch(
@@ -412,6 +457,12 @@ function isCompositeCompareOperator(
   value: CompositeFilterOperator | CompositeAssertionOperator,
 ): value is FixedRuleOperator {
   return compositeCompareOperators.has(value)
+}
+
+function isCompositeContainsOperator(
+  value: CompositeFilterOperator | CompositeAssertionOperator,
+): value is 'contains' | 'not_contains' {
+  return value === 'contains' || value === 'not_contains'
 }
 
 function createId(prefix: string): string {
@@ -490,6 +541,16 @@ function normalizeDualCompositeComparisons(
   return nextComparisons.length ? nextComparisons : [createDualCompositeComparison()]
 }
 
+function getRuleEntryTypeBySelection(selection: FixedRuleSelection): RuleEntryType {
+  if (selection === 'dual_composite_compare') {
+    return 'dual_composite'
+  }
+  if (selection === 'composite_condition_check') {
+    return 'composite'
+  }
+  return 'single'
+}
+
 function applyDualCompositeComparisons(comparisons?: DualCompositeComparison[]): void {
   dualCompositeComparisons.value = normalizeDualCompositeComparisons(comparisons)
 }
@@ -547,6 +608,14 @@ function setConditionOperator(
   operator: CompositeFilterOperator | CompositeAssertionOperator,
 ): void {
   condition.operator = operator
+  if (isCompositeContainsOperator(operator)) {
+    condition.value_source = 'literal'
+    condition.expected_field = undefined
+    if (typeof condition.expected_value !== 'string') {
+      condition.expected_value = ''
+    }
+    return
+  }
   if (!isCompositeCompareOperator(operator)) {
     condition.value_source = undefined
     condition.expected_value = undefined
@@ -565,6 +634,11 @@ function setConditionOperator(
 }
 
 function setConditionValueSource(condition: CompositeCondition, valueSource: 'literal' | 'field'): void {
+  if (isCompositeContainsOperator(condition.operator)) {
+    condition.value_source = 'literal'
+    condition.expected_field = undefined
+    return
+  }
   condition.value_source = valueSource
   if (valueSource === 'field') {
     condition.expected_value = undefined
@@ -578,11 +652,21 @@ function shouldShowConditionValueSource(condition: CompositeCondition): boolean 
 }
 
 function shouldShowConditionExpectedValue(condition: CompositeCondition): boolean {
+  if (isCompositeContainsOperator(condition.operator)) {
+    return true
+  }
   return isCompositeCompareOperator(condition.operator) && (condition.value_source ?? 'literal') === 'literal'
 }
 
 function shouldShowConditionExpectedField(condition: CompositeCondition): boolean {
   return isCompositeCompareOperator(condition.operator) && condition.value_source === 'field'
+}
+
+function getConditionExpectedValuePlaceholder(condition: CompositeCondition): string {
+  if (isCompositeContainsOperator(condition.operator)) {
+    return condition.operator === 'not_contains' ? '输入要排除的片段' : '输入要匹配的片段'
+  }
+  return '请输入比较值'
 }
 
 function getConditionOptions(mode: ConditionMode) {
@@ -618,6 +702,15 @@ function validateCompositeCondition(
   }
   if (mode === 'filter' && (condition.operator === 'unique' || condition.operator === 'duplicate_required')) {
     return `${label}的筛选条件不支持唯一或必须重复。`
+  }
+  if (isCompositeContainsOperator(condition.operator)) {
+    if (condition.value_source === 'field') {
+      return `${label}的${condition.operator === 'not_contains' ? '不包含' : '包含'}条件只支持固定值。`
+    }
+    if (!condition.expected_value?.trim()) {
+      return `${label}缺少比较值。`
+    }
+    return null
   }
   if (!isCompositeCompareOperator(condition.operator)) {
     return null
@@ -753,7 +846,7 @@ function getVariableColumnSummary(variable: VariableTag | null | undefined): str
 }
 
 function buildVariableOptionLabel(variable: VariableTag): string {
-  return `${variable.tag} | ${variable.source_id} | ${variable.sheet} | ${getVariableColumnSummary(variable)}`
+  return variable.tag
 }
 
 function buildDefaultRuleName(
@@ -771,7 +864,7 @@ function buildDefaultRuleName(
     if (selectedRule === 'dual_composite_compare') {
       return `${normalizedSheet}-${variable.tag}-双组合变量比对`
     }
-    return `${normalizedSheet}-${variable.tag}-组合变量校验`
+    return `${normalizedSheet}-${variable.tag}-组合条件校验`
   }
   const normalizedColumn = variable.column?.trim() ?? ''
   if (!normalizedSheet || !normalizedColumn) {
@@ -841,6 +934,12 @@ function summarizeCondition(
   }
   if (condition.operator === 'duplicate_required') {
     return `${fieldLabel} 必须重复`
+  }
+  if (condition.operator === 'contains') {
+    return `${fieldLabel} 包含 ${condition.expected_value ?? ''}`
+  }
+  if (condition.operator === 'not_contains') {
+    return `${fieldLabel} 不包含 ${condition.expected_value ?? ''}`
   }
 
   const operator = {
@@ -921,7 +1020,7 @@ function buildRuleSelectionSummary(rule: FixedRuleDefinition): string {
     return `双组合变量比对（${getDualCompositeKeyCheckModeLabel(rule.key_check_mode)}，${rule.comparisons?.length ?? 0} 条比较）`
   }
   if (rule.rule_type === 'composite_condition_check') {
-    return '组合变量条件分支校验'
+    return '组合条件校验'
   }
   if (rule.rule_type === 'sequence_order_check') {
     return buildSequenceSummary(
@@ -1038,7 +1137,8 @@ function openCreateRuleDialog(): void {
   ruleForm.rule_id = ''
   ruleForm.group_id = store.selectedRuleGroup.group_id
   ruleForm.rule_name = ''
-  ruleForm.target_variable_tag = variableOptions.value[0]?.tag ?? ''
+  ruleForm.rule_entry_type = 'single'
+  ruleForm.target_variable_tag = singleVariableOptions.value[0]?.tag ?? ''
   ruleForm.selected_rule = 'gt'
   ruleForm.expected_value = '0'
   ruleForm.reference_variable_tag = ''
@@ -1063,6 +1163,7 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
   ruleForm.group_id = rule.group_id
   ruleForm.rule_name = rule.rule_name
   ruleForm.target_variable_tag = rule.target_variable_tag
+  ruleForm.rule_entry_type = getRuleEntryTypeBySelection(getRuleSelectionValue(rule))
   if (rule.rule_type === 'composite_condition_check') {
     ruleForm.selected_rule = 'composite_condition_check'
     ruleForm.expected_value = ''
@@ -1129,8 +1230,17 @@ function validateRuleForm(): boolean {
     return false
   }
 
-  if ((variable.variable_kind ?? 'single') === 'composite') {
-    if (ruleForm.selected_rule === 'dual_composite_compare') {
+  if (isSingleRuleEntry.value && (variable.variable_kind ?? 'single') !== 'single') {
+    ElMessage.warning('单变量校验只能选择单变量。')
+    return false
+  }
+
+  if (isCompositeRuleEntry.value && (variable.variable_kind ?? 'single') !== 'composite') {
+    ElMessage.warning('当前规则类型只能选择组合变量。')
+    return false
+  }
+
+  if (ruleForm.rule_entry_type === 'dual_composite') {
       if (!ruleForm.reference_variable_tag.trim()) {
         ElMessage.warning('请选择目标变量（变量 2）。')
         return false
@@ -1154,15 +1264,12 @@ function validateRuleForm(): boolean {
         }
       }
       return true
-    }
+  }
 
-    if (ruleForm.selected_rule !== 'composite_condition_check') {
-      ElMessage.warning('组合变量当前仅支持组合变量校验或双组合变量比对。')
-      return false
-    }
+  if (ruleForm.rule_entry_type === 'composite') {
 
     if (!compositeRuleForm.branches.length) {
-      ElMessage.warning('组合变量规则至少需要一个条件分支。')
+      ElMessage.warning('组合条件规则至少需要一个条件分支。')
       return false
     }
 
@@ -1273,8 +1380,7 @@ async function handleSaveRule(): Promise<void> {
     return
   }
 
-  if (isCompositeRuleTarget.value) {
-    if (isDualCompositeRule.value) {
+  if (ruleForm.rule_entry_type === 'dual_composite') {
       store.upsertOrchestrationRule({
         rule_id: ruleForm.rule_id || undefined,
         group_id: ruleForm.group_id,
@@ -1285,7 +1391,7 @@ async function handleSaveRule(): Promise<void> {
         key_check_mode: ruleForm.key_check_mode,
         comparisons: normalizeDualCompositeComparisons(dualCompositeComparisons.value),
       })
-    } else {
+    } else if (ruleForm.rule_entry_type === 'composite') {
       store.upsertOrchestrationRule({
         rule_id: ruleForm.rule_id || undefined,
         group_id: ruleForm.group_id,
@@ -1294,7 +1400,6 @@ async function handleSaveRule(): Promise<void> {
         rule_type: 'composite_condition_check',
         composite_config: normalizeCompositeConfig(compositeRuleForm),
       })
-    }
   } else {
     const selectedRule = ruleForm.selected_rule
     if (selectedRule === 'sequence_order_check') {
@@ -1676,6 +1781,17 @@ function handleToggleSingleSelection(ruleId: string): void {
             </div>
           </div>
           <div>
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则类型</label>
+            <el-select v-model="ruleForm.rule_entry_type" class="w-full">
+              <el-option
+                v-for="option in ruleEntryTypeOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+          </div>
+          <div>
             <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标变量</label>
             <el-select
               v-model="ruleForm.target_variable_tag"
@@ -1684,7 +1800,7 @@ function handleToggleSingleSelection(ruleId: string): void {
               placeholder="选择目标变量"
             >
               <el-option
-                v-for="variable in variableOptions"
+                v-for="variable in filteredTargetVariableOptions"
                 :key="variable.tag"
                 :label="buildVariableOptionLabel(variable)"
                 :value="variable.tag"
@@ -1706,15 +1822,15 @@ function handleToggleSingleSelection(ruleId: string): void {
         <!-- 段 2：校验配置（仅单变量） -->
         <section
           class="flex flex-col gap-3"
-          :class="isCompositeRuleTarget ? 'opacity-50 pointer-events-none' : ''"
+          :class="!isSingleRuleEntry ? 'opacity-50 pointer-events-none' : ''"
         >
           <div class="flex items-end justify-between border-b border-line pb-2">
             <div>
               <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">校验配置</h3>
-              <p class="mt-0.5 text-[12px] text-ink-500">仅当目标为单变量时显示</p>
+              <p class="mt-0.5 text-[12px] text-ink-500">仅当规则类型为单变量校验时显示</p>
             </div>
             <span
-              v-if="isCompositeRuleTarget"
+              v-if="!isSingleRuleEntry"
               class="inline-flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[12px] font-medium text-ink-500"
             >
               <span class="h-1.5 w-1.5 rounded-full bg-ink-300"></span>
@@ -1727,7 +1843,7 @@ function handleToggleSingleSelection(ruleId: string): void {
               <el-select
                 v-model="ruleForm.selected_rule"
                 class="w-full"
-                :disabled="isCompositeRuleTarget"
+                :disabled="!isSingleRuleEntry"
               >
                 <el-option
                   v-for="option in ruleSelectionOptions"
@@ -1789,33 +1905,18 @@ function handleToggleSingleSelection(ruleId: string): void {
           </div>
         </section>
 
-        <!-- 段 3：组合变量规则 -->
-        <section v-if="isCompositeRuleTarget" class="flex flex-col gap-4">
+        <!-- 段 3：组合条件规则 -->
+        <section v-if="!isSingleRuleEntry" class="flex flex-col gap-4">
           <div class="flex items-end justify-between border-b border-line pb-2">
             <div>
-              <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">组合变量规则</h3>
-              <p class="mt-0.5 text-[12px] text-ink-500">选择规则类型后再配置字段与条件</p>
+              <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">组合条件规则</h3>
+              <p class="mt-0.5 text-[12px] text-ink-500">当前规则类型对应的字段与条件配置</p>
             </div>
             <span class="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-medium text-accent-ink">
               <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
               组合变量已激活
             </span>
           </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则类型</label>
-              <el-select v-model="ruleForm.selected_rule" class="w-full">
-                <el-option
-                  v-for="option in compositeRuleTypeOptions"
-                  :key="option.value"
-                  :label="option.label"
-                  :value="option.value"
-                />
-              </el-select>
-            </div>
-          </div>
-
           <template v-if="isDualCompositeRule">
             <div class="rounded-field bg-subtle p-4">
               <div class="grid grid-cols-2 gap-4">
@@ -1996,7 +2097,10 @@ function handleToggleSingleSelection(ruleId: string): void {
                   </div>
                   <div v-if="shouldShowConditionExpectedValue(condition)">
                     <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
-                    <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                    <el-input
+                      v-model="condition.expected_value"
+                      :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                    />
                   </div>
                   <div v-if="shouldShowConditionExpectedField(condition)">
                     <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
@@ -2109,7 +2213,10 @@ function handleToggleSingleSelection(ruleId: string): void {
                     </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
-                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                      <el-input
+                        v-model="condition.expected_value"
+                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      />
                     </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
@@ -2193,7 +2300,10 @@ function handleToggleSingleSelection(ruleId: string): void {
                     </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
-                      <el-input v-model="condition.expected_value" placeholder="请输入比较值" />
+                      <el-input
+                        v-model="condition.expected_value"
+                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      />
                     </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>

@@ -19,6 +19,8 @@ from backend.app.rules.domain.operators import (
     evaluate_compare_assertion,
     is_not_null_violation,
     matches_compare_filter,
+    matches_contains_filter,
+    matches_not_contains_filter,
     matches_not_null_filter,
 )
 from backend.app.rules.domain.result import build_fixed_result
@@ -209,6 +211,20 @@ def _apply_composite_filters(
         series = filtered[field]
         if condition.operator == "not_null":
             mask = series.apply(matches_not_null_filter)
+        elif condition.operator == "contains":
+            mask = series.apply(
+                lambda value: matches_contains_filter(
+                    actual_value=value,
+                    expected_value=condition.expected_value,
+                )
+            )
+        elif condition.operator == "not_contains":
+            mask = series.apply(
+                lambda value: matches_not_contains_filter(
+                    actual_value=value,
+                    expected_value=condition.expected_value,
+                )
+            )
         else:
             mask = filtered.apply(
                 lambda row: matches_compare_filter(

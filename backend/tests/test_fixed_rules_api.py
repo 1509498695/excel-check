@@ -61,6 +61,7 @@ def _build_composite_variable(
     source_id: str = "items-source",
     *,
     tag: str = "faction-group-map",
+    append_index_to_key: bool = False,
 ) -> dict[str, object]:
     return {
         "tag": _build_composite_tag(source_id, "items", tag),
@@ -69,6 +70,7 @@ def _build_composite_variable(
         "variable_kind": "composite",
         "columns": ["INT_ID", "INT_Faction", "INT_Group"],
         "key_column": "INT_ID",
+        "append_index_to_key": append_index_to_key,
         "expected_type": "json",
     }
 
@@ -778,6 +780,156 @@ async def test_put_fixed_rules_config_accepts_composite_rule_and_round_trips(
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_composite_contains_filter_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持字符串包含筛选。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_contains_round_trip.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_MapType": ["ABCD", "ACD", "BCD"],
+            "INT_Faction": [0, 1, 0],
+            "INT_Group": [100001, 200, 100003],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "contains-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(
+        composite_variable["tag"],
+        rule_name="组合条件包含筛选",
+    )
+    composite_rule["composite_config"]["global_filters"] = [
+        {
+            "condition_id": "global-maptype-contains",
+            "field": "STR_MapType",
+            "operator": "contains",
+            "value_source": "literal",
+            "expected_value": "B",
+        }
+    ]
+    composite_rule["composite_config"]["branches"] = [
+        {
+            "branch_id": "branch-maptype",
+            "filters": [
+                {
+                    "condition_id": "branch-maptype-contains",
+                    "field": "STR_MapType",
+                    "operator": "contains",
+                    "value_source": "literal",
+                    "expected_value": "C",
+                }
+            ],
+            "assertions": [
+                {
+                    "condition_id": "branch-maptype-not-null",
+                    "field": "INT_Group",
+                    "operator": "not_null",
+                }
+            ],
+        }
+    ]
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assert rule["composite_config"]["global_filters"][0]["operator"] == "contains"
+    assert rule["composite_config"]["global_filters"][0]["expected_value"] == "B"
+    assert rule["composite_config"]["branches"][0]["filters"][0]["operator"] == "contains"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_composite_not_contains_filter_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持字符串不包含筛选。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_not_contains_round_trip.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_MapType": ["ABCD", "ACD", "XYZ"],
+            "INT_Faction": [0, 1, 0],
+            "INT_Group": [100001, 200, 100003],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "not-contains-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(
+        composite_variable["tag"],
+        rule_name="组合条件不包含筛选",
+    )
+    composite_rule["composite_config"]["global_filters"] = [
+        {
+            "condition_id": "global-maptype-not-contains",
+            "field": "STR_MapType",
+            "operator": "not_contains",
+            "value_source": "literal",
+            "expected_value": "B",
+        }
+    ]
+    composite_rule["composite_config"]["branches"] = [
+        {
+            "branch_id": "branch-maptype-not-contains",
+            "filters": [
+                {
+                    "condition_id": "branch-maptype-not-contains",
+                    "field": "STR_MapType",
+                    "operator": "not_contains",
+                    "value_source": "literal",
+                    "expected_value": "Y",
+                }
+            ],
+            "assertions": [
+                {
+                    "condition_id": "branch-maptype-not-null",
+                    "field": "INT_Group",
+                    "operator": "not_null",
+                }
+            ],
+        }
+    ]
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assert rule["composite_config"]["global_filters"][0]["operator"] == "not_contains"
+    assert rule["composite_config"]["global_filters"][0]["expected_value"] == "B"
+    assert rule["composite_config"]["branches"][0]["filters"][0]["operator"] == "not_contains"
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_variable(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -993,6 +1145,94 @@ async def test_put_fixed_rules_config_rejects_unique_in_composite_filters(
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_contains_in_composite_assertions(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_invalid_contains_assertion.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "STR_MapType": ["ABCD", "ACD"],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "contains-assertion-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["branches"][0]["assertions"][0] = {
+        "condition_id": "branch-assert-contains",
+        "field": "STR_MapType",
+        "operator": "contains",
+        "value_source": "literal",
+        "expected_value": "B",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_contains_with_field_rhs(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_invalid_contains_field.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "STR_MapType": ["ABCD", "ACD"],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "contains-field-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["global_filters"][0] = {
+        "condition_id": "global-contains-field",
+        "field": "STR_MapType",
+        "operator": "contains",
+        "value_source": "field",
+        "expected_field": "INT_Group",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "contains" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_compare_assertion_without_rhs(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -1057,6 +1297,329 @@ async def test_execute_fixed_rules_supports_composite_condition_check(
     assert abnormal_results[0]["rule_name"] == "派系与分组映射校验"
     assert abnormal_results[0]["row_index"] == 5
     assert abnormal_results[0]["location"] == "items -> INT_Group"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_composite_contains_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持字符串包含筛选。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_contains_execute.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_MapType": ["ABCD", "BCD", "BEE"],
+            "INT_Faction": [0, 0, 1],
+            "INT_Group": [100001, "", 300],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "contains-execute-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = {
+        "rule_id": "rule-composite-contains",
+        "group_id": "basic-checks",
+        "rule_name": "组合条件包含筛选",
+        "target_variable_tag": composite_variable["tag"],
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [
+                {
+                    "condition_id": "global-maptype-contains-b",
+                    "field": "STR_MapType",
+                    "operator": "contains",
+                    "value_source": "literal",
+                    "expected_value": "B",
+                }
+            ],
+            "branches": [
+                {
+                    "branch_id": "branch-maptype-contains-c",
+                    "filters": [
+                        {
+                            "condition_id": "branch-maptype-contains-c",
+                            "field": "STR_MapType",
+                            "operator": "contains",
+                            "value_source": "literal",
+                            "expected_value": "C",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-group-not-null",
+                            "field": "INT_Group",
+                            "operator": "not_null",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "组合条件包含筛选"
+    assert abnormal_results[0]["row_index"] == 3
+    assert abnormal_results[0]["location"] == "items -> INT_Group"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_composite_not_contains_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持字符串不包含筛选。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_not_contains_execute.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_MapType": ["ACD", "XYZ", "BCD"],
+            "INT_Faction": [0, 0, 1],
+            "INT_Group": [100001, "", 300],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "not-contains-execute-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = {
+        "rule_id": "rule-composite-not-contains",
+        "group_id": "basic-checks",
+        "rule_name": "组合条件不包含筛选",
+        "target_variable_tag": composite_variable["tag"],
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [
+                {
+                    "condition_id": "global-maptype-not-contains-b",
+                    "field": "STR_MapType",
+                    "operator": "not_contains",
+                    "value_source": "literal",
+                    "expected_value": "B",
+                }
+            ],
+            "branches": [
+                {
+                    "branch_id": "branch-maptype-not-contains-q",
+                    "filters": [
+                        {
+                            "condition_id": "branch-maptype-not-contains-q",
+                            "field": "STR_MapType",
+                            "operator": "not_contains",
+                            "value_source": "literal",
+                            "expected_value": "Q",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-group-not-null",
+                            "field": "INT_Group",
+                            "operator": "not_null",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "组合条件不包含筛选"
+    assert abnormal_results[0]["row_index"] == 3
+    assert abnormal_results[0]["location"] == "items -> INT_Group"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_mixed_composite_contains_and_not_contains_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持 contains + not_contains + not_null 混合执行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_contains_not_contains_mix.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_ParamType": ["int", "int-已废弃", "int-live"],
+            "STR_ServersParam": ["server-ok", "server-skip", ""],
+            "DES": ["A", "B", "C"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "contains-not-contains-mix"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ParamType", "STR_ServersParam", "DES"],
+        "key_column": "STR_ParamType",
+        "append_index_to_key": True,
+        "expected_type": "json",
+    }
+    composite_rule = {
+        "rule_id": "rule-composite-contains-not-contains-mix",
+        "group_id": "basic-checks",
+        "rule_name": "组合条件混合筛选",
+        "target_variable_tag": composite_variable["tag"],
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [
+                {
+                    "condition_id": "global-paramtype-contains-int",
+                    "field": "__key__",
+                    "operator": "contains",
+                    "value_source": "literal",
+                    "expected_value": "int",
+                }
+            ],
+            "branches": [
+                {
+                    "branch_id": "branch-paramtype-not-contains-deprecated",
+                    "filters": [
+                        {
+                            "condition_id": "branch-paramtype-not-contains-deprecated",
+                            "field": "__key__",
+                            "operator": "not_contains",
+                            "value_source": "literal",
+                            "expected_value": "已废弃",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-servers-param-not-null",
+                            "field": "STR_ServersParam",
+                            "operator": "not_null",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "组合条件混合筛选"
+    assert abnormal_results[0]["row_index"] == 4
+    assert abnormal_results[0]["location"] == "items -> STR_ServersParam"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_round_trips_composite_key_suffix_flag(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验配置可保存并读取组合变量的 Key 追加序号开关。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_suffix_round_trip.xlsx",
+        {"INT_ID": ["A", "A"], "INT_Faction": [0, 1], "INT_Group": [1, 2]},
+    )
+    composite_variable = _build_composite_variable(append_index_to_key=True)
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    returned_variable = get_response.json()["data"]["variables"][0]
+    assert returned_variable["append_index_to_key"] is True
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_composite_key_suffix_generation(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验执行链路会使用原值_序号生成组合变量 key。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_suffix_execute.xlsx",
+        {"INT_ID": ["A", "A"], "INT_Faction": [0, 1], "INT_Group": [1, 2]},
+    )
+    composite_variable = _build_composite_variable(tag="suffix-map", append_index_to_key=True)
+    composite_rule = {
+        "rule_id": "rule-composite-suffix",
+        "group_id": "basic-checks",
+        "rule_name": "组合条件 Key 后缀校验",
+        "target_variable_tag": composite_variable["tag"],
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [],
+            "branches": [
+                {
+                    "branch_id": "branch-key-eq-suffixed",
+                    "filters": [],
+                    "assertions": [
+                        {
+                            "condition_id": "assert-key-eq",
+                            "field": "__key__",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "A_0",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["row_index"] == 3
+    assert "A_0" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio

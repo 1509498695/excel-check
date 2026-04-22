@@ -63,6 +63,7 @@ const compositeDraft = reactive<VariableTag>({
   variable_kind: 'composite',
   columns: [],
   key_column: '',
+  append_index_to_key: false,
   expected_type: 'json',
 })
 const singleErrors = reactive({ source_id: '', sheet: '', column: '', tag: '', expected_type: '' })
@@ -107,6 +108,10 @@ const compositeColumnOptions = computed(
 )
 const compositeKeyOptions = computed(() =>
   compositeDraft.columns?.filter((item): item is string => typeof item === 'string' && !!item) ?? [],
+)
+const hasDuplicateCompositeKeys = computed(() => compositePreview.value?.has_duplicate_keys ?? false)
+const showAppendIndexCheckbox = computed(
+  () => hasDuplicateCompositeKeys.value || !!compositeDraft.append_index_to_key,
 )
 const detailVariable = computed<VariableTag | null>(() =>
   detailDialogTag.value
@@ -221,6 +226,7 @@ function resetCompositeDraft(): void {
   compositeDraft.sheet = ''
   compositeDraft.columns = []
   compositeDraft.key_column = ''
+  compositeDraft.append_index_to_key = false
   compositeDraft.variable_kind = 'composite'
   compositeDraft.expected_type = 'json'
   compositeTagTouched.value = false
@@ -325,8 +331,19 @@ async function refreshCompositePreview(): Promise<void> {
       sheet: compositeDraft.sheet.trim(),
       columns: compositeDraft.columns ?? [],
       key_column: compositeDraft.key_column ?? '',
+      append_index_to_key: compositeDraft.append_index_to_key ?? false,
     })
     compositePreview.value = response.data
+    if (response.data.has_duplicate_keys && !compositeDraft.append_index_to_key) {
+      const duplicateText =
+        response.data.duplicate_keys_preview?.length
+          ? ` '${response.data.duplicate_keys_preview.join("', '")}'`
+          : ''
+      compositePreviewError.value = `组合变量的 key 列 '${response.data.key_column}' 存在重复值${duplicateText}，无法生成唯一映射。`
+    }
+    if (!response.data.has_duplicate_keys && compositeEditingTag.value === null) {
+      compositeDraft.append_index_to_key = false
+    }
   } catch (error) {
     compositePreviewError.value = error instanceof Error ? error.message : '读取组合变量预览失败。'
   } finally {
@@ -356,6 +373,7 @@ async function openEditTab(variable: VariableTag): Promise<void> {
     compositeDraft.sheet = variable.sheet
     compositeDraft.columns = [...(variable.columns ?? [])]
     compositeDraft.key_column = variable.key_column ?? ''
+    compositeDraft.append_index_to_key = variable.append_index_to_key ?? false
     compositeDraft.expected_type = 'json'
     compositeTagTouched.value =
       variable.tag.trim() !==
@@ -449,6 +467,7 @@ async function handleCompositeSheetChange(value: string): Promise<void> {
   compositeDraft.sheet = value
   compositeDraft.columns = []
   compositeDraft.key_column = ''
+  compositeDraft.append_index_to_key = false
   compositeErrors.sheet = ''
   compositeErrors.columns = ''
   compositeErrors.key_column = ''
@@ -460,6 +479,7 @@ async function handleCompositeColumnsChange(value: string[]): Promise<void> {
   compositeDraft.columns = [...new Set(value)]
   if (!compositeDraft.columns.includes(compositeDraft.key_column ?? '')) {
     compositeDraft.key_column = ''
+    compositeDraft.append_index_to_key = false
   }
   compositeErrors.columns = ''
   compositeErrors.key_column = ''
@@ -469,8 +489,14 @@ async function handleCompositeColumnsChange(value: string[]): Promise<void> {
 
 async function handleCompositeKeyChange(value: string): Promise<void> {
   compositeDraft.key_column = value
+  if (!value) compositeDraft.append_index_to_key = false
   compositeErrors.key_column = ''
   syncCompositeTag()
+  await refreshCompositePreview()
+}
+
+async function handleCompositeAppendIndexChange(value: boolean): Promise<void> {
+  compositeDraft.append_index_to_key = value
   await refreshCompositePreview()
 }
 
@@ -551,6 +577,10 @@ async function saveCompositeVariable(): Promise<void> {
     return
   }
   await refreshCompositePreview()
+  if (compositePreview.value?.has_duplicate_keys && !compositeDraft.append_index_to_key) {
+    ElMessage.warning('当前 Key 列存在重复值，请先开启“Key 后追加序号”。')
+    return
+  }
   const nextTag = compositeDraft.tag.trim()
   store.upsertVariable(
     {
@@ -560,6 +590,7 @@ async function saveCompositeVariable(): Promise<void> {
       variable_kind: 'composite',
       columns: [...(compositeDraft.columns ?? [])],
       key_column: compositeDraft.key_column?.trim(),
+      append_index_to_key: compositeDraft.append_index_to_key ?? false,
       expected_type: 'json',
     },
     compositeEditingTag.value ?? undefined,
@@ -619,7 +650,7 @@ function getVariableKindLabel(variable: VariableTag): string {
 
 function getVariableFieldSummary(variable: VariableTag): string {
   return (variable.variable_kind ?? 'single') === 'composite'
-    ? `key: ${variable.key_column ?? '-'} / 列: ${(variable.columns ?? []).join('、')}`
+    ? `key: ${variable.key_column ?? '-'}${variable.append_index_to_key ? ' + _序号' : ''} / 列: ${(variable.columns ?? []).join('、')}`
     : variable.column ?? '-'
 }
 
@@ -923,6 +954,16 @@ defineExpose({
               />
             </el-select>
             <div v-if="compositeErrors.key_column" class="mt-1 text-[12px] text-danger">{{ compositeErrors.key_column }}</div>
+            <label
+              v-if="showAppendIndexCheckbox"
+              class="mt-2 flex items-center gap-2 text-[12px] text-ink-600"
+            >
+              <el-checkbox
+                :model-value="compositeDraft.append_index_to_key"
+                @update:model-value="handleCompositeAppendIndexChange"
+              />
+              <span>Key 后追加序号</span>
+            </label>
           </div>
           <div>
             <label class="mb-1.5 block text-[12px] font-medium text-ink-500">期望类型</label>
@@ -971,9 +1012,14 @@ defineExpose({
           <div class="rounded-field border border-line bg-card px-3 py-2 text-[12px] text-ink-500">
             <div>共 <strong class="font-mono text-ink-900">{{ compositePreview.total_rows }}</strong> 行 / <strong class="font-mono text-ink-900">{{ Object.keys(compositePreview.mapping).length }}</strong> 个 key</div>
             <div class="mt-0.5">Key 列：<span class="font-mono text-ink-700">{{ compositePreview.key_column }}</span></div>
+            <div class="mt-0.5">Key 生成：<span class="font-mono text-ink-700">{{ compositeDraft.append_index_to_key ? `${compositePreview.key_column}_0` : compositePreview.key_column }}</span></div>
+            <div
+              v-if="compositePreview.has_duplicate_keys"
+              class="mt-0.5 text-warning-ink"
+            >当前 Key 列存在重复，可开启“Key 后追加序号”。</div>
           </div>
           <pre class="flex-1 rounded-field border border-line bg-canvas px-3 py-2 font-mono text-[11px] leading-[1.5] text-ink-700 whitespace-pre-wrap break-all overflow-auto max-h-[300px]">{{ formatJsonPreview(compositePreview.mapping) }}</pre>
-          <div class="text-[11px] text-ink-500">外层 key 取 Key 列每行值，内层对象保留其余列</div>
+          <div class="text-[11px] text-ink-500">外层 key 取 Key 列值{{ compositeDraft.append_index_to_key ? '并追加 _序号' : '' }}，内层对象保留其余列</div>
         </template>
       </div>
     </div>
@@ -1045,7 +1091,7 @@ defineExpose({
           <div class="preview-summary">
             <span>字段结构</span>
             <strong>key: {{ detailPreview.key_column }}</strong>
-            <small>关联列：{{ detailPreview.columns.join('、') }}</small>
+            <small>关联列：{{ detailPreview.columns.join('、') }}{{ detailVariable?.append_index_to_key ? ' / Key: 原值_序号' : '' }}</small>
           </div>
           <pre class="json-preview-block detail-json-block">{{ formatJsonPreview(detailPreview.mapping) }}</pre>
         </div>

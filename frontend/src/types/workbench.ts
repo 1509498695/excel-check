@@ -23,6 +23,7 @@ export interface VariableTag {
   column?: string
   columns?: string[]
   key_column?: string
+  append_index_to_key?: boolean
   expected_type?: ExpectedType | null
 }
 
@@ -138,6 +139,8 @@ export interface CompositeVariablePreviewData {
   sheet: string
   columns: string[]
   key_column: string
+  has_duplicate_keys: boolean
+  duplicate_keys_preview?: string[]
   mapping: Record<string, Record<string, unknown>>
   total_rows: number
   loaded_rows?: number
@@ -158,6 +161,7 @@ export interface CompositePreviewRequest {
   sheet: string
   columns: string[]
   key_column: string
+  append_index_to_key?: boolean
 }
 
 export interface ColumnPreviewResponse {

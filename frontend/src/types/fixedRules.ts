@@ -1,12 +1,17 @@
 import type { AbnormalResult, DataSource, ExecutionMeta, VariableTag } from './workbench'
 
 export type FixedRuleOperator = 'eq' | 'ne' | 'gt' | 'lt'
-export type CompositeFilterOperator = FixedRuleOperator | 'not_null'
+export type CompositeFilterOperator =
+  | FixedRuleOperator
+  | 'not_null'
+  | 'contains'
+  | 'not_contains'
 export type CompositeAssertionOperator =
   | FixedRuleOperator
   | 'not_null'
   | 'unique'
   | 'duplicate_required'
+export type CompositeConditionOperator = CompositeFilterOperator | CompositeAssertionOperator
 export type CompositeValueSource = 'literal' | 'field'
 export type DualCompositeKeyCheckMode = 'baseline_only' | 'bidirectional'
 export type FixedRuleType =
@@ -31,7 +36,7 @@ export type SequenceStartMode = 'auto' | 'manual'
 export interface CompositeCondition {
   condition_id: string
   field: string
-  operator: CompositeAssertionOperator
+  operator: CompositeConditionOperator
   value_source?: CompositeValueSource
   expected_value?: string
   expected_field?: string

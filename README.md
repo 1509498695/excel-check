@@ -12,7 +12,8 @@
 - 项目校验 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
 - 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，保存后前端会自动切换当前项目到新的归属项目。
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
-- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`、`dual_composite_compare`；其中个人校验与项目校验的规则弹窗现支持 3 类入口：单变量校验、组合变量校验、双组合变量比对。`dual_composite_compare` 会先按两个组合变量的外层 Key 关联，再按多条字段比对规则执行 AND 校验。
+- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`、`dual_composite_compare`；其中个人校验与项目校验的规则弹窗现支持 3 类入口：单变量校验、组合条件校验、双组合变量比对。弹窗会先选规则类型，再按类型过滤目标变量；`composite_condition_check` 的全局筛选和分支筛选已支持字符串 `包含 / 不包含`，`dual_composite_compare` 会先按两个组合变量的外层 Key 关联，再按多条字段比对规则执行 AND 校验。添加组合变量时还可按原始行序生成 `原值_序号` 的唯一键；只有当前 Key 列存在重复值，才会显示“Key 后追加序号”。
+- 项目校验 `/fixed-rules` 的 `组合条件校验` 保存链路已修复：当全局筛选或分支筛选使用字符串 `包含` 时，前端会保留比较值并按正确协议提交，不再误报“缺少比较值”。
 - 数据源能力：本地 Excel（`.xlsx` / `.xls`）、本地 CSV；飞书与 SVN 作为独立 source 类型当前为占位。
 
 ## 2. 技术栈与默认地址
@@ -70,7 +71,7 @@ npm run build
 3. 进入个人校验 `/`，按 01 → 02 → 03 顺序：
    - 01 新增本地 Excel 数据源（建议 `backend/tests/data/minimal_rules.xlsx`）。
    - 02 添加变量（来源 → Sheet → 列名 → 期望类型）。
-   - 03 在规则组里新增规则（单变量校验 / 组合变量校验 / 双组合变量比对）。
+   - 03 在规则组里新增规则（先选单变量校验 / 组合条件校验 / 双组合变量比对，再从过滤后的变量列表中选择目标变量）。
      - 双组合变量比对：先选“基准变量”和“目标变量”，再配置 Key 校验方式与多条字段比对规则。
 4. 点击 03 模块底部「执行校验」。
 5. 结果区会展示 4 个统计块（扫描总行数 / 失败数据源 / 异常结果 / 执行耗时）+ 异常明细表。

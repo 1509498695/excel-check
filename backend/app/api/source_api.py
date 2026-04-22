@@ -57,6 +57,7 @@ class CompositePreviewRequest(BaseModel):
     sheet: str
     columns: list[str] = Field(default_factory=list)
     key_column: str
+    append_index_to_key: bool = False
 
 
 def _get_pick_filetypes(source_type: str) -> list[tuple[str, str]]:
@@ -256,6 +257,7 @@ async def get_composite_variable_preview(payload: CompositePreviewRequest) -> di
             sheet_name=payload.sheet,
             columns=payload.columns,
             key_column=payload.key_column,
+            append_index_to_key=payload.append_index_to_key,
         )
     except (FileNotFoundError, ValueError, ImportError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

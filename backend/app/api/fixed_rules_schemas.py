@@ -21,7 +21,15 @@ FixedRuleType = Literal[
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
 SequenceDirection = Literal["asc", "desc"]
 SequenceStartMode = Literal["auto", "manual"]
-CompositeFilterOperator = Literal["eq", "ne", "gt", "lt", "not_null"]
+CompositeFilterOperator = Literal[
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "not_null",
+    "contains",
+    "not_contains",
+]
 CompositeAssertionOperator = Literal[
     "eq",
     "ne",
@@ -33,6 +41,7 @@ CompositeAssertionOperator = Literal[
 ]
 CompositeValueSource = Literal["literal", "field"]
 DualCompositeKeyCheckMode = Literal["baseline_only", "bidirectional"]
+DualCompositeOperator = Literal["eq", "ne", "gt", "lt", "not_null"]
 FixedRulesConfigIssueLevel = Literal["warning", "error"]
 
 
@@ -67,7 +76,7 @@ class CompositeCondition(BaseModel):
 
     condition_id: str
     field: str
-    operator: CompositeAssertionOperator
+    operator: CompositeFilterOperator | CompositeAssertionOperator
     value_source: CompositeValueSource | None = None
     expected_value: str | None = None
     expected_field: str | None = None
@@ -99,7 +108,7 @@ class DualCompositeComparison(BaseModel):
 
     comparison_id: str
     left_field: str
-    operator: CompositeFilterOperator
+    operator: DualCompositeOperator
     right_field: str
 
 

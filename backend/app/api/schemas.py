@@ -30,6 +30,7 @@ class VariableTag(BaseModel):
     column: str | None = None
     columns: list[str] | None = None
     key_column: str | None = None
+    append_index_to_key: bool = False
     expected_type: Literal["int", "str", "json"] | None = None
 
 

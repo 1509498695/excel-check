@@ -89,6 +89,7 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
       variable_kind: 'composite' as const,
       columns,
       key_column: keyColumn,
+      append_index_to_key: variable.append_index_to_key ?? undefined,
       expected_type: 'json' as const,
     })
   }

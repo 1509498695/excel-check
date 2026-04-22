@@ -539,6 +539,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
               sheet: variable.sheet,
               columns: variable.columns ?? [],
               key_column: variable.key_column ?? '',
+              append_index_to_key: variable.append_index_to_key ?? false,
             })
           : await fetchColumnPreview({
               source,
@@ -781,6 +782,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         column: variable.column?.trim(),
         columns: variable.columns ? [...variable.columns] : undefined,
         key_column: variable.key_column?.trim(),
+        append_index_to_key: variable.append_index_to_key ?? false,
       }
 
       if (originalTag && originalTag !== nextTag) {

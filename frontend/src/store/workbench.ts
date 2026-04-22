@@ -459,6 +459,7 @@ export const useWorkbenchStore = defineStore('workbench', {
               sheet: variable.sheet,
               columns: variable.columns ?? [],
               key_column: variable.key_column ?? '',
+              append_index_to_key: variable.append_index_to_key ?? false,
             })
           : await fetchColumnPreview({
               source,
@@ -547,7 +548,10 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     upsertVariable(variable: VariableTag, originalTag?: string): void {
-      const variableCopy = { ...variable }
+      const variableCopy = {
+        ...variable,
+        append_index_to_key: variable.append_index_to_key ?? false,
+      }
 
       if (originalTag) {
         const index = this.variables.findIndex((item) => item.tag === originalTag)

@@ -40,6 +40,12 @@ export function isCompareOperator(
   return value === 'eq' || value === 'ne' || value === 'gt' || value === 'lt'
 }
 
+export function isCompositeContainsOperator(
+  value: string | undefined,
+): value is 'contains' | 'not_contains' {
+  return value === 'contains' || value === 'not_contains'
+}
+
 export function isSingleVariable(variable: VariableTag | undefined | null): variable is VariableTag {
   return variable != null && (variable.variable_kind ?? 'single') === 'single'
 }
@@ -71,6 +77,16 @@ export function normalizeCompositeCondition(condition: CompositeCondition): Comp
       expected_value:
         valueSource === 'literal' ? normalizeExpectedValue(condition.expected_value) : undefined,
       expected_field: valueSource === 'field' ? condition.expected_field?.trim() : undefined,
+    }
+  }
+
+  if (isCompositeContainsOperator(operator)) {
+    return {
+      condition_id: normalizedConditionId,
+      field: normalizedField,
+      operator,
+      value_source: 'literal',
+      expected_value: normalizeExpectedValue(condition.expected_value),
     }
   }
 
@@ -119,6 +135,10 @@ export function isValidCompositeCondition(
 
   if (operator === 'not_null' || operator === 'unique' || operator === 'duplicate_required') {
     return true
+  }
+
+  if (isCompositeContainsOperator(operator)) {
+    return Boolean(normalizeExpectedValue(condition.expected_value))
   }
 
   if (!isCompareOperator(operator)) {
