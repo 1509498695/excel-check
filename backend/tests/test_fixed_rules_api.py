@@ -147,6 +147,31 @@ def _build_composite_rule(
     }
 
 
+def _build_sequence_rule(
+    target_variable_tag: str,
+    *,
+    rule_id: str = "rule-sequence",
+    rule_name: str = "INT_ID 顺序校验",
+    direction: str = "asc",
+    step: str = "1",
+    start_mode: str = "auto",
+    start_value: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "rule_id": rule_id,
+        "group_id": "basic-checks",
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "rule_type": "sequence_order_check",
+        "sequence_direction": direction,
+        "sequence_step": step,
+        "sequence_start_mode": start_mode,
+    }
+    if start_value is not None:
+        payload["sequence_start_value"] = start_value
+    return payload
+
+
 def _build_v4_payload(
     workbook_path: Path,
     *,
@@ -402,6 +427,44 @@ async def test_put_fixed_rules_config_supports_cross_table_mapping_round_trip(
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_sequence_order_check_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验规则可以保存并再次读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_round_trip.xlsx",
+        {"INT_ID": [10, 11, 12], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[
+          _build_sequence_rule(
+              target_tag,
+              direction="desc",
+              step="5",
+              start_mode="manual",
+              start_value="100",
+          )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    get_payload = get_response.json()["data"]
+    rule = get_payload["rules"][0]
+    assert rule["rule_type"] == "sequence_order_check"
+    assert rule["sequence_direction"] == "desc"
+    assert rule["sequence_step"] == "5"
+    assert rule["sequence_start_mode"] == "manual"
+    assert rule["sequence_start_value"] == "100"
+
+
+@pytest.mark.anyio
 async def test_get_fixed_rules_config_migrates_legacy_payload(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -549,6 +612,86 @@ async def test_put_fixed_rules_config_rejects_composite_variable_binding(
 
     assert response.status_code == 400
     assert "rule-composite" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_sequence_rule_bound_to_composite_variable(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验只能绑定单变量。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_composite_invalid.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"], "NAME": ["x", "y", "z"]},
+    )
+    composite_tag = "[items-source-items-INT_ID-mapping]"
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": composite_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "DESC", "NAME"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        rules=[_build_sequence_rule(composite_tag)],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "rule-sequence" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_sequence_rule_with_invalid_step(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验的步长必须是大于 0 的数字。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_invalid_step.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_sequence_rule(target_tag, step="0")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "step" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_sequence_rule_without_manual_start_value(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证手动起始模式必须填写起始值。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_missing_start.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_sequence_rule(target_tag, start_mode="manual")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "start_value" in response.json()["detail"]
 
 
 @pytest.mark.anyio
@@ -802,6 +945,123 @@ async def test_execute_fixed_rules_passes_gt_zero_rule(
     assert execute_payload["msg"] == "Execution Completed"
     assert execute_payload["meta"]["total_rows_scanned"] == 3
     assert execute_payload["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_sequence_order_check_auto_start(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验支持自动取首行作为起始值。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_auto.xlsx",
+        {"INT_ID": [10, 11, 12, 13], "DESC": ["a", "b", "c", "d"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_sequence_rule(target_tag, rule_name="INT_ID 顺序递增")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    execute_payload = execute_response.json()
+    assert execute_payload["msg"] == "Execution Completed"
+    assert execute_payload["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_reports_sequence_gap(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验会报告断档。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_gap.xlsx",
+        {"INT_ID": [1, 2, 4], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_sequence_rule(target_tag, rule_name="INT_ID 顺序递增")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["row_index"] == 4
+    assert abnormal_results[0]["rule_name"] == "INT_ID 顺序递增"
+    assert "期望值 3" in abnormal_results[0]["message"]
+    assert "步长 1" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_sequence_order_check_manual_descending(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验支持手动起始值和降序步长。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_desc.xlsx",
+        {"INT_ID": [20, 18, 16], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[
+            _build_sequence_rule(
+                target_tag,
+                direction="desc",
+                step="2",
+                start_mode="manual",
+                start_value="20",
+                rule_name="INT_ID 倒序连续",
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    assert execute_response.json()["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_reports_sequence_empty_and_non_numeric(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证顺序校验会严格报告空值和非数字。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "sequence_invalid_values.xlsx",
+        {"INT_ID": [1, None, "abc"], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_sequence_rule(target_tag, rule_name="INT_ID 顺序递增")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert abnormal_results[0]["row_index"] == 3
+    assert abnormal_results[1]["row_index"] == 4
+    assert "当前值为空" in abnormal_results[0]["message"]
+    assert "不是合法数字" in abnormal_results[1]["message"]
 
 
 @pytest.mark.anyio

@@ -12,9 +12,17 @@ export type FixedRuleType =
   | 'fixed_value_compare'
   | 'not_null'
   | 'unique'
+  | 'sequence_order_check'
   | 'cross_table_mapping'
   | 'composite_condition_check'
-export type FixedRuleSelection = FixedRuleOperator | 'not_null' | 'unique' | 'in'
+export type FixedRuleSelection =
+  | FixedRuleOperator
+  | 'not_null'
+  | 'unique'
+  | 'sequence_order_check'
+  | 'in'
+export type SequenceDirection = 'asc' | 'desc'
+export type SequenceStartMode = 'auto' | 'manual'
 
 export interface CompositeCondition {
   condition_id: string
@@ -51,6 +59,10 @@ export interface FixedRuleDefinition {
   operator?: FixedRuleOperator
   expected_value?: string
   reference_variable_tag?: string
+  sequence_direction?: SequenceDirection
+  sequence_step?: string
+  sequence_start_mode?: SequenceStartMode
+  sequence_start_value?: string
   composite_config?: CompositeRuleConfig
 }
 

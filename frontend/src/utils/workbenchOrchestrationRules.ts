@@ -69,6 +69,22 @@ export function orchestrationRulesToValidationRules(
       }
     }
 
+    if (rule.rule_type === 'sequence_order_check') {
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'sequence_order_check',
+        params: {
+          target_tag: variable.tag,
+          direction: rule.sequence_direction ?? 'asc',
+          step: rule.sequence_step ?? '1',
+          start_mode: rule.sequence_start_mode ?? 'auto',
+          start_value: rule.sequence_start_value ?? '',
+          rule_name: rule.rule_name,
+          location: locationForSingle(variable),
+        },
+      }
+    }
+
     return {
       rule_id: rule.rule_id,
       rule_type: rule.rule_type,

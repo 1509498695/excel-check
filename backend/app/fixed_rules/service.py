@@ -35,6 +35,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
     "not_null",
     "unique",
+    "sequence_order_check",
     "cross_table_mapping",
     "composite_condition_check",
 }
@@ -56,6 +57,31 @@ SUPPORTED_LOCAL_SOURCE_SUFFIXES = {
     "local_csv": {".csv"},
 }
 LEGACY_FIXED_RULE_KEYS = {"file_path", "sheet", "columns", "svn_enabled"}
+
+
+def _normalize_sequence_numeric(
+    value: str | None,
+    *,
+    field_name: str,
+    rule_id: str,
+    positive_only: bool = False,
+) -> str:
+    """校验并规范顺序校验使用的数字参数。"""
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValueError(f"规则 '{rule_id}' 缺少 {field_name}。")
+
+    try:
+        numeric = float(normalized)
+    except ValueError as exc:
+        raise ValueError(f"规则 '{rule_id}' 的 {field_name} 必须是合法数字。") from exc
+
+    if positive_only and numeric <= 0:
+        raise ValueError(f"规则 '{rule_id}' 的 {field_name} 必须大于 0。")
+
+    if numeric.is_integer():
+        return str(int(numeric))
+    return format(numeric, "g")
 
 
 def build_default_fixed_rules_config() -> FixedRulesConfig:
@@ -399,13 +425,17 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_id=rule.rule_id,
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
-                target_variable_tag=rule.target_variable_tag,
-                rule_type=rule.rule_type,
-                operator=rule.operator,
-                expected_value=rule.expected_value,
-                reference_variable_tag=rule.reference_variable_tag,
-                composite_config=rule.composite_config,
-            )
+                    target_variable_tag=rule.target_variable_tag,
+                    rule_type=rule.rule_type,
+                    operator=rule.operator,
+                    expected_value=rule.expected_value,
+                    reference_variable_tag=rule.reference_variable_tag,
+                    sequence_direction=rule.sequence_direction,
+                    sequence_step=rule.sequence_step,
+                    sequence_start_mode=rule.sequence_start_mode,
+                    sequence_start_value=rule.sequence_start_value,
+                    composite_config=rule.composite_config,
+                )
             )
             continue
 
@@ -415,13 +445,17 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_id=rule.rule_id,
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
-                target_variable_tag=rule.target_variable_tag,
-                rule_type=rule.rule_type,
-                operator=rule.operator,
-                expected_value=rule.expected_value,
-                reference_variable_tag=rule.reference_variable_tag,
-                composite_config=rule.composite_config,
-            )
+                    target_variable_tag=rule.target_variable_tag,
+                    rule_type=rule.rule_type,
+                    operator=rule.operator,
+                    expected_value=rule.expected_value,
+                    reference_variable_tag=rule.reference_variable_tag,
+                    sequence_direction=rule.sequence_direction,
+                    sequence_step=rule.sequence_step,
+                    sequence_start_mode=rule.sequence_start_mode,
+                    sequence_start_value=rule.sequence_start_value,
+                    composite_config=rule.composite_config,
+                )
             )
             continue
 
@@ -481,6 +515,10 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 rule_type=rule.rule_type,
                 operator=rule.operator,
                 expected_value=rule.expected_value,
+                sequence_direction=rule.sequence_direction,
+                sequence_step=rule.sequence_step,
+                sequence_start_mode=rule.sequence_start_mode,
+                sequence_start_value=rule.sequence_start_value,
                 composite_config=rule.composite_config,
             )
         )
@@ -792,6 +830,10 @@ def _normalize_rules(
         operator = rule.operator.strip() if rule.operator else ""
         expected_value = rule.expected_value.strip() if rule.expected_value else ""
         reference_variable_tag = (rule.reference_variable_tag or "").strip()
+        sequence_direction = (rule.sequence_direction or "").strip()
+        sequence_step = (rule.sequence_step or "").strip()
+        sequence_start_mode = (rule.sequence_start_mode or "").strip()
+        sequence_start_value = (rule.sequence_start_value or "").strip()
 
         if not rule_id:
             raise ValueError("?????? rule_id?")
@@ -815,6 +857,10 @@ def _normalize_rules(
         normalized_operator: str | None = None
         normalized_expected_value: str | None = None
         normalized_reference_variable_tag: str | None = None
+        normalized_sequence_direction: str | None = None
+        normalized_sequence_step: str | None = None
+        normalized_sequence_start_mode: str | None = None
+        normalized_sequence_start_value: str | None = None
         normalized_composite_config: CompositeRuleConfig | None = None
 
         if variable_kind == "single" and rule_type == "composite_condition_check":
@@ -861,6 +907,37 @@ def _normalize_rules(
                     f"规则 '{rule_id}' 的参考变量 '{reference_variable_tag}' 必须是单个变量。"
                 )
             normalized_reference_variable_tag = reference_variable_tag
+        elif rule_type == "sequence_order_check":
+            if operator or expected_value or reference_variable_tag or rule.composite_config is not None:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的顺序校验不应包含比较值、参考变量或组合配置。"
+                )
+            if sequence_direction not in {"asc", "desc"}:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的顺序方向仅支持 asc 或 desc。"
+                )
+            if sequence_start_mode not in {"auto", "manual"}:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的起始值模式仅支持 auto 或 manual。"
+                )
+            normalized_sequence_direction = sequence_direction
+            normalized_sequence_step = _normalize_sequence_numeric(
+                sequence_step,
+                field_name="step",
+                rule_id=rule_id,
+                positive_only=True,
+            )
+            normalized_sequence_start_mode = sequence_start_mode
+            if sequence_start_mode == "manual":
+                normalized_sequence_start_value = _normalize_sequence_numeric(
+                    sequence_start_value,
+                    field_name="start_value",
+                    rule_id=rule_id,
+                )
+            elif sequence_start_value:
+                raise ValueError(
+                    f"规则 '{rule_id}' 在自动起始模式下不应填写 start_value。"
+                )
         elif rule_type == "composite_condition_check":
             normalized_composite_config = _normalize_composite_rule_config(
                 rule_id=rule_id,
@@ -878,6 +955,10 @@ def _normalize_rules(
                 operator=normalized_operator,
                 expected_value=normalized_expected_value,
                 reference_variable_tag=normalized_reference_variable_tag,
+                sequence_direction=normalized_sequence_direction,
+                sequence_step=normalized_sequence_step,
+                sequence_start_mode=normalized_sequence_start_mode,
+                sequence_start_value=normalized_sequence_start_value,
                 composite_config=normalized_composite_config,
             )
         )
@@ -1292,6 +1373,17 @@ def _build_fixed_rule_params(
         return {
             "dict_tag": rule.reference_variable_tag,
             "target_tag": target_variable.tag,
+            "rule_name": rule.rule_name,
+            "location": location,
+        }
+
+    if rule.rule_type == "sequence_order_check":
+        return {
+            "target_tag": target_variable.tag,
+            "direction": rule.sequence_direction,
+            "step": rule.sequence_step,
+            "start_mode": rule.sequence_start_mode,
+            "start_value": rule.sequence_start_value,
             "rule_name": rule.rule_name,
             "location": location,
         }

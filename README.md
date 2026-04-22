@@ -12,7 +12,7 @@
 - 项目校验 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
 - 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，保存后前端会自动切换当前项目到新的归属项目。
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
-- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`cross_table_mapping`、`composite_condition_check`；其中个人校验单变量规则弹窗额外提供 `包含 (in)` 选项，保存时复用 `cross_table_mapping`。
+- 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`；其中个人校验与项目校验的单变量规则弹窗都支持 `顺序校验`（升序 / 降序、步长、自动 / 手动起始），`包含 (in)` 保存时复用 `cross_table_mapping`。
 - 数据源能力：本地 Excel（`.xlsx` / `.xls`）、本地 CSV；飞书与 SVN 作为独立 source 类型当前为占位。
 
 ## 2. 技术栈与默认地址
@@ -70,7 +70,7 @@ npm run build
 3. 进入个人校验 `/`，按 01 → 02 → 03 顺序：
    - 01 新增本地 Excel 数据源（建议 `backend/tests/data/minimal_rules.xlsx`）。
    - 02 添加变量（来源 → Sheet → 列名 → 期望类型）。
-   - 03 在规则组里新增规则（`fixed_value_compare` / `not_null` / `unique` / `包含 (in)` / `composite_condition_check`）。
+   - 03 在规则组里新增规则（`fixed_value_compare` / `not_null` / `unique` / `sequence_order_check` / `包含 (in)` / `composite_condition_check`）。
 4. 点击 03 模块底部「执行校验」。
 5. 结果区会展示 4 个统计块（扫描总行数 / 失败数据源 / 异常结果 / 执行耗时）+ 异常明细表。
 

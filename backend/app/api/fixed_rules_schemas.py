@@ -13,10 +13,13 @@ FixedRuleType = Literal[
     "fixed_value_compare",
     "not_null",
     "unique",
+    "sequence_order_check",
     "cross_table_mapping",
     "composite_condition_check",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
+SequenceDirection = Literal["asc", "desc"]
+SequenceStartMode = Literal["auto", "manual"]
 CompositeFilterOperator = Literal["eq", "ne", "gt", "lt", "not_null"]
 CompositeAssertionOperator = Literal[
     "eq",
@@ -101,6 +104,10 @@ class FixedRuleDefinition(BaseModel):
     operator: FixedRuleOperator | None = None
     expected_value: str | None = None
     reference_variable_tag: str | None = None
+    sequence_direction: SequenceDirection | None = None
+    sequence_step: str | None = None
+    sequence_start_mode: SequenceStartMode | None = None
+    sequence_start_value: str | None = None
     composite_config: CompositeRuleConfig | None = None
 
 

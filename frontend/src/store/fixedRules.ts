@@ -84,6 +84,23 @@ function createDefaultConfig(): FixedRulesConfig {
   }
 }
 
+function isValidSequenceStep(value: string | undefined): boolean {
+  const normalized = value?.trim() ?? ''
+  if (!normalized) {
+    return false
+  }
+  const numeric = Number(normalized)
+  return Number.isFinite(numeric) && numeric > 0
+}
+
+function isValidSequenceStartValue(value: string | undefined): boolean {
+  const normalized = value?.trim() ?? ''
+  if (!normalized) {
+    return false
+  }
+  return Number.isFinite(Number(normalized))
+}
+
 export const useFixedRulesStore = defineStore('fixed-rules', {
   state: (): FixedRulesState => ({
     config: createDefaultConfig(),
@@ -225,6 +242,22 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
               }
               const referenceVariable = variableMap.get(referenceTag)
               if (!referenceVariable || !isSingleVariable(referenceVariable)) {
+                return true
+              }
+              return false
+            }
+
+            if (rule.rule_type === 'sequence_order_check') {
+              if (!rule.sequence_direction || !['asc', 'desc'].includes(rule.sequence_direction)) {
+                return true
+              }
+              if (!rule.sequence_start_mode || !['auto', 'manual'].includes(rule.sequence_start_mode)) {
+                return true
+              }
+              if (!isValidSequenceStep(rule.sequence_step)) {
+                return true
+              }
+              if (rule.sequence_start_mode === 'manual' && !isValidSequenceStartValue(rule.sequence_start_value)) {
                 return true
               }
               return false
@@ -773,6 +806,18 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         reference_variable_tag:
           rule.rule_type === 'cross_table_mapping'
             ? rule.reference_variable_tag?.trim() || undefined
+            : undefined,
+        sequence_direction:
+          rule.rule_type === 'sequence_order_check' ? rule.sequence_direction ?? 'asc' : undefined,
+        sequence_step:
+          rule.rule_type === 'sequence_order_check' ? rule.sequence_step?.trim() || '1' : undefined,
+        sequence_start_mode:
+          rule.rule_type === 'sequence_order_check'
+            ? rule.sequence_start_mode ?? 'auto'
+            : undefined,
+        sequence_start_value:
+          rule.rule_type === 'sequence_order_check' && rule.sequence_start_mode === 'manual'
+            ? rule.sequence_start_value?.trim() || undefined
             : undefined,
         composite_config: normalizedCompositeConfig,
       }
