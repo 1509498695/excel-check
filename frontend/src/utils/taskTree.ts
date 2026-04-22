@@ -214,6 +214,50 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
     }
   }
 
+  if (rule.rule_type === 'dual_composite_compare') {
+    const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const referenceTag =
+      typeof rule.params.reference_tag === 'string' ? rule.params.reference_tag.trim() : ''
+    const keyCheckMode =
+      typeof rule.params.key_check_mode === 'string' ? rule.params.key_check_mode.trim() : ''
+    const comparisons = Array.isArray(rule.params.comparisons) ? rule.params.comparisons : []
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+
+    if (!targetTag) {
+      throw new Error('规则 "dual_composite_compare" 缺少基准变量。')
+    }
+    if (!referenceTag) {
+      throw new Error('规则 "dual_composite_compare" 缺少目标变量。')
+    }
+    if (!availableTags.has(targetTag)) {
+      throw new Error(`规则 "dual_composite_compare" 引用了不存在的变量 "${targetTag}"。`)
+    }
+    if (!availableTags.has(referenceTag)) {
+      throw new Error(`规则 "dual_composite_compare" 引用了不存在的变量 "${referenceTag}"。`)
+    }
+    if (!['baseline_only', 'bidirectional'].includes(keyCheckMode)) {
+      throw new Error('规则 "dual_composite_compare" 的 key_check_mode 无效。')
+    }
+    if (!comparisons.length) {
+      throw new Error('规则 "dual_composite_compare" 缺少字段比对规则。')
+    }
+    if (!ruleName) {
+      throw new Error('规则 "dual_composite_compare" 缺少 rule_name。')
+    }
+
+    return {
+      rule_id: rule.rule_id,
+      rule_type: rule.rule_type,
+      params: {
+        target_tag: targetTag,
+        reference_tag: referenceTag,
+        key_check_mode: keyCheckMode,
+        comparisons,
+        rule_name: ruleName,
+      },
+    }
+  }
+
   if (rule.rule_type === 'cross_table_mapping') {
     const dictTag = typeof rule.params.dict_tag === 'string' ? rule.params.dict_tag.trim() : ''
     const targetTag =

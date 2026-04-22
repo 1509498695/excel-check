@@ -118,6 +118,42 @@ function isValidSequenceStartValue(value: string | undefined): boolean {
   return Number.isFinite(Number(normalized))
 }
 
+function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<string, VariableTag>): boolean {
+  const targetTag = rule.target_variable_tag.trim()
+  const referenceTag = rule.reference_variable_tag?.trim() ?? ''
+  const targetVariable = variableMap.get(targetTag)
+  const referenceVariable = variableMap.get(referenceTag)
+
+  if (!targetTag || !referenceTag || targetTag === referenceTag) {
+    return false
+  }
+  if (!isCompositeVariable(targetVariable) || !isCompositeVariable(referenceVariable)) {
+    return false
+  }
+  if (!rule.key_check_mode || !['baseline_only', 'bidirectional'].includes(rule.key_check_mode)) {
+    return false
+  }
+  if (!rule.comparisons?.length) {
+    return false
+  }
+
+  const leftFields = new Set(['__key__', ...((targetVariable.columns ?? []).filter(Boolean))])
+  const rightFields = new Set(['__key__', ...((referenceVariable.columns ?? []).filter(Boolean))])
+
+  return rule.comparisons.every((comparison) => {
+    if (!comparison.comparison_id?.trim()) {
+      return false
+    }
+    if (!comparison.left_field?.trim() || !leftFields.has(comparison.left_field.trim())) {
+      return false
+    }
+    if (!comparison.right_field?.trim() || !rightFields.has(comparison.right_field.trim())) {
+      return false
+    }
+    return ['eq', 'ne', 'gt', 'lt', 'not_null'].includes(comparison.operator)
+  })
+}
+
 export const useWorkbenchStore = defineStore('workbench', {
   state: (): WorkbenchState => ({
     sources: [],
@@ -231,7 +267,7 @@ export const useWorkbenchStore = defineStore('workbench', {
           }
 
           if (isSingleVariable(variable)) {
-            if (rule.rule_type === 'composite_condition_check') {
+            if (rule.rule_type === 'composite_condition_check' || rule.rule_type === 'dual_composite_compare') {
               return true
             }
 
@@ -288,11 +324,13 @@ export const useWorkbenchStore = defineStore('workbench', {
             return true
           }
 
-          if (rule.rule_type !== 'composite_condition_check') {
-            return true
+          if (rule.rule_type === 'composite_condition_check') {
+            return !isValidCompositeConfig(rule.composite_config)
           }
-
-          return !isValidCompositeConfig(rule.composite_config)
+          if (rule.rule_type === 'dual_composite_compare') {
+            return !isValidDualCompositeRule(rule, variableMap)
+          }
+          return true
         })
         .map((rule) => rule.rule_id)
     },
@@ -677,7 +715,7 @@ export const useWorkbenchStore = defineStore('workbench', {
             ? normalizeExpectedValue(rule.expected_value)
             : undefined,
         reference_variable_tag:
-          rule.rule_type === 'cross_table_mapping'
+          rule.rule_type === 'cross_table_mapping' || rule.rule_type === 'dual_composite_compare'
             ? rule.reference_variable_tag?.trim() || undefined
             : undefined,
         sequence_direction:
@@ -693,6 +731,19 @@ export const useWorkbenchStore = defineStore('workbench', {
             ? rule.sequence_start_value?.trim() || undefined
             : undefined,
         composite_config: normalizedCompositeConfig,
+        key_check_mode:
+          rule.rule_type === 'dual_composite_compare'
+            ? rule.key_check_mode ?? 'baseline_only'
+            : undefined,
+        comparisons:
+          rule.rule_type === 'dual_composite_compare'
+            ? (rule.comparisons ?? []).map((comparison) => ({
+                comparison_id: comparison.comparison_id,
+                left_field: comparison.left_field.trim(),
+                operator: comparison.operator,
+                right_field: comparison.right_field.trim(),
+              }))
+            : [],
       }
 
       const index = this.orchestrationRules.findIndex((item) => item.rule_id === nextRule.rule_id)

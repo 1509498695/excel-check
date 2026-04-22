@@ -8,6 +8,7 @@ export type CompositeAssertionOperator =
   | 'unique'
   | 'duplicate_required'
 export type CompositeValueSource = 'literal' | 'field'
+export type DualCompositeKeyCheckMode = 'baseline_only' | 'bidirectional'
 export type FixedRuleType =
   | 'fixed_value_compare'
   | 'not_null'
@@ -15,12 +16,15 @@ export type FixedRuleType =
   | 'sequence_order_check'
   | 'cross_table_mapping'
   | 'composite_condition_check'
+  | 'dual_composite_compare'
 export type FixedRuleSelection =
   | FixedRuleOperator
   | 'not_null'
   | 'unique'
   | 'sequence_order_check'
   | 'in'
+  | 'composite_condition_check'
+  | 'dual_composite_compare'
 export type SequenceDirection = 'asc' | 'desc'
 export type SequenceStartMode = 'auto' | 'manual'
 
@@ -44,6 +48,13 @@ export interface CompositeRuleConfig {
   branches: CompositeBranch[]
 }
 
+export interface DualCompositeComparison {
+  comparison_id: string
+  left_field: string
+  operator: FixedRuleOperator | 'not_null'
+  right_field: string
+}
+
 export interface FixedRuleGroup {
   group_id: string
   group_name: string
@@ -64,6 +75,8 @@ export interface FixedRuleDefinition {
   sequence_start_mode?: SequenceStartMode
   sequence_start_value?: string
   composite_config?: CompositeRuleConfig
+  key_check_mode?: DualCompositeKeyCheckMode
+  comparisons?: DualCompositeComparison[]
 }
 
 export interface FixedRulesConfig {

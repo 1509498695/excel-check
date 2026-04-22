@@ -37,6 +37,27 @@ def _create_composite_test_workbook(target_path: Path) -> Path:
     return target_path
 
 
+def _create_dual_composite_test_workbook(target_path: Path) -> Path:
+    """创建双组合变量关联比对测试所需的 Excel 文件。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [10001, 10002],
+                "INT_ConditionType": [4, 3],
+                "INT_RequireRule": [1, 1],
+            }
+        ).to_excel(writer, sheet_name="left_items", index=False)
+        pd.DataFrame(
+            {
+                "INT_ID": [10001, 10002],
+                "INT_ConditionType": [5, 3],
+                "INT_RequireRule": [1, 1],
+            }
+        ).to_excel(writer, sheet_name="right_items", index=False)
+
+    return target_path
+
+
 def _create_paginated_test_workbook(target_path: Path) -> Path:
     """创建用于执行结果分页测试的 Excel 文件。"""
     with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
@@ -662,6 +683,80 @@ async def test_execute_engine_accepts_composite_variable_without_breaking_rules(
         item["rule_name"] == "cross_table_mapping" and item["raw_value"] == 9
         for item in response_payload["data"]["abnormal_results"]
     )
+
+
+@pytest.mark.anyio
+async def test_execute_engine_supports_dual_composite_compare(tmp_path: Path) -> None:
+    """验证个人校验执行接口支持双组合变量按 Key 关联后比较字段值。"""
+    workbook_path = _create_dual_composite_test_workbook(tmp_path / "dual_composite_rules.xlsx")
+
+    payload = {
+        "sources": [
+            {
+                "id": "src_dual",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[left-json]",
+                "source_id": "src_dual",
+                "sheet": "left_items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            },
+            {
+                "tag": "[right-json]",
+                "source_id": "src_dual",
+                "sheet": "right_items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            },
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-dual",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[left-json]",
+                    "reference_tag": "[right-json]",
+                    "key_check_mode": "baseline_only",
+                    "rule_name": "双组合变量比对",
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-condition-type",
+                            "left_field": "INT_ConditionType",
+                            "operator": "eq",
+                            "right_field": "INT_ConditionType",
+                        },
+                        {
+                            "comparison_id": "compare-require-rule",
+                            "left_field": "INT_RequireRule",
+                            "operator": "eq",
+                            "right_field": "INT_RequireRule",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "双组合变量比对"
+    assert "Key 10001" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio

@@ -9,6 +9,7 @@ import pandas as pd
 from backend.app.api.fixed_rules_schemas import (
     CompositeBranch,
     CompositeCondition,
+    DualCompositeComparison,
     CompositeRuleConfig,
 )
 from backend.app.api.schemas import ValidationRule, VariableTag
@@ -27,7 +28,10 @@ from backend.app.rules.domain.value import (
     to_number,
 )
 from backend.app.rules.engine_core import RuleExecutionContext, register_rule
-from backend.app.rules.infrastructure.tag_extractor import by_target_tag
+from backend.app.rules.infrastructure.tag_extractor import (
+    by_reference_and_target_tag,
+    by_target_tag,
+)
 
 
 COMPOSITE_KEY_FIELD = "__key__"
@@ -148,6 +152,25 @@ def _get_composite_rule_config(rule: ValidationRule) -> CompositeRuleConfig:
         raise ValueError(
             f"Rule '{rule.rule_type}' provides invalid composite_config: {exc}"
         ) from exc
+
+
+def _get_dual_composite_comparisons(rule: ValidationRule) -> list[DualCompositeComparison]:
+    """读取并校验双组合变量比对规则的字段比较列表。"""
+    payload = rule.params.get("comparisons")
+    if not isinstance(payload, list) or not payload:
+        raise ValueError(f"Rule '{rule.rule_type}' requires non-empty params.comparisons.")
+
+    comparisons: list[DualCompositeComparison] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"Rule '{rule.rule_type}' provides invalid params.comparisons.")
+        try:
+            comparisons.append(DualCompositeComparison.model_validate(item))
+        except Exception as exc:  # pragma: no cover
+            raise ValueError(
+                f"Rule '{rule.rule_type}' provides invalid comparison config: {exc}"
+            ) from exc
+    return comparisons
 
 
 def _resolve_condition_expected_value(
@@ -636,5 +659,185 @@ def check_composite_condition_check(
                 branch=branch,
             )
         )
+
+    return abnormal_results
+
+
+@register_rule("dual_composite_compare", dependent_tags=by_reference_and_target_tag)
+def check_dual_composite_compare(
+    rule: ValidationRule,
+    context: RuleExecutionContext,
+) -> list[dict[str, Any]]:
+    """按外层 Key 关联两个组合变量，并逐项比较 Value 字段。"""
+    target_tag = _get_fixed_rule_param(rule, "target_tag")
+    reference_tag = _get_fixed_rule_param(rule, "reference_tag")
+    key_check_mode = _get_fixed_rule_param(rule, "key_check_mode")
+    rule_name = _get_fixed_rule_param(rule, "rule_name")
+    comparisons = _get_dual_composite_comparisons(rule)
+
+    if key_check_mode not in {"baseline_only", "bidirectional"}:
+        raise ValueError(
+            f"Rule '{rule.rule_type}' requires params.key_check_mode to be 'baseline_only' or 'bidirectional'."
+        )
+
+    target_variable, target_frame = _get_composite_variable_frame(context, target_tag, rule.rule_type)
+    reference_variable, reference_frame = _get_composite_variable_frame(
+        context,
+        reference_tag,
+        rule.rule_type,
+    )
+
+    target_by_key = target_frame.set_index(COMPOSITE_KEY_FIELD, drop=False)
+    reference_by_key = reference_frame.set_index(COMPOSITE_KEY_FIELD, drop=False)
+    abnormal_results: list[dict[str, Any]] = []
+    target_key_location = _build_rule_location(target_variable, COMPOSITE_KEY_FIELD)
+    reference_key_location = _build_rule_location(reference_variable, COMPOSITE_KEY_FIELD)
+
+    for key in target_by_key.index.tolist():
+        if key not in reference_by_key.index:
+            row = target_by_key.loc[key]
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=int(row["_row_index"]),
+                    raw_value=key,
+                    rule_name=rule_name,
+                    location=target_key_location,
+                    message=f"目标组合变量中缺失该 Key ({key})。",
+                )
+            )
+            continue
+
+        target_row = target_by_key.loc[key]
+        reference_row = reference_by_key.loc[key]
+        abnormal_results.extend(
+            _evaluate_dual_composite_key(
+                rule_name=rule_name,
+                key=str(key),
+                target_variable=target_variable,
+                reference_variable=reference_variable,
+                target_row=target_row,
+                reference_row=reference_row,
+                comparisons=comparisons,
+            )
+        )
+
+    if key_check_mode == "bidirectional":
+        for key in reference_by_key.index.tolist():
+            if key in target_by_key.index:
+                continue
+            row = reference_by_key.loc[key]
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=int(row["_row_index"]),
+                    raw_value=key,
+                    rule_name=rule_name,
+                    location=reference_key_location,
+                    message=f"基准组合变量中缺失该 Key ({key})。",
+                )
+            )
+
+    return abnormal_results
+
+
+def _evaluate_dual_composite_key(
+    *,
+    rule_name: str,
+    key: str,
+    target_variable: VariableTag,
+    reference_variable: VariableTag,
+    target_row: pd.Series,
+    reference_row: pd.Series,
+    comparisons: list[DualCompositeComparison],
+) -> list[dict[str, Any]]:
+    """执行单个 Key 上的全部字段比较。"""
+    abnormal_results: list[dict[str, Any]] = []
+
+    for comparison in comparisons:
+        left_field = comparison.left_field
+        right_field = comparison.right_field
+        operator = comparison.operator
+        row_index = int(target_row["_row_index"])
+        location = (
+            f"{target_variable.sheet} -> {_get_field_display_name(target_variable, left_field)}"
+            f" ⇄ {reference_variable.sheet} -> {_get_field_display_name(reference_variable, right_field)}"
+        )
+
+        if left_field not in target_row.index:
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=row_index,
+                    raw_value=key,
+                    rule_name=rule_name,
+                    location=location,
+                    message=f"Key {key} 的基准变量缺少字段 {left_field}。",
+                )
+            )
+            continue
+        if right_field not in reference_row.index:
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=row_index,
+                    raw_value=key,
+                    rule_name=rule_name,
+                    location=location,
+                    message=f"Key {key} 的目标变量缺少字段 {right_field}。",
+                )
+            )
+            continue
+
+        left_value = target_row[left_field]
+        right_value = reference_row[right_field]
+        left_label = _get_field_display_name(target_variable, left_field)
+        right_label = _get_field_display_name(reference_variable, right_field)
+
+        if operator == "not_null":
+            if is_empty_value(left_value) or is_empty_value(right_value):
+                abnormal_results.append(
+                    build_fixed_result(
+                        row_index=row_index,
+                        raw_value=left_value,
+                        rule_name=rule_name,
+                        location=location,
+                        message=(
+                            f"Key {key} 字段非空失败：基准变量({left_label}={left_value}) / "
+                            f"目标变量({right_label}={right_value}) 不能为空。"
+                        ),
+                    )
+                )
+            continue
+
+        result = evaluate_compare_assertion(
+            actual_value=left_value,
+            operator=operator,
+            expected_value=right_value,
+        )
+        if result.incomparable:
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=row_index,
+                    raw_value=left_value,
+                    rule_name=rule_name,
+                    location=location,
+                    message=(
+                        f"Key {key} 字段比对失败：基准变量({left_label}={left_value}) 与 "
+                        f"目标变量({right_label}={right_value}) 无法按数值比较。"
+                    ),
+                )
+            )
+            continue
+        if result.failed:
+            operator_text = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<"}[operator]
+            abnormal_results.append(
+                build_fixed_result(
+                    row_index=row_index,
+                    raw_value=left_value,
+                    rule_name=rule_name,
+                    location=location,
+                    message=(
+                        f"字段比对失败：Key {key} 下，基准变量({left_label}={left_value}) "
+                        f"{operator_text} 目标变量({right_label}={right_value}) 不成立。"
+                    ),
+                )
+            )
 
     return abnormal_results

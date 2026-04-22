@@ -43,6 +43,17 @@ def by_dict_and_target_tag(rule: ValidationRule) -> list[str]:
     return [dict_tag, target_tag]
 
 
+def by_reference_and_target_tag(rule: ValidationRule) -> list[str]:
+    """``dual_composite_compare``：从 ``params.reference_tag`` / ``target_tag`` 中提取双 tag。"""
+    reference_tag = rule.params.get("reference_tag")
+    target_tag = rule.params.get("target_tag")
+    if not isinstance(reference_tag, str) or not reference_tag:
+        raise ValueError("Rule 'dual_composite_compare' requires params.reference_tag.")
+    if not isinstance(target_tag, str) or not target_tag:
+        raise ValueError("Rule 'dual_composite_compare' requires params.target_tag.")
+    return [reference_tag, target_tag]
+
+
 def by_target_tag(rule: ValidationRule) -> list[str]:
     """``fixed_value_compare`` / ``composite_condition_check``：单 tag 提取。
 

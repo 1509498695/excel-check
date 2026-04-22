@@ -39,6 +39,12 @@ export const STATIC_RULE_TEMPLATES = [
     level: 'error',
   },
   {
+    ruleType: 'dual_composite_compare',
+    title: '双组合变量比对',
+    description: '按外层 Key 关联两个组合变量，再比较内部字段值。',
+    level: 'error',
+  },
+  {
     ruleType: 'cross_table_mapping',
     title: '跨表映射校验',
     description: '历史规则类型，工作台 UI 已不再配置；引擎仍支持。',
@@ -61,7 +67,8 @@ export function getRuleLevelTone(ruleType: string): 'danger' | 'warning' | 'prim
     ruleType === 'not_null' ||
     ruleType === 'cross_table_mapping' ||
     ruleType === 'fixed_value_compare' ||
-    ruleType === 'composite_condition_check'
+    ruleType === 'composite_condition_check' ||
+    ruleType === 'dual_composite_compare'
   ) {
     return 'danger'
   }

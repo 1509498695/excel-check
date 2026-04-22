@@ -41,6 +41,25 @@ export function orchestrationRulesToValidationRules(
       }
     }
 
+    if (rule.rule_type === 'dual_composite_compare') {
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'dual_composite_compare',
+        params: {
+          target_tag: variable.tag,
+          reference_tag: rule.reference_variable_tag?.trim() ?? '',
+          key_check_mode: rule.key_check_mode ?? 'baseline_only',
+          comparisons: (rule.comparisons ?? []).map((comparison) => ({
+            comparison_id: comparison.comparison_id,
+            left_field: comparison.left_field,
+            operator: comparison.operator,
+            right_field: comparison.right_field,
+          })),
+          rule_name: rule.rule_name,
+        },
+      }
+    }
+
     if (rule.rule_type === 'fixed_value_compare') {
       return {
         rule_id: rule.rule_id,

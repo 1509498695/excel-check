@@ -172,6 +172,57 @@ def _build_sequence_rule(
     return payload
 
 
+def _create_dual_composite_workbook(
+    target_path: Path,
+    *,
+    left_rows: dict[str, list[object]],
+    right_rows: dict[str, list[object]],
+) -> Path:
+    """创建双组合变量比对测试所需的最小 Excel 文件。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(left_rows).to_excel(writer, sheet_name="left_items", index=False)
+        pd.DataFrame(right_rows).to_excel(writer, sheet_name="right_items", index=False)
+
+    return target_path
+
+
+def _build_dual_composite_rule(
+    target_variable_tag: str,
+    reference_variable_tag: str,
+    *,
+    key_check_mode: str = "baseline_only",
+    comparisons: list[dict[str, object]] | None = None,
+    rule_id: str = "rule-dual-composite-compare",
+    group_id: str = "basic-checks",
+    rule_name: str = "双组合变量比对",
+) -> dict[str, object]:
+    return {
+        "rule_id": rule_id,
+        "group_id": group_id,
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "reference_variable_tag": reference_variable_tag,
+        "rule_type": "dual_composite_compare",
+        "key_check_mode": key_check_mode,
+        "comparisons": comparisons
+        if comparisons is not None
+        else [
+            {
+                "comparison_id": "compare-condition-type",
+                "left_field": "INT_ConditionType",
+                "operator": "eq",
+                "right_field": "INT_ConditionType",
+            },
+            {
+                "comparison_id": "compare-require-rule",
+                "left_field": "INT_RequireRule",
+                "operator": "eq",
+                "right_field": "INT_RequireRule",
+            },
+        ],
+    }
+
+
 def _build_v4_payload(
     workbook_path: Path,
     *,
@@ -749,6 +800,111 @@ async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_var
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_dual_composite_compare_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证双组合变量比对规则可以保存并再次读取。"""
+    workbook_path = _create_dual_composite_workbook(
+        tmp_path / "dual_composite_round_trip.xlsx",
+        left_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [4, 3],
+            "INT_RequireRule": [1, 1],
+        },
+        right_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [5, 3],
+            "INT_RequireRule": [1, 1],
+        },
+    )
+    left_variable = {
+        "tag": _build_composite_tag("items-source", "left_items", "left-map"),
+        "source_id": "items-source",
+        "sheet": "left_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    right_variable = {
+        "tag": _build_composite_tag("items-source", "right_items", "right-map"),
+        "source_id": "items-source",
+        "sheet": "right_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[left_variable, right_variable],
+        rules=[_build_dual_composite_rule(left_variable["tag"], right_variable["tag"])],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assert rule["rule_type"] == "dual_composite_compare"
+    assert rule["target_variable_tag"] == left_variable["tag"]
+    assert rule["reference_variable_tag"] == right_variable["tag"]
+    assert rule["key_check_mode"] == "baseline_only"
+    assert len(rule["comparisons"]) == 2
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_dual_composite_compare_bound_to_single_variable(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证双组合变量比对只能绑定组合变量。"""
+    workbook_path = _create_dual_composite_workbook(
+        tmp_path / "dual_composite_invalid.xlsx",
+        left_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [4, 3],
+            "INT_RequireRule": [1, 1],
+        },
+        right_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [5, 3],
+            "INT_RequireRule": [1, 1],
+        },
+    )
+    single_variable = {
+        "tag": _build_single_tag("items-source", "left_items", "INT_ConditionType"),
+        "source_id": "items-source",
+        "sheet": "left_items",
+        "variable_kind": "single",
+        "column": "INT_ConditionType",
+        "expected_type": "str",
+    }
+    right_variable = {
+        "tag": _build_composite_tag("items-source", "right_items", "right-map"),
+        "source_id": "items-source",
+        "sheet": "right_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[single_variable, right_variable],
+        rules=[_build_dual_composite_rule(single_variable["tag"], right_variable["tag"])],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "不能保存双组合变量比对" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_rule_without_branches(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -901,6 +1057,130 @@ async def test_execute_fixed_rules_supports_composite_condition_check(
     assert abnormal_results[0]["rule_name"] == "派系与分组映射校验"
     assert abnormal_results[0]["row_index"] == 5
     assert abnormal_results[0]["location"] == "items -> INT_Group"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_dual_composite_compare(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证双组合变量比对会按 Key 关联后比较内部字段值。"""
+    workbook_path = _create_dual_composite_workbook(
+        tmp_path / "dual_composite_execute.xlsx",
+        left_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [4, 3],
+            "INT_RequireRule": [1, 1],
+        },
+        right_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [5, 3],
+            "INT_RequireRule": [1, 1],
+        },
+    )
+    left_variable = {
+        "tag": _build_composite_tag("items-source", "left_items", "left-map"),
+        "source_id": "items-source",
+        "sheet": "left_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    right_variable = {
+        "tag": _build_composite_tag("items-source", "right_items", "right-map"),
+        "source_id": "items-source",
+        "sheet": "right_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[left_variable, right_variable],
+        rules=[_build_dual_composite_rule(left_variable["tag"], right_variable["tag"])],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "双组合变量比对"
+    assert "Key 10001" in abnormal_results[0]["message"]
+    assert "INT_ConditionType" in abnormal_results[0]["message"]
+    assert "4" in abnormal_results[0]["message"]
+    assert "5" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_dual_composite_compare_reports_bidirectional_missing_key(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证双向 Key 校验会报告目标侧多出的 Key。"""
+    workbook_path = _create_dual_composite_workbook(
+        tmp_path / "dual_composite_bidirectional.xlsx",
+        left_rows={
+            "INT_ID": [10001],
+            "INT_ConditionType": [4],
+            "INT_RequireRule": [1],
+        },
+        right_rows={
+            "INT_ID": [10001, 10002],
+            "INT_ConditionType": [4, 5],
+            "INT_RequireRule": [1, 1],
+        },
+    )
+    left_variable = {
+        "tag": _build_composite_tag("items-source", "left_items", "left-map"),
+        "source_id": "items-source",
+        "sheet": "left_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    right_variable = {
+        "tag": _build_composite_tag("items-source", "right_items", "right-map"),
+        "source_id": "items-source",
+        "sheet": "right_items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_ConditionType", "INT_RequireRule"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[left_variable, right_variable],
+        rules=[
+            _build_dual_composite_rule(
+                left_variable["tag"],
+                right_variable["tag"],
+                key_check_mode="bidirectional",
+                comparisons=[
+                    {
+                        "comparison_id": "compare-condition-type",
+                        "left_field": "INT_ConditionType",
+                        "operator": "eq",
+                        "right_field": "INT_ConditionType",
+                    }
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert "缺失该 Key (10002)" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio

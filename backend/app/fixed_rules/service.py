@@ -14,6 +14,8 @@ from backend.app.api.fixed_rules_schemas import (
     CompositeCondition,
     CompositeFilterOperator,
     CompositeRuleConfig,
+    DualCompositeComparison,
+    DualCompositeKeyCheckMode,
     FixedRuleDefinition,
     FixedRuleGroup,
     FixedRulesConfig,
@@ -38,6 +40,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "sequence_order_check",
     "cross_table_mapping",
     "composite_condition_check",
+    "dual_composite_compare",
 }
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SUPPORTED_COMPOSITE_FILTER_OPERATORS = {"eq", "ne", "gt", "lt", "not_null"}
@@ -50,6 +53,8 @@ SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
     "unique",
     "duplicate_required",
 }
+SUPPORTED_DUAL_COMPOSITE_OPERATORS = {"eq", "ne", "gt", "lt", "not_null"}
+SUPPORTED_DUAL_COMPOSITE_KEY_CHECK_MODES = {"baseline_only", "bidirectional"}
 COMPARE_STYLE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SET_STYLE_OPERATORS = {"unique", "duplicate_required"}
 SUPPORTED_LOCAL_SOURCE_SUFFIXES = {
@@ -435,6 +440,8 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     sequence_start_mode=rule.sequence_start_mode,
                     sequence_start_value=rule.sequence_start_value,
                     composite_config=rule.composite_config,
+                    key_check_mode=rule.key_check_mode,
+                    comparisons=rule.comparisons,
                 )
             )
             continue
@@ -455,6 +462,8 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     sequence_start_mode=rule.sequence_start_mode,
                     sequence_start_value=rule.sequence_start_value,
                     composite_config=rule.composite_config,
+                    key_check_mode=rule.key_check_mode,
+                    comparisons=rule.comparisons,
                 )
             )
             continue
@@ -515,11 +524,14 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 rule_type=rule.rule_type,
                 operator=rule.operator,
                 expected_value=rule.expected_value,
+                reference_variable_tag=rule.reference_variable_tag,
                 sequence_direction=rule.sequence_direction,
                 sequence_step=rule.sequence_step,
                 sequence_start_mode=rule.sequence_start_mode,
                 sequence_start_value=rule.sequence_start_value,
                 composite_config=rule.composite_config,
+                key_check_mode=rule.key_check_mode,
+                comparisons=rule.comparisons,
             )
         )
 
@@ -862,12 +874,18 @@ def _normalize_rules(
         normalized_sequence_start_mode: str | None = None
         normalized_sequence_start_value: str | None = None
         normalized_composite_config: CompositeRuleConfig | None = None
+        normalized_key_check_mode: DualCompositeKeyCheckMode | None = None
+        normalized_dual_comparisons: list[DualCompositeComparison] = []
 
         if variable_kind == "single" and rule_type == "composite_condition_check":
             raise ValueError(
                 f"???? '{rule_id}' ???????? '{target_variable_tag}'????????????????"
             )
-        if variable_kind == "composite" and rule_type != "composite_condition_check":
+        if variable_kind == "single" and rule_type == "dual_composite_compare":
+            raise ValueError(
+                f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存双组合变量比对。"
+            )
+        if variable_kind == "composite" and rule_type not in {"composite_condition_check", "dual_composite_compare"}:
             raise ValueError(
                 f"???? '{rule_id}' ???????? '{target_variable_tag}'???????????????"
             )
@@ -944,6 +962,20 @@ def _normalize_rules(
                 variable=target_variable,
                 composite_config=rule.composite_config,
             )
+        elif rule_type == "dual_composite_compare":
+            (
+                normalized_reference_variable_tag,
+                normalized_key_check_mode,
+                normalized_dual_comparisons,
+            ) = _normalize_dual_composite_rule(
+                rule_id=rule_id,
+                target_variable=target_variable,
+                target_variable_tag=target_variable_tag,
+                reference_variable_tag=reference_variable_tag,
+                key_check_mode=rule.key_check_mode,
+                comparisons=rule.comparisons,
+                variable_map=variable_map,
+            )
 
         normalized_rules.append(
             FixedRuleDefinition(
@@ -960,6 +992,8 @@ def _normalize_rules(
                 sequence_start_mode=normalized_sequence_start_mode,
                 sequence_start_value=normalized_sequence_start_value,
                 composite_config=normalized_composite_config,
+                key_check_mode=normalized_key_check_mode,
+                comparisons=normalized_dual_comparisons,
             )
         )
         seen_rule_ids.add(rule_id)
@@ -1027,6 +1061,92 @@ def _normalize_composite_rule_config(
     return CompositeRuleConfig(
         global_filters=global_filters,
         branches=normalized_branches,
+    )
+
+
+def _normalize_dual_composite_rule(
+    *,
+    rule_id: str,
+    target_variable: VariableTag,
+    target_variable_tag: str,
+    reference_variable_tag: str,
+    key_check_mode: DualCompositeKeyCheckMode | None,
+    comparisons: list[DualCompositeComparison],
+    variable_map: dict[str, VariableTag],
+) -> tuple[str, DualCompositeKeyCheckMode, list[DualCompositeComparison]]:
+    """校验并规范双组合变量比对规则。"""
+    if not reference_variable_tag:
+        raise ValueError(f"规则 '{rule_id}' 缺少 reference_variable_tag。")
+    if reference_variable_tag == target_variable_tag:
+        raise ValueError(f"规则 '{rule_id}' 的目标变量不能与基准变量相同。")
+    if reference_variable_tag not in variable_map:
+        raise ValueError(
+            f"规则 '{rule_id}' 引用了不存在的目标组合变量 '{reference_variable_tag}'。"
+        )
+
+    reference_variable = variable_map[reference_variable_tag]
+    if (reference_variable.variable_kind or "single") != "composite":
+        raise ValueError(
+            f"规则 '{rule_id}' 的目标变量 '{reference_variable_tag}' 必须是组合变量。"
+        )
+
+    normalized_key_check_mode = str(key_check_mode or "baseline_only").strip()
+    if normalized_key_check_mode not in SUPPORTED_DUAL_COMPOSITE_KEY_CHECK_MODES:
+        raise ValueError(
+            f"规则 '{rule_id}' 的 key_check_mode 仅支持 baseline_only 或 bidirectional。"
+        )
+
+    if not comparisons:
+        raise ValueError(f"规则 '{rule_id}' 至少需要一条字段比对规则。")
+
+    left_fields = _collect_composite_available_fields(target_variable)
+    right_fields = _collect_composite_available_fields(reference_variable)
+    normalized_comparisons: list[DualCompositeComparison] = []
+    seen_comparison_ids: set[str] = set()
+
+    for index, comparison in enumerate(comparisons, start=1):
+        comparison_id = comparison.comparison_id.strip()
+        left_field = comparison.left_field.strip()
+        operator = str(comparison.operator).strip()
+        right_field = comparison.right_field.strip()
+
+        if not comparison_id:
+            raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少 comparison_id。")
+        if comparison_id in seen_comparison_ids:
+            raise ValueError(
+                f"规则 '{rule_id}' 的字段比对存在重复 comparison_id '{comparison_id}'。"
+            )
+        if not left_field:
+            raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少左侧字段。")
+        if left_field not in left_fields:
+            raise ValueError(
+                f"规则 '{rule_id}' 的字段比对 {index} 引用了无效的左侧字段 '{left_field}'。"
+            )
+        if operator not in SUPPORTED_DUAL_COMPOSITE_OPERATORS:
+            raise ValueError(
+                f"规则 '{rule_id}' 的字段比对 {index} 使用了不支持的运算符 '{operator}'。"
+            )
+        if not right_field:
+            raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少右侧字段。")
+        if right_field not in right_fields:
+            raise ValueError(
+                f"规则 '{rule_id}' 的字段比对 {index} 引用了无效的右侧字段 '{right_field}'。"
+            )
+
+        normalized_comparisons.append(
+            DualCompositeComparison(
+                comparison_id=comparison_id,
+                left_field=left_field,
+                operator=operator,
+                right_field=right_field,
+            )
+        )
+        seen_comparison_ids.add(comparison_id)
+
+    return (
+        reference_variable_tag,
+        normalized_key_check_mode,
+        normalized_comparisons,
     )
 
 
@@ -1356,6 +1476,18 @@ def _build_fixed_rule_params(
             "composite_config": rule.composite_config.model_dump(mode="json", exclude_none=True)
             if rule.composite_config
             else None,
+        }
+
+    if rule.rule_type == "dual_composite_compare":
+        return {
+            "target_tag": target_variable.tag,
+            "reference_tag": rule.reference_variable_tag,
+            "key_check_mode": rule.key_check_mode,
+            "comparisons": [
+                comparison.model_dump(mode="json", exclude_none=True)
+                for comparison in rule.comparisons
+            ],
+            "rule_name": rule.rule_name,
         }
 
     location = f"{target_variable.sheet} -> {target_variable.column}"

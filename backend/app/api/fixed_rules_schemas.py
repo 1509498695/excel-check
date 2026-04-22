@@ -16,6 +16,7 @@ FixedRuleType = Literal[
     "sequence_order_check",
     "cross_table_mapping",
     "composite_condition_check",
+    "dual_composite_compare",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
 SequenceDirection = Literal["asc", "desc"]
@@ -31,6 +32,7 @@ CompositeAssertionOperator = Literal[
     "duplicate_required",
 ]
 CompositeValueSource = Literal["literal", "field"]
+DualCompositeKeyCheckMode = Literal["baseline_only", "bidirectional"]
 FixedRulesConfigIssueLevel = Literal["warning", "error"]
 
 
@@ -90,6 +92,17 @@ class CompositeRuleConfig(BaseModel):
     branches: list[CompositeBranch] = Field(default_factory=list)
 
 
+class DualCompositeComparison(BaseModel):
+    """描述双组合变量比对中的单条字段比较规则。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    comparison_id: str
+    left_field: str
+    operator: CompositeFilterOperator
+    right_field: str
+
+
 class FixedRuleDefinition(BaseModel):
     """描述一条固定规则定义。"""
 
@@ -109,6 +122,8 @@ class FixedRuleDefinition(BaseModel):
     sequence_start_mode: SequenceStartMode | None = None
     sequence_start_value: str | None = None
     composite_config: CompositeRuleConfig | None = None
+    key_check_mode: DualCompositeKeyCheckMode | None = None
+    comparisons: list[DualCompositeComparison] = Field(default_factory=list)
 
 
 class FixedRulesConfigIssue(BaseModel):
