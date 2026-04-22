@@ -46,6 +46,12 @@ export function isCompositeContainsOperator(
   return value === 'contains' || value === 'not_contains'
 }
 
+export function isCompositeRegexOperator(
+  value: string | undefined,
+): value is 'regex' {
+  return value === 'regex'
+}
+
 export function isSingleVariable(variable: VariableTag | undefined | null): variable is VariableTag {
   return variable != null && (variable.variable_kind ?? 'single') === 'single'
 }
@@ -86,6 +92,15 @@ export function normalizeCompositeCondition(condition: CompositeCondition): Comp
       field: normalizedField,
       operator,
       value_source: 'literal',
+      expected_value: normalizeExpectedValue(condition.expected_value),
+    }
+  }
+
+  if (isCompositeRegexOperator(operator)) {
+    return {
+      condition_id: normalizedConditionId,
+      field: normalizedField,
+      operator,
       expected_value: normalizeExpectedValue(condition.expected_value),
     }
   }
@@ -139,6 +154,10 @@ export function isValidCompositeCondition(
 
   if (isCompositeContainsOperator(operator)) {
     return Boolean(normalizeExpectedValue(condition.expected_value))
+  }
+
+  if (isCompositeRegexOperator(operator)) {
+    return section === 'assertion' && Boolean(normalizeExpectedValue(condition.expected_value))
   }
 
   if (!isCompareOperator(operator)) {

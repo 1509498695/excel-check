@@ -299,6 +299,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
               return false
             }
 
+            if (rule.rule_type === 'regex_check') {
+              return !normalizeExpectedValue(rule.expected_value)
+            }
+
             if (rule.rule_type !== 'fixed_value_compare') {
               return false
             }
@@ -840,7 +844,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         rule_type: rule.rule_type,
         operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
         expected_value:
-          rule.rule_type === 'fixed_value_compare'
+          rule.rule_type === 'fixed_value_compare' || rule.rule_type === 'regex_check'
             ? normalizeExpectedValue(rule.expected_value)
             : undefined,
         reference_variable_tag:

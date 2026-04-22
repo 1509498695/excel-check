@@ -35,6 +35,7 @@ FIXED_RULES_CONFIG_VERSION = 4
 COMPOSITE_KEY_FIELD = "__key__"
 SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
+    "regex_check",
     "not_null",
     "unique",
     "sequence_order_check",
@@ -58,6 +59,7 @@ SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
     "gt",
     "lt",
     "not_null",
+    "regex",
     "unique",
     "duplicate_required",
 }
@@ -915,6 +917,20 @@ def _normalize_rules(
                     ) from exc
             normalized_operator = operator
             normalized_expected_value = expected_value
+        elif rule_type == "regex_check":
+            if operator or reference_variable_tag or rule.composite_config is not None:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的正则校验不应包含比较操作符、参考变量或组合配置。"
+                )
+            if not expected_value:
+                raise ValueError(f"规则 '{rule_id}' 缺少正则表达式。")
+            try:
+                re.compile(expected_value)
+            except re.error as exc:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的正则表达式无效：{expected_value}"
+                ) from exc
+            normalized_expected_value = expected_value
         elif rule_type == "cross_table_mapping":
             if not reference_variable_tag:
                 raise ValueError(
@@ -1244,6 +1260,25 @@ def _normalize_composite_conditions(
                 raise ValueError(
                     f"???? '{rule_id}' ?{section_label}? 'not_null' ????????????"
                 )
+        elif operator == "regex":
+            normalized_value_source = None
+            if value_source:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的{section_label}操作符 'regex' 不支持右值来源。"
+                )
+            if not expected_value:
+                raise ValueError(f"规则 '{rule_id}' 的{section_label}缺少正则表达式。")
+            if expected_field:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的{section_label}操作符 'regex' 不支持右侧字段。"
+                )
+            try:
+                re.compile(expected_value)
+            except re.error as exc:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的{section_label}正则表达式无效：{expected_value}"
+                ) from exc
+            normalized_expected_value = expected_value
         elif operator in SET_STYLE_OPERATORS:
             if value_source or expected_value or expected_field:
                 raise ValueError(
@@ -1519,6 +1554,14 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "operator": rule.operator,
             "expected_value": rule.expected_value,
+            "rule_name": rule.rule_name,
+            "location": location,
+        }
+
+    if rule.rule_type == "regex_check":
+        return {
+            "target_tag": target_variable.tag,
+            "pattern": rule.expected_value,
             "rule_name": rule.rule_name,
             "location": location,
         }

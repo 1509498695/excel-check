@@ -85,6 +85,7 @@ const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> 
   { label: '不等于 (!=)', value: 'ne' },
   { label: '大于 (>)', value: 'gt' },
   { label: '小于 (<)', value: 'lt' },
+  { label: '正则校验', value: 'regex_check' },
   { label: '非空校验', value: 'not_null' },
   { label: '唯一校验', value: 'unique' },
   { label: '顺序校验', value: 'sequence_order_check' },
@@ -118,6 +119,7 @@ const compositeAssertionOptions: Array<{ label: string; value: CompositeAssertio
   { label: '不等于 (!=)', value: 'ne' },
   { label: '大于 (>)', value: 'gt' },
   { label: '小于 (<)', value: 'lt' },
+  { label: '正则校验', value: 'regex' },
   { label: '非空校验', value: 'not_null' },
   { label: '唯一校验', value: 'unique' },
   { label: '必须重复', value: 'duplicate_required' },
@@ -135,6 +137,7 @@ const ruleSelectionNameMap: Record<FixedRuleSelection, string> = {
   ne: '不等于',
   gt: '大于',
   lt: '小于',
+  regex_check: '正则校验',
   not_null: '非空校验',
   unique: '唯一校验',
   sequence_order_check: '顺序校验',
@@ -242,7 +245,9 @@ const partiallySelectedVisibleRules = computed(() => {
 })
 
 const shouldShowExpectedValue = computed(
-  () => isSingleRuleEntry.value && isCompareRuleSelection(ruleForm.selected_rule),
+  () =>
+    isSingleRuleEntry.value &&
+    (isCompareRuleSelection(ruleForm.selected_rule) || ruleForm.selected_rule === 'regex_check'),
 )
 const shouldShowReferenceVariable = computed(
   () => isSingleRuleEntry.value && ruleForm.selected_rule === 'in',
@@ -260,9 +265,14 @@ const isDualCompositeRule = computed(
   () => ruleForm.rule_entry_type === 'dual_composite',
 )
 const expectedValuePlaceholder = computed(() =>
-  ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
+  ruleForm.selected_rule === 'regex_check'
+    ? '输入完整正则表达式'
+    : ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
     ? '请输入要比较的精确值'
     : '请输入数值阈值',
+)
+const singleExpectedValueLabel = computed(() =>
+  ruleForm.selected_rule === 'regex_check' ? '正则表达式' : '比较值',
 )
 
 const currentGroupCount = computed(
@@ -465,6 +475,12 @@ function isCompositeContainsOperator(
   return value === 'contains' || value === 'not_contains'
 }
 
+function isCompositeRegexOperator(
+  value: CompositeFilterOperator | CompositeAssertionOperator,
+): value is 'regex' {
+  return value === 'regex'
+}
+
 function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -616,6 +632,14 @@ function setConditionOperator(
     }
     return
   }
+  if (isCompositeRegexOperator(operator)) {
+    condition.value_source = undefined
+    condition.expected_field = undefined
+    if (typeof condition.expected_value !== 'string') {
+      condition.expected_value = ''
+    }
+    return
+  }
   if (!isCompositeCompareOperator(operator)) {
     condition.value_source = undefined
     condition.expected_value = undefined
@@ -655,6 +679,9 @@ function shouldShowConditionExpectedValue(condition: CompositeCondition): boolea
   if (isCompositeContainsOperator(condition.operator)) {
     return true
   }
+  if (isCompositeRegexOperator(condition.operator)) {
+    return true
+  }
   return isCompositeCompareOperator(condition.operator) && (condition.value_source ?? 'literal') === 'literal'
 }
 
@@ -665,6 +692,9 @@ function shouldShowConditionExpectedField(condition: CompositeCondition): boolea
 function getConditionExpectedValuePlaceholder(condition: CompositeCondition): string {
   if (isCompositeContainsOperator(condition.operator)) {
     return condition.operator === 'not_contains' ? '输入要排除的片段' : '输入要匹配的片段'
+  }
+  if (isCompositeRegexOperator(condition.operator)) {
+    return '输入完整正则表达式'
   }
   return '请输入比较值'
 }
@@ -709,6 +739,15 @@ function validateCompositeCondition(
     }
     if (!condition.expected_value?.trim()) {
       return `${label}缺少比较值。`
+    }
+    return null
+  }
+  if (isCompositeRegexOperator(condition.operator)) {
+    if (mode !== 'assertion') {
+      return `${label}的正则校验只能用于分支校验条件。`
+    }
+    if (!condition.expected_value?.trim()) {
+      return `${label}缺少正则表达式。`
     }
     return null
   }
@@ -935,6 +974,9 @@ function summarizeCondition(
   if (condition.operator === 'duplicate_required') {
     return `${fieldLabel} 必须重复`
   }
+  if (condition.operator === 'regex') {
+    return `${fieldLabel} 正则匹配 ${condition.expected_value ?? ''}`
+  }
   if (condition.operator === 'contains') {
     return `${fieldLabel} 包含 ${condition.expected_value ?? ''}`
   }
@@ -1012,6 +1054,9 @@ function buildRuleCondition(rule: FixedRuleDefinition): string {
       rule.sequence_start_value,
     )}`
   }
+  if (rule.rule_type === 'regex_check') {
+    return `${columnName} 正则匹配 ${rule.expected_value ?? ''}`
+  }
   return `${columnName} ${getOperatorLabel(rule.operator ?? 'gt')} ${rule.expected_value ?? ''}`
 }
 
@@ -1030,6 +1075,9 @@ function buildRuleSelectionSummary(rule: FixedRuleDefinition): string {
       rule.sequence_start_value,
     )
   }
+  if (rule.rule_type === 'regex_check') {
+    return '正则校验'
+  }
   return getRuleSelectionLabel(getRuleSelectionValue(rule))
 }
 
@@ -1047,6 +1095,9 @@ function buildRuleSourcePathSummary(rule: FixedRuleDefinition): string {
 
 function buildRuleCompareValueSummary(rule: FixedRuleDefinition): string {
   if (rule.rule_type === 'fixed_value_compare') {
+    return rule.expected_value ?? ''
+  }
+  if (rule.rule_type === 'regex_check') {
     return rule.expected_value ?? ''
   }
   if (rule.rule_type === 'cross_table_mapping') {
@@ -1184,7 +1235,10 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
     applyDualCompositeComparisons(rule.comparisons)
   } else {
     ruleForm.selected_rule = getRuleSelectionValue(rule)
-    ruleForm.expected_value = rule.rule_type === 'fixed_value_compare' ? rule.expected_value ?? '' : ''
+    ruleForm.expected_value =
+      rule.rule_type === 'fixed_value_compare' || rule.rule_type === 'regex_check'
+        ? rule.expected_value ?? ''
+        : ''
     ruleForm.reference_variable_tag =
       rule.rule_type === 'cross_table_mapping' ? rule.reference_variable_tag ?? '' : ''
     ruleForm.sequence_direction = rule.rule_type === 'sequence_order_check' ? rule.sequence_direction ?? 'asc' : 'asc'
@@ -1361,7 +1415,7 @@ function validateRuleForm(): boolean {
     return true
   }
   if (!ruleForm.expected_value.trim()) {
-    ElMessage.warning('请填写比较值。')
+    ElMessage.warning(ruleForm.selected_rule === 'regex_check' ? '请填写正则表达式。' : '请填写比较值。')
     return false
   }
   if (
@@ -1423,6 +1477,15 @@ async function handleSaveRule(): Promise<void> {
         target_variable_tag: ruleForm.target_variable_tag,
         rule_type: 'cross_table_mapping',
         reference_variable_tag: ruleForm.reference_variable_tag,
+      })
+    } else if (selectedRule === 'regex_check') {
+      store.upsertOrchestrationRule({
+        rule_id: ruleForm.rule_id || undefined,
+        group_id: ruleForm.group_id,
+        rule_name: ruleForm.rule_name,
+        target_variable_tag: ruleForm.target_variable_tag,
+        rule_type: 'regex_check',
+        expected_value: ruleForm.expected_value,
       })
     } else if (isCompareRuleSelection(selectedRule)) {
       store.upsertOrchestrationRule({
@@ -1854,7 +1917,7 @@ function handleToggleSingleSelection(ruleId: string): void {
               </el-select>
             </div>
             <div v-if="shouldShowExpectedValue">
-              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值</label>
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">{{ singleExpectedValueLabel }}</label>
               <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
             </div>
             <div v-else-if="shouldShowReferenceVariable">
@@ -2096,7 +2159,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                     </el-select>
                   </div>
                   <div v-if="shouldShowConditionExpectedValue(condition)">
-                    <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                    <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
                     <el-input
                       v-model="condition.expected_value"
                       :placeholder="getConditionExpectedValuePlaceholder(condition)"
@@ -2212,7 +2275,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                       </el-select>
                     </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
-                      <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                      <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
                       <el-input
                         v-model="condition.expected_value"
                         :placeholder="getConditionExpectedValuePlaceholder(condition)"
@@ -2299,7 +2362,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                       </el-select>
                     </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
-                      <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                      <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
                       <el-input
                         v-model="condition.expected_value"
                         :placeholder="getConditionExpectedValuePlaceholder(condition)"

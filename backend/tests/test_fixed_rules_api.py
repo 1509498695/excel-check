@@ -174,6 +174,23 @@ def _build_sequence_rule(
     return payload
 
 
+def _build_regex_rule(
+    target_variable_tag: str,
+    *,
+    rule_id: str = "rule-regex",
+    rule_name: str = "字段正则校验",
+    pattern: str = r"(?:\d+(?:-\d+)?:(?:0|1))(?:;\d+(?:-\d+)?:(?:0|1))*",
+) -> dict[str, object]:
+    return {
+        "rule_id": rule_id,
+        "group_id": "basic-checks",
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "rule_type": "regex_check",
+        "expected_value": pattern,
+    }
+
+
 def _create_dual_composite_workbook(
     target_path: Path,
     *,
@@ -515,6 +532,52 @@ async def test_put_fixed_rules_config_supports_sequence_order_check_round_trip(
     assert rule["sequence_step"] == "5"
     assert rule["sequence_start_mode"] == "manual"
     assert rule["sequence_start_value"] == "100"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_regex_check_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证正则校验规则可以保存并再次读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "regex_round_trip.xlsx",
+        {
+            "DESC": [
+                "11005:1;457-458:1;460:1;489-1500:1;488:0",
+                "bad-format",
+            ]
+        },
+    )
+    target_tag = _build_single_tag("items-source", "items", "DESC")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DESC",
+                "expected_type": "str",
+            }
+        ],
+        rules=[
+            _build_regex_rule(
+                target_tag,
+                rule_name="DESC 正则校验",
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assert rule["rule_type"] == "regex_check"
+    assert rule["expected_value"] == r"(?:\d+(?:-\d+)?:(?:0|1))(?:;\d+(?:-\d+)?:(?:0|1))*"
 
 
 @pytest.mark.anyio
@@ -930,6 +993,69 @@ async def test_put_fixed_rules_config_accepts_composite_not_contains_filter_roun
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_composite_regex_assertion_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持在分支校验中保存正则断言。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_regex_round_trip.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "STR_MapType": ["ABCD", "AXYZ"],
+            "STR_Config": [
+                "11005:1;457-458:1;460:1;489-1500:1;488:0",
+                "broken",
+            ],
+            "INT_Group": [100001, 100002],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "regex-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "STR_Config", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(
+        composite_variable["tag"],
+        rule_name="组合条件正则校验",
+    )
+    composite_rule["composite_config"]["global_filters"] = []
+    composite_rule["composite_config"]["branches"] = [
+        {
+            "branch_id": "branch-regex-check",
+            "filters": [],
+            "assertions": [
+                {
+                    "condition_id": "branch-config-regex",
+                    "field": "STR_Config",
+                    "operator": "regex",
+                    "expected_value": r"(?:\d+(?:-\d+)?:(?:0|1))(?:;\d+(?:-\d+)?:(?:0|1))*",
+                }
+            ],
+        }
+    ]
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assertion = rule["composite_config"]["branches"][0]["assertions"][0]
+    assert assertion["operator"] == "regex"
+    assert assertion["expected_value"] == r"(?:\d+(?:-\d+)?:(?:0|1))(?:;\d+(?:-\d+)?:(?:0|1))*"
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_composite_rule_bound_to_single_variable(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -1186,6 +1312,50 @@ async def test_put_fixed_rules_config_rejects_contains_in_composite_assertions(
 
     assert response.status_code == 400
     assert "rule-composite-branch" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_regex_in_composite_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验不会把正则操作符接受到筛选条件里。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_invalid_regex_filter.xlsx",
+        {
+            "INT_ID": [100001, 100002],
+            "STR_Config": ["ok", "bad"],
+            "INT_Faction": [0, 1],
+            "INT_Group": [100001, 100001],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "regex-filter-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_Config", "INT_Faction", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = _build_composite_rule(composite_variable["tag"])
+    composite_rule["composite_config"]["global_filters"][0] = {
+        "condition_id": "global-regex-filter",
+        "field": "STR_Config",
+        "operator": "regex",
+        "expected_value": r".+",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "regex" in response.json()["detail"]
 
 
 @pytest.mark.anyio
@@ -1544,6 +1714,85 @@ async def test_execute_fixed_rules_supports_mixed_composite_contains_and_not_con
 
 
 @pytest.mark.anyio
+async def test_execute_fixed_rules_supports_composite_regex_assertion(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验支持在分支校验中执行正则断言。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "composite_regex_execute.xlsx",
+        {
+            "INT_ID": [100001, 100002, 100003],
+            "STR_MapType": ["ACTIVE", "ACTIVE", "SKIP"],
+            "STR_Config": [
+                "11005:1;457-458:1;460:1;489-1500:1;488:0",
+                "invalid-config",
+                "11005:1",
+            ],
+            "INT_Group": [1, 2, 3],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "regex-execute-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_MapType", "STR_Config", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    composite_rule = {
+        "rule_id": "rule-composite-regex",
+        "group_id": "basic-checks",
+        "rule_name": "组合条件正则断言",
+        "target_variable_tag": composite_variable["tag"],
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+            "global_filters": [],
+            "branches": [
+                {
+                    "branch_id": "branch-active-regex",
+                    "filters": [
+                        {
+                            "condition_id": "branch-maptype-active",
+                            "field": "STR_MapType",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "ACTIVE",
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "condition_id": "branch-config-regex",
+                            "field": "STR_Config",
+                            "operator": "regex",
+                            "expected_value": r"(?:\d+(?:-\d+)?:(?:0|1))(?:;\d+(?:-\d+)?:(?:0|1))*",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[composite_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "组合条件正则断言"
+    assert abnormal_results[0]["row_index"] == 3
+    assert abnormal_results[0]["location"] == "items -> STR_Config"
+    assert "正则格式" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_round_trips_composite_key_suffix_flag(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -1767,6 +2016,44 @@ async def test_put_fixed_rules_config_rejects_compare_rule_without_expected_valu
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_regex_check_with_invalid_pattern(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证正则校验规则会拦截非法表达式。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "invalid_regex_pattern.xlsx",
+        {"DESC": ["ok", "bad"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "DESC")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DESC",
+                "expected_type": "str",
+            }
+        ],
+        rules=[
+            _build_regex_rule(
+                target_tag,
+                pattern="(",
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "正则表达式无效" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_execute_fixed_rules_passes_gt_zero_rule(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -1788,6 +2075,50 @@ async def test_execute_fixed_rules_passes_gt_zero_rule(
     assert execute_payload["msg"] == "Execution Completed"
     assert execute_payload["meta"]["total_rows_scanned"] == 3
     assert execute_payload["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_regex_check(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证单变量正则校验可执行，并按完整匹配报告异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "regex_execute.xlsx",
+        {
+            "DESC": [
+                "11005:1;457-458:1;460:1;489-1500:1;488:0",
+                "11005:1;457-458:1",
+                "broken",
+            ]
+        },
+    )
+    target_tag = _build_single_tag("items-source", "items", "DESC")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[
+            {
+                "tag": target_tag,
+                "source_id": "items-source",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "DESC",
+                "expected_type": "str",
+            }
+        ],
+        rules=[_build_regex_rule(target_tag, rule_name="DESC 格式校验")],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "DESC 格式校验"
+    assert abnormal_results[0]["row_index"] == 4
+    assert "正则格式" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio

@@ -11,6 +11,7 @@ from backend.app.api.schemas import DataSource, VariableTag
 
 FixedRuleType = Literal[
     "fixed_value_compare",
+    "regex_check",
     "not_null",
     "unique",
     "sequence_order_check",
@@ -36,6 +37,7 @@ CompositeAssertionOperator = Literal[
     "gt",
     "lt",
     "not_null",
+    "regex",
     "unique",
     "duplicate_required",
 ]

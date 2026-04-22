@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
@@ -402,6 +403,36 @@ def _evaluate_duplicate_required_assertion(
     ]
 
 
+def _evaluate_regex_assertion(
+    *,
+    variable: VariableTag,
+    branch_title: str,
+    rule_name: str,
+    frame: pd.DataFrame,
+    condition: CompositeCondition,
+) -> list[dict[str, Any]]:
+    """执行组合变量分支上的正则断言。"""
+    compiled_pattern = re.compile(condition.expected_value or "")
+    field = condition.field
+    location = _build_rule_location(variable, field)
+    return [
+        build_fixed_result(
+            row_index=row["_row_index"],
+            raw_value=row[field],
+            rule_name=rule_name,
+            location=location,
+            message=(
+                f"{branch_title}：{_get_field_display_name(variable, field)} 不符合正则格式"
+                f" {condition.expected_value or ''}。"
+            ),
+        )
+        for _, row in frame[[field, "_row_index"]].iterrows()
+        if not compiled_pattern.fullmatch(
+            "" if normalize_fixed_text(row[field]) is None else normalize_fixed_text(row[field]) or ""
+        )
+    ]
+
+
 def _evaluate_composite_branch_assertions(
     *,
     variable: VariableTag,
@@ -444,10 +475,61 @@ def _evaluate_composite_branch_assertions(
                     condition=condition,
                 )
             )
+        elif condition.operator == "regex":
+            abnormal_results.extend(
+                _evaluate_regex_assertion(
+                    variable=variable,
+                    branch_title=branch_title,
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
         else:  # pragma: no cover - 接口层与 service 已做校验
             raise ValueError(
                 f"Unsupported composite assertion operator '{condition.operator}'."
             )
+
+    return abnormal_results
+
+
+@register_rule("regex_check", dependent_tags=by_target_tag)
+def check_regex_check(
+    rule: ValidationRule,
+    context: RuleExecutionContext,
+) -> list[dict[str, Any]]:
+    """执行固定规则模块的单列正则校验。"""
+    target_tag = _get_fixed_rule_param(rule, "target_tag")
+    pattern = _get_fixed_rule_param(rule, "pattern")
+    rule_name = _get_fixed_rule_param(rule, "rule_name")
+
+    try:
+        compiled_pattern = re.compile(pattern)
+    except re.error as exc:  # pragma: no cover - 保存阶段已拦截
+        raise ValueError(f"Rule '{rule.rule_type}' requires a valid params.pattern.") from exc
+
+    variable, frame, column_name = _get_single_variable_frame(
+        context,
+        target_tag,
+        rule.rule_type,
+    )
+    location = f"{variable.sheet} -> {column_name}"
+    abnormal_results: list[dict[str, Any]] = []
+
+    for _, row in frame[[column_name, "_row_index"]].iterrows():
+        text = normalize_fixed_text(row[column_name])
+        normalized_text = "" if text is None else text
+        if compiled_pattern.fullmatch(normalized_text):
+            continue
+        abnormal_results.append(
+            build_fixed_result(
+                row_index=row["_row_index"],
+                raw_value=row[column_name],
+                rule_name=rule_name,
+                location=location,
+                message=f"该值不符合正则格式 {pattern}。",
+            )
+        )
 
     return abnormal_results
 

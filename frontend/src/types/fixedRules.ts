@@ -9,6 +9,7 @@ export type CompositeFilterOperator =
 export type CompositeAssertionOperator =
   | FixedRuleOperator
   | 'not_null'
+  | 'regex'
   | 'unique'
   | 'duplicate_required'
 export type CompositeConditionOperator = CompositeFilterOperator | CompositeAssertionOperator
@@ -16,6 +17,7 @@ export type CompositeValueSource = 'literal' | 'field'
 export type DualCompositeKeyCheckMode = 'baseline_only' | 'bidirectional'
 export type FixedRuleType =
   | 'fixed_value_compare'
+  | 'regex_check'
   | 'not_null'
   | 'unique'
   | 'sequence_order_check'
@@ -24,6 +26,7 @@ export type FixedRuleType =
   | 'dual_composite_compare'
 export type FixedRuleSelection =
   | FixedRuleOperator
+  | 'regex_check'
   | 'not_null'
   | 'unique'
   | 'sequence_order_check'

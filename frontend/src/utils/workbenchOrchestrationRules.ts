@@ -74,6 +74,19 @@ export function orchestrationRulesToValidationRules(
       }
     }
 
+    if (rule.rule_type === 'regex_check') {
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'regex_check',
+        params: {
+          target_tag: variable.tag,
+          pattern: rule.expected_value ?? '',
+          rule_name: rule.rule_name,
+          location: locationForSingle(variable),
+        },
+      }
+    }
+
     if (rule.rule_type === 'cross_table_mapping') {
       const referenceVariable = variableMap.get(rule.reference_variable_tag?.trim() ?? '')
       return {

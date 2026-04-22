@@ -186,6 +186,37 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
     }
   }
 
+  if (rule.rule_type === 'regex_check') {
+    const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const pattern = typeof rule.params.pattern === 'string' ? rule.params.pattern.trim() : ''
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+    const location = typeof rule.params.location === 'string' ? rule.params.location.trim() : ''
+
+    if (!targetTag) {
+      throw new Error('规则 "regex_check" 缺少 target_tag。')
+    }
+    if (!availableTags.has(targetTag)) {
+      throw new Error(`规则 "regex_check" 引用了不存在的变量 "${targetTag}"。`)
+    }
+    if (!pattern) {
+      throw new Error('规则 "regex_check" 缺少 pattern。')
+    }
+    if (!ruleName) {
+      throw new Error('规则 "regex_check" 缺少 rule_name。')
+    }
+
+    return {
+      rule_id: rule.rule_id,
+      rule_type: rule.rule_type,
+      params: createCleanObject({
+        target_tag: targetTag,
+        pattern,
+        rule_name: ruleName,
+        location: location || undefined,
+      }),
+    }
+  }
+
   if (rule.rule_type === 'composite_condition_check') {
     const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
     const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
