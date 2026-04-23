@@ -244,6 +244,55 @@ def _build_dual_composite_rule(
     }
 
 
+def _build_pipeline_node(
+    variable_tag: str,
+    *,
+    filters: list[dict[str, object]] | None = None,
+    assertions: list[dict[str, object]] | None = None,
+    node_id: str = "node-1",
+) -> dict[str, object]:
+    return {
+        "node_id": node_id,
+        "variable_tag": variable_tag,
+        "filters": filters or [],
+        "assertions": assertions or [],
+    }
+
+
+def _build_multi_composite_pipeline_rule(
+    target_variable_tag: str,
+    *,
+    nodes: list[dict[str, object]] | None = None,
+    rule_id: str = "rule-multi-pipeline",
+    group_id: str = "basic-checks",
+    rule_name: str = "多组合变量串行校验",
+) -> dict[str, object]:
+    pipeline_nodes = nodes or [
+        _build_pipeline_node(
+            target_variable_tag,
+            assertions=[
+                {
+                    "condition_id": "assert-default",
+                    "field": "INT_Group",
+                    "operator": "eq",
+                    "value_source": "field",
+                    "expected_field": "__key__",
+                }
+            ],
+        )
+    ]
+    return {
+        "rule_id": rule_id,
+        "group_id": group_id,
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "rule_type": "multi_composite_pipeline_check",
+        "pipeline_config": {
+            "nodes": pipeline_nodes,
+        },
+    }
+
+
 def _build_v4_payload(
     workbook_path: Path,
     *,
@@ -1141,6 +1190,170 @@ async def test_put_fixed_rules_config_supports_dual_composite_compare_round_trip
 
 
 @pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_multi_composite_pipeline_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组合变量串行校验支持单节点配置保存和再次读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_round_trip.xlsx",
+        {
+            "INT_ID": [1, 2],
+            "STR_ABSwitch": ["A", "B"],
+            "DESC3": ["A", "B"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "ab-desc-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_pipeline_node(
+                        composite_variable["tag"],
+                        node_id="node-ab",
+                        filters=[],
+                        assertions=[
+                            {
+                                "condition_id": "assert-desc-match-ab",
+                                "field": "DESC3",
+                                "operator": "eq",
+                                "value_source": "field",
+                                "expected_field": "STR_ABSwitch",
+                            }
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assert rule["rule_type"] == "multi_composite_pipeline_check"
+    assert rule["target_variable_tag"] == composite_variable["tag"]
+    assert len(rule["pipeline_config"]["nodes"]) == 1
+    assert rule["pipeline_config"]["nodes"][0]["variable_tag"] == composite_variable["tag"]
+    assert rule["pipeline_config"]["nodes"][0]["assertions"][0]["expected_field"] == "STR_ABSwitch"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_supports_multi_composite_pipeline_set_assertions_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组合变量串行校验支持唯一/必须重复断言的保存与读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_set_assertions_round_trip.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "STR_ABSwitch": ["A", "B", "C"],
+            "DESC3": ["dup", "dup", "solo"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "set-assertions-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_pipeline_node(
+                        composite_variable["tag"],
+                        node_id="node-set-assertions",
+                        assertions=[
+                            {
+                                "condition_id": "assert-desc-unique",
+                                "field": "DESC3",
+                                "operator": "unique",
+                            },
+                            {
+                                "condition_id": "assert-switch-duplicate-required",
+                                "field": "STR_ABSwitch",
+                                "operator": "duplicate_required",
+                            },
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    rule = get_response.json()["data"]["rules"][0]
+    assertions = rule["pipeline_config"]["nodes"][0]["assertions"]
+    assert [assertion["operator"] for assertion in assertions] == ["unique", "duplicate_required"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_multi_pipeline_bound_to_single_variable(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组合变量串行校验只能绑定组合变量。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_invalid_single.xlsx",
+        {"INT_ID": [1, 2], "DESC": ["a", "b"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                target_tag,
+                nodes=[
+                    _build_pipeline_node(
+                        target_tag,
+                        assertions=[
+                            {
+                                "condition_id": "assert-id-not-null",
+                                "field": "INT_ID",
+                                "operator": "not_null",
+                            }
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "不能保存多组合变量串行校验" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_rejects_dual_composite_compare_bound_to_single_variable(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -1474,6 +1687,289 @@ async def test_execute_fixed_rules_supports_composite_condition_check(
     assert abnormal_results[0]["rule_name"] == "派系与分组映射校验"
     assert abnormal_results[0]["row_index"] == 5
     assert abnormal_results[0]["location"] == "items -> INT_Group"
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_single_node_multi_composite_pipeline_check(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证单节点多组合变量串行校验可执行，并按过滤后断言。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_single_node.xlsx",
+        {
+            "INT_ID": [1, 2],
+            "STR_ABSwitch": ["A", "B"],
+            "DESC3": ["A", "WRONG"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "ab-desc-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                composite_variable["tag"],
+                rule_name="单节点组合串行校验",
+                nodes=[
+                    _build_pipeline_node(
+                        composite_variable["tag"],
+                        node_id="node-1",
+                        filters=[
+                            {
+                                "condition_id": "filter-key-1",
+                                "field": "__key__",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "1",
+                            },
+                            {
+                                "condition_id": "filter-switch-a",
+                                "field": "STR_ABSwitch",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "A",
+                            },
+                        ],
+                        assertions=[
+                            {
+                                "condition_id": "assert-desc-match-a",
+                                "field": "DESC3",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "A",
+                            }
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    execute_payload = execute_response.json()
+    assert execute_payload["msg"] == "Execution Completed"
+    assert execute_payload["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_multi_composite_pipeline_set_assertions(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组合变量串行校验支持唯一/必须重复断言执行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_set_assertions_execute.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "STR_ABSwitch": ["A", "B", "C"],
+            "DESC3": ["dup", "dup", "solo"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "set-assertions-execute-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                composite_variable["tag"],
+                rule_name="组合串行集合断言",
+                nodes=[
+                    _build_pipeline_node(
+                        composite_variable["tag"],
+                        node_id="node-set-assertions",
+                        assertions=[
+                            {
+                                "condition_id": "assert-desc-unique",
+                                "field": "DESC3",
+                                "operator": "unique",
+                            },
+                            {
+                                "condition_id": "assert-switch-duplicate-required",
+                                "field": "STR_ABSwitch",
+                                "operator": "duplicate_required",
+                            },
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 5
+    assert {item["level"] for item in abnormal_results} == {"warning"}
+    assert {item["location"] for item in abnormal_results} == {"items -> DESC3", "items -> STR_ABSwitch"}
+    messages = [item["message"] for item in abnormal_results]
+    assert any("应保持唯一" in message for message in messages)
+    assert any("至少需要出现一组重复值" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_pipeline_short_circuits_after_first_failed_node(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多节点串行校验在首个失败节点收集异常后停止后续节点。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_pipeline_short_circuit.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "STR_ABSwitch": ["A", "B", "C"],
+            "DESC3": ["A", "B", "C"],
+            "STR_Mode": ["x", "y", "z"],
+            "DESC4": ["OK", "FAIL", "OK"],
+            "STR_Extra": ["m", "n", "p"],
+            "DESC5": ["PASS", "BAD", "WRONG"],
+        },
+    )
+    variable_one = {
+        "tag": _build_composite_tag("items-source", "items", "node-one-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    variable_two = {
+        "tag": _build_composite_tag("items-source", "items", "node-two-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_Mode", "DESC4"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    variable_three = {
+        "tag": _build_composite_tag("items-source", "items", "node-three-map"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_Extra", "DESC5"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[variable_one, variable_two, variable_three],
+        rules=[
+            _build_multi_composite_pipeline_rule(
+                variable_one["tag"],
+                rule_name="多节点组合串行校验",
+                nodes=[
+                    _build_pipeline_node(
+                        variable_one["tag"],
+                        node_id="node-1",
+                        filters=[
+                            {
+                                "condition_id": "node-1-filter-key",
+                                "field": "__key__",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "1",
+                            }
+                        ],
+                        assertions=[
+                            {
+                                "condition_id": "node-1-assert",
+                                "field": "DESC3",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "A",
+                            }
+                        ],
+                    ),
+                    _build_pipeline_node(
+                        variable_two["tag"],
+                        node_id="node-2",
+                        filters=[
+                            {
+                                "condition_id": "node-2-filter-key",
+                                "field": "__key__",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "2",
+                            }
+                        ],
+                        assertions=[
+                            {
+                                "condition_id": "node-2-assert",
+                                "field": "DESC4",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "OK",
+                            }
+                        ],
+                    ),
+                    _build_pipeline_node(
+                        variable_three["tag"],
+                        node_id="node-3",
+                        filters=[
+                            {
+                                "condition_id": "node-3-filter-key",
+                                "field": "__key__",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "3",
+                            }
+                        ],
+                        assertions=[
+                            {
+                                "condition_id": "node-3-assert",
+                                "field": "DESC5",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "PASS",
+                            }
+                        ],
+                    ),
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "多节点组合串行校验"
+    assert "节点 2" in abnormal_results[0]["message"]
+    assert "节点 3" not in abnormal_results[0]["message"]
+    assert abnormal_results[0]["location"] == "items -> DESC4"
 
 
 @pytest.mark.anyio

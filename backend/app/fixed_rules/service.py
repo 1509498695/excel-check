@@ -20,6 +20,8 @@ from backend.app.api.fixed_rules_schemas import (
     FixedRuleGroup,
     FixedRulesConfig,
     FixedRulesConfigIssue,
+    MultiCompositePipelineConfig,
+    MultiCompositePipelineNode,
     UNGROUPED_GROUP_ID,
     UNGROUPED_GROUP_NAME,
 )
@@ -42,6 +44,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "cross_table_mapping",
     "composite_condition_check",
     "dual_composite_compare",
+    "multi_composite_pipeline_check",
 }
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
@@ -54,6 +57,16 @@ SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
     "not_contains",
 }
 SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
+    "eq",
+    "ne",
+    "gt",
+    "lt",
+    "not_null",
+    "regex",
+    "unique",
+    "duplicate_required",
+}
+SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS = {
     "eq",
     "ne",
     "gt",
@@ -256,7 +269,14 @@ def build_fixed_rules_task_tree(
     needed_tags = {
         tag
         for rule in ordered_rules
-        for tag in [rule.target_variable_tag, rule.reference_variable_tag]
+        for tag in [
+            rule.target_variable_tag,
+            rule.reference_variable_tag,
+            *[
+                node.variable_tag
+                for node in (rule.pipeline_config.nodes if rule.pipeline_config else [])
+            ],
+        ]
         if tag
     }
 
@@ -461,6 +481,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     composite_config=rule.composite_config,
                     key_check_mode=rule.key_check_mode,
                     comparisons=rule.comparisons,
+                    pipeline_config=rule.pipeline_config,
                 )
             )
             continue
@@ -483,6 +504,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     composite_config=rule.composite_config,
                     key_check_mode=rule.key_check_mode,
                     comparisons=rule.comparisons,
+                    pipeline_config=rule.pipeline_config,
                 )
             )
             continue
@@ -551,6 +573,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 composite_config=rule.composite_config,
                 key_check_mode=rule.key_check_mode,
                 comparisons=rule.comparisons,
+                pipeline_config=rule.pipeline_config,
             )
         )
 
@@ -931,6 +954,7 @@ def _normalize_rules(
         normalized_composite_config: CompositeRuleConfig | None = None
         normalized_key_check_mode: DualCompositeKeyCheckMode | None = None
         normalized_dual_comparisons: list[DualCompositeComparison] = []
+        normalized_pipeline_config: MultiCompositePipelineConfig | None = None
 
         if variable_kind == "single" and rule_type == "composite_condition_check":
             raise ValueError(
@@ -940,7 +964,15 @@ def _normalize_rules(
             raise ValueError(
                 f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存双组合变量比对。"
             )
-        if variable_kind == "composite" and rule_type not in {"composite_condition_check", "dual_composite_compare"}:
+        if variable_kind == "single" and rule_type == "multi_composite_pipeline_check":
+            raise ValueError(
+                f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存多组合变量串行校验。"
+            )
+        if variable_kind == "composite" and rule_type not in {
+            "composite_condition_check",
+            "dual_composite_compare",
+            "multi_composite_pipeline_check",
+        }:
             raise ValueError(
                 f"???? '{rule_id}' ???????? '{target_variable_tag}'???????????????"
             )
@@ -1045,6 +1077,13 @@ def _normalize_rules(
                 comparisons=rule.comparisons,
                 variable_map=variable_map,
             )
+        elif rule_type == "multi_composite_pipeline_check":
+            normalized_pipeline_config = _normalize_multi_composite_pipeline_config(
+                rule_id=rule_id,
+                target_variable_tag=target_variable_tag,
+                pipeline_config=rule.pipeline_config,
+                variable_map=variable_map,
+            )
 
         normalized_rules.append(
             FixedRuleDefinition(
@@ -1063,6 +1102,7 @@ def _normalize_rules(
                 composite_config=normalized_composite_config,
                 key_check_mode=normalized_key_check_mode,
                 comparisons=normalized_dual_comparisons,
+                pipeline_config=normalized_pipeline_config,
             )
         )
         seen_rule_ids.add(rule_id)
@@ -1131,6 +1171,81 @@ def _normalize_composite_rule_config(
         global_filters=global_filters,
         branches=normalized_branches,
     )
+
+
+def _normalize_multi_composite_pipeline_config(
+    *,
+    rule_id: str,
+    target_variable_tag: str,
+    pipeline_config: MultiCompositePipelineConfig | None,
+    variable_map: dict[str, VariableTag],
+) -> MultiCompositePipelineConfig:
+    """校验并规范多组合变量串行校验配置。"""
+    if pipeline_config is None:
+        raise ValueError(f"规则 '{rule_id}' 缺少 pipeline_config。")
+    if not pipeline_config.nodes:
+        raise ValueError(f"规则 '{rule_id}' 至少需要一个组合变量节点。")
+
+    normalized_nodes: list[MultiCompositePipelineNode] = []
+    seen_node_ids: set[str] = set()
+
+    for node_index, node in enumerate(pipeline_config.nodes, start=1):
+        node_id = node.node_id.strip()
+        variable_tag = (node.variable_tag or "").strip()
+        if not node_id:
+            raise ValueError(f"规则 '{rule_id}' 的节点 {node_index} 缺少 node_id。")
+        if node_id in seen_node_ids:
+            raise ValueError(
+                f"规则 '{rule_id}' 的节点存在重复 node_id '{node_id}'。"
+            )
+        if not variable_tag:
+            raise ValueError(f"规则 '{rule_id}' 的节点 {node_index} 缺少 variable_tag。")
+        if variable_tag not in variable_map:
+            raise ValueError(
+                f"规则 '{rule_id}' 的节点 {node_index} 引用了不存在的组合变量 '{variable_tag}'。"
+            )
+
+        variable = variable_map[variable_tag]
+        if (variable.variable_kind or "single") != "composite":
+            raise ValueError(
+                f"规则 '{rule_id}' 的节点 {node_index} 引用了单变量 '{variable_tag}'，"
+                "多组合变量串行校验仅支持组合变量。"
+            )
+
+        available_fields = _collect_composite_available_fields(variable)
+        filters = _normalize_composite_conditions(
+            rule_id=rule_id,
+            conditions=node.filters,
+            section_label=f"节点 {node_index} 的前置过滤",
+            available_fields=available_fields,
+            allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+        )
+        assertions = _normalize_composite_conditions(
+            rule_id=rule_id,
+            conditions=node.assertions,
+            section_label=f"节点 {node_index} 的最终判定",
+            available_fields=available_fields,
+            allowed_operators=SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS,
+        )
+        if not assertions:
+            raise ValueError(f"规则 '{rule_id}' 的节点 {node_index} 至少需要一条最终判定。")
+
+        normalized_nodes.append(
+            MultiCompositePipelineNode(
+                node_id=node_id,
+                variable_tag=variable_tag,
+                filters=filters,
+                assertions=assertions,
+            )
+        )
+        seen_node_ids.add(node_id)
+
+    if normalized_nodes[0].variable_tag != target_variable_tag:
+        raise ValueError(
+            f"规则 '{rule_id}' 的 target_variable_tag 必须与首个节点变量保持一致。"
+        )
+
+    return MultiCompositePipelineConfig(nodes=normalized_nodes)
 
 
 def _normalize_dual_composite_rule(
@@ -1724,6 +1839,15 @@ def _build_fixed_rule_params(
                 for comparison in rule.comparisons
             ],
             "rule_name": rule.rule_name,
+        }
+
+    if rule.rule_type == "multi_composite_pipeline_check":
+        return {
+            "target_tag": target_variable.tag,
+            "rule_name": rule.rule_name,
+            "pipeline_config": rule.pipeline_config.model_dump(mode="json", exclude_none=True)
+            if rule.pipeline_config
+            else None,
         }
 
     location = f"{target_variable.sheet} -> {target_variable.column}"

@@ -9,6 +9,9 @@ import type {
   CompositeRuleConfig,
   FixedRuleDefinition,
   FixedRuleGroup,
+  MultiCompositePipelineConfig,
+  MultiCompositePipelineNode,
+  PipelineAssertionOperator,
 } from '../types/fixedRules'
 import type { VariableTag } from '../types/workbench'
 
@@ -52,6 +55,21 @@ export function isCompositeRegexOperator(
   return value === 'regex'
 }
 
+function isPipelineAssertionOperator(
+  value: string | undefined,
+): value is PipelineAssertionOperator {
+  return (
+    value === 'eq' ||
+    value === 'ne' ||
+    value === 'gt' ||
+    value === 'lt' ||
+    value === 'not_null' ||
+    value === 'regex' ||
+    value === 'unique' ||
+    value === 'duplicate_required'
+  )
+}
+
 export function isSingleVariable(variable: VariableTag | undefined | null): variable is VariableTag {
   return variable != null && (variable.variable_kind ?? 'single') === 'single'
 }
@@ -66,6 +84,10 @@ function createConditionId(): string {
 
 function createBranchId(): string {
   return createEntityId('branch')
+}
+
+function createNodeId(): string {
+  return createEntityId('node')
 }
 
 function preserveNonBlankIdentifier(value: string | undefined): string {
@@ -128,6 +150,17 @@ export function normalizeCompositeBranch(branch: CompositeBranch): CompositeBran
   }
 }
 
+export function normalizeMultiCompositePipelineNode(
+  node: MultiCompositePipelineNode,
+): MultiCompositePipelineNode {
+  return {
+    node_id: node.node_id.trim() || createNodeId(),
+    variable_tag: preserveNonBlankIdentifier(node.variable_tag),
+    filters: node.filters.map(normalizeCompositeCondition),
+    assertions: node.assertions.map(normalizeCompositeCondition),
+  }
+}
+
 export function normalizeCompositeConfig(
   config: CompositeRuleConfig | undefined,
 ): CompositeRuleConfig | undefined {
@@ -138,6 +171,18 @@ export function normalizeCompositeConfig(
   return {
     global_filters: config.global_filters.map(normalizeCompositeCondition),
     branches: config.branches.map(normalizeCompositeBranch),
+  }
+}
+
+export function normalizeMultiCompositePipelineConfig(
+  config: MultiCompositePipelineConfig | undefined,
+): MultiCompositePipelineConfig | undefined {
+  if (!config) {
+    return undefined
+  }
+
+  return {
+    nodes: config.nodes.map(normalizeMultiCompositePipelineNode),
   }
 }
 
@@ -201,6 +246,45 @@ export function isValidCompositeConfig(config: CompositeRuleConfig | undefined):
   )
 }
 
+function isValidPipelineNode(node: MultiCompositePipelineNode): boolean {
+  if (!node.node_id.trim() || !node.variable_tag.trim()) {
+    return false
+  }
+
+  if (!node.filters.every((condition) => isValidCompositeCondition(condition, 'filter'))) {
+    return false
+  }
+
+  if (!node.assertions.length) {
+    return false
+  }
+
+  return node.assertions.every(
+    (condition) =>
+      isValidCompositeCondition(condition, 'assertion') &&
+      isPipelineAssertionOperator(condition.operator),
+  )
+}
+
+export function isValidMultiCompositePipelineConfig(
+  config: MultiCompositePipelineConfig | undefined,
+  variableMap?: Map<string, VariableTag>,
+): boolean {
+  if (!config?.nodes.length) {
+    return false
+  }
+
+  return config.nodes.every((node) => {
+    if (!isValidPipelineNode(node)) {
+      return false
+    }
+    if (!variableMap) {
+      return true
+    }
+    return isCompositeVariable(variableMap.get(node.variable_tag.trim()))
+  })
+}
+
 export function pruneRulesByRemovedTags(
   rules: FixedRuleDefinition[],
   removedTags: Set<string>,
@@ -212,7 +296,10 @@ export function pruneRulesByRemovedTags(
   return rules.filter(
     (rule) =>
       !removedTags.has(rule.target_variable_tag) &&
-      !removedTags.has(rule.reference_variable_tag?.trim() ?? ''),
+      !removedTags.has(rule.reference_variable_tag?.trim() ?? '') &&
+      !(rule.pipeline_config?.nodes ?? []).some((node) =>
+        removedTags.has(node.variable_tag.trim()),
+      ),
   )
 }
 

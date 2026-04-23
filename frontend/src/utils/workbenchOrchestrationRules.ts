@@ -60,6 +60,20 @@ export function orchestrationRulesToValidationRules(
       }
     }
 
+    if (rule.rule_type === 'multi_composite_pipeline_check') {
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'multi_composite_pipeline_check',
+        params: {
+          target_tag: variable.tag,
+          rule_name: rule.rule_name,
+          pipeline_config: rule.pipeline_config
+            ? JSON.parse(JSON.stringify(rule.pipeline_config))
+            : undefined,
+        },
+      }
+    }
+
     if (rule.rule_type === 'fixed_value_compare') {
       return {
         rule_id: rule.rule_id,

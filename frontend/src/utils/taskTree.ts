@@ -293,6 +293,35 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
     }
   }
 
+  if (rule.rule_type === 'multi_composite_pipeline_check') {
+    const targetTag = typeof rule.params.target_tag === 'string' ? rule.params.target_tag.trim() : ''
+    const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
+    const pipelineConfig = rule.params.pipeline_config
+
+    if (!targetTag) {
+      throw new Error('规则 "multi_composite_pipeline_check" 缺少目标变量。')
+    }
+    if (!availableTags.has(targetTag)) {
+      throw new Error(`规则 "multi_composite_pipeline_check" 引用了不存在的变量 "${targetTag}"。`)
+    }
+    if (!ruleName) {
+      throw new Error('规则 "multi_composite_pipeline_check" 缺少 rule_name。')
+    }
+    if (pipelineConfig == null || typeof pipelineConfig !== 'object') {
+      throw new Error('规则 "multi_composite_pipeline_check" 缺少 pipeline_config。')
+    }
+
+    return {
+      rule_id: rule.rule_id,
+      rule_type: rule.rule_type,
+      params: {
+        target_tag: targetTag,
+        rule_name: ruleName,
+        pipeline_config: pipelineConfig as Record<string, unknown>,
+      },
+    }
+  }
+
   if (rule.rule_type === 'cross_table_mapping') {
     const dictTag = typeof rule.params.dict_tag === 'string' ? rule.params.dict_tag.trim() : ''
     const targetTag =

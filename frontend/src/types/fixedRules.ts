@@ -13,6 +13,12 @@ export type CompositeAssertionOperator =
   | 'unique'
   | 'duplicate_required'
 export type CompositeConditionOperator = CompositeFilterOperator | CompositeAssertionOperator
+export type PipelineAssertionOperator =
+  | FixedRuleOperator
+  | 'not_null'
+  | 'regex'
+  | 'unique'
+  | 'duplicate_required'
 export type CompositeValueSource = 'literal' | 'field'
 export type DualCompositeKeyCheckMode = 'baseline_only' | 'bidirectional'
 export type FixedRuleType =
@@ -24,6 +30,7 @@ export type FixedRuleType =
   | 'cross_table_mapping'
   | 'composite_condition_check'
   | 'dual_composite_compare'
+  | 'multi_composite_pipeline_check'
 export type FixedRuleSelection =
   | FixedRuleOperator
   | 'regex_check'
@@ -33,6 +40,7 @@ export type FixedRuleSelection =
   | 'in'
   | 'composite_condition_check'
   | 'dual_composite_compare'
+  | 'multi_composite_pipeline_check'
 export type SequenceDirection = 'asc' | 'desc'
 export type SequenceStartMode = 'auto' | 'manual'
 
@@ -63,6 +71,17 @@ export interface DualCompositeComparison {
   right_field: string
 }
 
+export interface MultiCompositePipelineNode {
+  node_id: string
+  variable_tag: string
+  filters: CompositeCondition[]
+  assertions: CompositeCondition[]
+}
+
+export interface MultiCompositePipelineConfig {
+  nodes: MultiCompositePipelineNode[]
+}
+
 export interface FixedRuleGroup {
   group_id: string
   group_name: string
@@ -85,6 +104,7 @@ export interface FixedRuleDefinition {
   composite_config?: CompositeRuleConfig
   key_check_mode?: DualCompositeKeyCheckMode
   comparisons?: DualCompositeComparison[]
+  pipeline_config?: MultiCompositePipelineConfig
 }
 
 export interface FixedRulesConfig {

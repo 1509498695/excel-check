@@ -18,6 +18,7 @@ FixedRuleType = Literal[
     "cross_table_mapping",
     "composite_condition_check",
     "dual_composite_compare",
+    "multi_composite_pipeline_check",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
 SequenceDirection = Literal["asc", "desc"]
@@ -103,6 +104,25 @@ class CompositeRuleConfig(BaseModel):
     branches: list[CompositeBranch] = Field(default_factory=list)
 
 
+class MultiCompositePipelineNode(BaseModel):
+    """描述多组合变量串行校验中的单个变量节点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    variable_tag: str
+    filters: list[CompositeCondition] = Field(default_factory=list)
+    assertions: list[CompositeCondition] = Field(default_factory=list)
+
+
+class MultiCompositePipelineConfig(BaseModel):
+    """描述多组合变量串行校验的完整节点队列。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[MultiCompositePipelineNode] = Field(default_factory=list)
+
+
 class DualCompositeComparison(BaseModel):
     """描述双组合变量比对中的单条字段比较规则。"""
 
@@ -135,6 +155,7 @@ class FixedRuleDefinition(BaseModel):
     composite_config: CompositeRuleConfig | None = None
     key_check_mode: DualCompositeKeyCheckMode | None = None
     comparisons: list[DualCompositeComparison] = Field(default_factory=list)
+    pipeline_config: MultiCompositePipelineConfig | None = None
 
 
 class FixedRulesConfigIssue(BaseModel):

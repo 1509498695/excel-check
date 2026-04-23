@@ -10,8 +10,10 @@ import pandas as pd
 from backend.app.api.fixed_rules_schemas import (
     CompositeBranch,
     CompositeCondition,
-    DualCompositeComparison,
     CompositeRuleConfig,
+    DualCompositeComparison,
+    MultiCompositePipelineConfig,
+    MultiCompositePipelineNode,
 )
 from backend.app.api.schemas import ValidationRule, VariableTag
 from backend.app.rules.domain.operators import (
@@ -32,6 +34,7 @@ from backend.app.rules.domain.value import (
 )
 from backend.app.rules.engine_core import RuleExecutionContext, register_rule
 from backend.app.rules.infrastructure.tag_extractor import (
+    by_pipeline_node_tags,
     by_reference_and_target_tag,
     by_target_tag,
 )
@@ -174,6 +177,23 @@ def _get_dual_composite_comparisons(rule: ValidationRule) -> list[DualCompositeC
                 f"Rule '{rule.rule_type}' provides invalid comparison config: {exc}"
             ) from exc
     return comparisons
+
+
+def _get_multi_composite_pipeline_config(
+    rule: ValidationRule,
+) -> MultiCompositePipelineConfig:
+    """读取并校验多组合变量串行校验规则配置。"""
+    config_payload = rule.params.get("pipeline_config")
+    if not isinstance(config_payload, dict):
+        raise ValueError(
+            f"Rule '{rule.rule_type}' requires params.pipeline_config."
+        )
+    try:
+        return MultiCompositePipelineConfig.model_validate(config_payload)
+    except Exception as exc:  # pragma: no cover - 非法配置由接口层先挡一层
+        raise ValueError(
+            f"Rule '{rule.rule_type}' provides invalid pipeline_config: {exc}"
+        ) from exc
 
 
 def _resolve_condition_expected_value(
@@ -493,6 +513,66 @@ def _evaluate_composite_branch_assertions(
     return abnormal_results
 
 
+def _evaluate_pipeline_node_assertions(
+    *,
+    variable: VariableTag,
+    node_title: str,
+    rule_name: str,
+    frame: pd.DataFrame,
+    assertions: list[CompositeCondition],
+) -> list[dict[str, Any]]:
+    """执行多组合变量串行校验单个节点上的全部最终判定。"""
+    abnormal_results: list[dict[str, Any]] = []
+
+    for condition in assertions:
+        if condition.operator in COMPARE_OPERATORS or condition.operator == "not_null":
+            abnormal_results.extend(
+                _evaluate_row_assertion(
+                    variable=variable,
+                    branch_title=node_title,
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
+        elif condition.operator == "unique":
+            abnormal_results.extend(
+                _evaluate_unique_assertion(
+                    variable=variable,
+                    branch_title=node_title,
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
+        elif condition.operator == "duplicate_required":
+            abnormal_results.extend(
+                _evaluate_duplicate_required_assertion(
+                    variable=variable,
+                    branch_title=node_title,
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
+        elif condition.operator == "regex":
+            abnormal_results.extend(
+                _evaluate_regex_assertion(
+                    variable=variable,
+                    branch_title=node_title,
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
+        else:  # pragma: no cover - 接口层与 service 已做校验
+            raise ValueError(
+                f"Unsupported pipeline assertion operator '{condition.operator}'."
+            )
+
+    return abnormal_results
+
+
 @register_rule("regex_check", dependent_tags=by_target_tag)
 def check_regex_check(
     rule: ValidationRule,
@@ -759,6 +839,39 @@ def check_composite_condition_check(
         )
 
     return abnormal_results
+
+
+@register_rule("multi_composite_pipeline_check", dependent_tags=by_pipeline_node_tags)
+def check_multi_composite_pipeline_check(
+    rule: ValidationRule,
+    context: RuleExecutionContext,
+) -> list[dict[str, Any]]:
+    """按节点顺序执行多组合变量串行校验，节点失败时短路后续节点。"""
+    rule_name = _get_fixed_rule_param(rule, "rule_name")
+    pipeline_config = _get_multi_composite_pipeline_config(rule)
+
+    for node_index, node in enumerate(pipeline_config.nodes, start=1):
+        variable, frame = _get_composite_variable_frame(
+            context,
+            node.variable_tag,
+            rule.rule_type,
+        )
+        filtered_frame = _apply_composite_filters(frame, variable, node.filters)
+        if filtered_frame.empty:
+            continue
+
+        node_title = f"节点 {node_index}"
+        node_abnormal_results = _evaluate_pipeline_node_assertions(
+            variable=variable,
+            node_title=node_title,
+            rule_name=rule_name,
+            frame=filtered_frame,
+            assertions=node.assertions,
+        )
+        if node_abnormal_results:
+            return node_abnormal_results
+
+    return []
 
 
 @register_rule("dual_composite_compare", dependent_tags=by_reference_and_target_tag)

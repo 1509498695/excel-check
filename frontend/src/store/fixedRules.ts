@@ -34,9 +34,11 @@ import {
   createEntityId,
   ensureDefaultGroup,
   isCompositeVariable,
+  isValidMultiCompositePipelineConfig,
   isSingleVariable,
   isValidCompositeConfig,
   normalizeCompositeConfig,
+  normalizeMultiCompositePipelineConfig,
   normalizeExpectedValue,
   pruneRulesByRemovedTags,
   RULE_ORCHESTRATION_PAGE_SIZE,
@@ -303,7 +305,11 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           }
 
           if (isSingleVariable(variable)) {
-            if (rule.rule_type === 'composite_condition_check' || rule.rule_type === 'dual_composite_compare') {
+            if (
+              rule.rule_type === 'composite_condition_check' ||
+              rule.rule_type === 'dual_composite_compare' ||
+              rule.rule_type === 'multi_composite_pipeline_check'
+            ) {
               return true
             }
 
@@ -368,6 +374,9 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           }
           if (rule.rule_type === 'dual_composite_compare') {
             return !isValidDualCompositeRule(rule, variableMap)
+          }
+          if (rule.rule_type === 'multi_composite_pipeline_check') {
+            return !isValidMultiCompositePipelineConfig(rule.pipeline_config, variableMap)
           }
           return true
         })
@@ -896,6 +905,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         rule.rule_type === 'composite_condition_check'
           ? normalizeCompositeConfig(rule.composite_config)
           : undefined
+      const normalizedPipelineConfig =
+        rule.rule_type === 'multi_composite_pipeline_check'
+          ? normalizeMultiCompositePipelineConfig(rule.pipeline_config)
+          : undefined
       const variableMap = new Map(this.config.variables.map((variable) => [variable.tag, variable] as const))
       const targetVariable = variableMap.get(rule.target_variable_tag.trim())
       const referenceVariable =
@@ -939,6 +952,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
             ? rule.sequence_start_value?.trim() || undefined
             : undefined,
         composite_config: normalizedCompositeConfig,
+        pipeline_config: normalizedPipelineConfig,
         key_check_mode:
           rule.rule_type === 'dual_composite_compare'
             ? rule.key_check_mode ?? 'baseline_only'
