@@ -36,6 +36,14 @@ import {
   UNGROUPED_GROUP,
 } from '../utils/ruleOrchestrationModel'
 import { buildTaskTreePayload } from '../utils/taskTree'
+import {
+  extractSourceBasename,
+  getSourceLocator,
+  isAffectedVariable,
+  isLocalFileSource,
+  joinDirectoryAndBasename,
+  normalizeReplacementPreset,
+} from '../utils/sourcePathReplacement'
 import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
@@ -61,6 +69,9 @@ interface WorkbenchState {
   preferredSourceId: string | null
   sourceMetadataMap: Record<string, SourceMetadata>
   variablePreviewMap: Record<string, VariablePreviewData>
+  sourceIssues: Record<string, string>
+  pathReplacementPresets: string[]
+  selectedPathReplacementPreset: string | null
 }
 
 function createWorkbenchDemoRules(): FixedRuleDefinition[] {
@@ -118,6 +129,24 @@ function isValidSequenceStartValue(value: string | undefined): boolean {
   return Number.isFinite(Number(normalized))
 }
 
+function resolveFieldAgainstAvailable(
+  requestedField: string | undefined,
+  availableFields: string[],
+): string | null {
+  const rawField = requestedField ?? ''
+  if (availableFields.includes(rawField)) {
+    return rawField
+  }
+
+  const normalizedField = rawField.trim()
+  if (!normalizedField) {
+    return null
+  }
+
+  const matchedFields = availableFields.filter((field) => field.trim() === normalizedField)
+  return matchedFields.length === 1 ? matchedFields[0] : null
+}
+
 function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<string, VariableTag>): boolean {
   const targetTag = rule.target_variable_tag.trim()
   const referenceTag = rule.reference_variable_tag?.trim() ?? ''
@@ -144,10 +173,10 @@ function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<st
     if (!comparison.comparison_id?.trim()) {
       return false
     }
-    if (!comparison.left_field?.trim() || !leftFields.has(comparison.left_field.trim())) {
+    if (!resolveFieldAgainstAvailable(comparison.left_field, [...leftFields])) {
       return false
     }
-    if (!comparison.right_field?.trim() || !rightFields.has(comparison.right_field.trim())) {
+    if (!resolveFieldAgainstAvailable(comparison.right_field, [...rightFields])) {
       return false
     }
     return ['eq', 'ne', 'gt', 'lt', 'not_null'].includes(comparison.operator)
@@ -177,6 +206,9 @@ export const useWorkbenchStore = defineStore('workbench', {
     preferredSourceId: null,
     sourceMetadataMap: {},
     variablePreviewMap: {},
+    sourceIssues: {},
+    pathReplacementPresets: [],
+    selectedPathReplacementPreset: null,
   }),
 
   getters: {
@@ -352,8 +384,14 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     canExecuteOrchestration(): boolean {
       return (
-        this.orchestrationRules.length > 0 && this.invalidOrchestrationRuleIds.length === 0
+        this.orchestrationRules.length > 0 &&
+        this.invalidOrchestrationRuleIds.length === 0 &&
+        !this.hasBlockingSourceIssues
       )
+    },
+
+    hasBlockingSourceIssues(state): boolean {
+      return Object.keys(state.sourceIssues).length > 0
     },
 
     singleVariables(state): VariableTag[] {
@@ -374,6 +412,15 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.pageError = ''
     },
 
+    clearExecutionResult(): void {
+      this.executionMeta = null
+      this.abnormalResults = []
+      this.abnormalResultTotal = 0
+      this.resultId = null
+      this.resultCurrentPage = 1
+      this.isResultPageLoading = false
+    },
+
     setActiveTag(tag: string | null): void {
       this.activeTag = tag
     },
@@ -384,6 +431,25 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     clearVariablePreview(tag: string): void {
       delete this.variablePreviewMap[tag]
+    },
+
+    setSelectedPathReplacementPreset(path: string | null): void {
+      this.selectedPathReplacementPreset = path ? normalizeReplacementPreset(path) : null
+    },
+
+    addPathReplacementPreset(path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path)
+      if (!normalizedPath) {
+        return
+      }
+
+      const presetMap = new Map(
+        this.pathReplacementPresets.map((preset) => [preset.toLowerCase(), preset] as const),
+      )
+      if (!presetMap.has(normalizedPath.toLowerCase())) {
+        presetMap.set(normalizedPath.toLowerCase(), normalizedPath)
+        this.pathReplacementPresets = [...presetMap.values()]
+      }
     },
 
     invalidateSourceArtifacts(sourceIds: string[]): void {
@@ -483,6 +549,10 @@ export const useWorkbenchStore = defineStore('workbench', {
         affectedSourceIds.add(originalId)
       }
 
+      affectedSourceIds.forEach((sourceId) => {
+        delete this.sourceIssues[sourceId]
+      })
+
       if (originalId && originalId !== source.id) {
         const index = this.sources.findIndex((item) => item.id === originalId)
         if (index >= 0) {
@@ -521,6 +591,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.variables = this.variables.filter((variable) => variable.source_id !== sourceId)
       this.orchestrationRules = pruneRulesByRemovedTags(this.orchestrationRules, removedTags)
       this.invalidateSourceArtifacts([sourceId])
+      delete this.sourceIssues[sourceId]
 
       const pageCount = Math.max(
         1,
@@ -710,6 +781,20 @@ export const useWorkbenchStore = defineStore('workbench', {
         rule.rule_type === 'composite_condition_check'
           ? normalizeCompositeConfig(rule.composite_config)
           : undefined
+      const variableMap = new Map(this.variables.map((variable) => [variable.tag, variable] as const))
+      const targetVariable = variableMap.get(rule.target_variable_tag.trim())
+      const referenceVariable =
+        rule.rule_type === 'dual_composite_compare'
+          ? variableMap.get(rule.reference_variable_tag?.trim() ?? '')
+          : undefined
+      const targetFields = [
+        '__key__',
+        ...((targetVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
+      ]
+      const referenceFields = [
+        '__key__',
+        ...((referenceVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
+      ]
 
       const nextRule: FixedRuleDefinition = {
         rule_id: rule.rule_id ?? createEntityId('wb-rule'),
@@ -747,9 +832,13 @@ export const useWorkbenchStore = defineStore('workbench', {
           rule.rule_type === 'dual_composite_compare'
             ? (rule.comparisons ?? []).map((comparison) => ({
                 comparison_id: comparison.comparison_id,
-                left_field: comparison.left_field.trim(),
+                left_field:
+                  resolveFieldAgainstAvailable(comparison.left_field, targetFields) ??
+                  comparison.left_field.trim(),
                 operator: comparison.operator,
-                right_field: comparison.right_field.trim(),
+                right_field:
+                  resolveFieldAgainstAvailable(comparison.right_field, referenceFields) ??
+                  comparison.right_field.trim(),
               }))
             : [],
       }
@@ -813,6 +902,10 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.pageError = '请先在步骤 3 添加至少一条规则。'
         return
       }
+      if (this.hasBlockingSourceIssues) {
+        this.pageError = '当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。'
+        throw new Error(this.pageError)
+      }
       if (this.invalidOrchestrationRuleIds.length) {
         this.pageError = '存在未配置完整的规则，请按步骤 3 顶部提示修复后再执行。'
         return
@@ -872,12 +965,173 @@ export const useWorkbenchStore = defineStore('workbench', {
       }
     },
 
+    async saveConfigNow(): Promise<void> {
+      await saveWorkbenchConfig(this._getAutoSavePayload())
+    },
+
+    async replaceSourceBasePath(baseDirectory: string): Promise<{
+      updatedCount: number
+      skippedCount: number
+      failedCount: number
+      affectedSourceIds: string[]
+    }> {
+      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory)
+      const candidateSources: Array<{
+        sourceId: string
+        source: DataSource
+        nextSource: DataSource
+        nextPath: string
+      }> = []
+      const affectedSourceIds = new Set<string>()
+      let updatedCount = 0
+      let skippedCount = 0
+
+      this.sources.slice().forEach((source) => {
+        if (!isLocalFileSource(source)) {
+          skippedCount += 1
+          return
+        }
+
+        const currentLocator = getSourceLocator(source)
+        const basename = extractSourceBasename(currentLocator)
+        if (!basename) {
+          skippedCount += 1
+          return
+        }
+
+        const nextPath = joinDirectoryAndBasename(normalizedBaseDirectory, basename)
+        candidateSources.push({
+          sourceId: source.id,
+          source,
+          nextSource: {
+            ...source,
+            path: nextPath,
+            pathOrUrl: nextPath,
+          },
+          nextPath,
+        })
+      })
+
+      if (!candidateSources.length) {
+        return {
+          updatedCount,
+          skippedCount,
+          failedCount: 0,
+          affectedSourceIds: [],
+        }
+      }
+
+      const validationFailures: string[] = []
+      const metadataValidatedSourceIds = new Set<string>()
+      for (const candidate of candidateSources) {
+        try {
+          await fetchSourceMetadata(candidate.nextSource)
+          metadataValidatedSourceIds.add(candidate.sourceId)
+        } catch (error) {
+          const reason =
+            error instanceof Error ? error.message : '读取数据源元数据失败。'
+          validationFailures.push(
+            `- ${candidate.sourceId} -> ${candidate.nextPath}：${reason}`,
+          )
+        }
+      }
+
+      for (const candidate of candidateSources) {
+        if (!metadataValidatedSourceIds.has(candidate.sourceId)) {
+          continue
+        }
+        const affectedVariables = this.variables.filter(
+          (variable) => variable.source_id === candidate.sourceId,
+        )
+
+        for (const variable of affectedVariables) {
+          const isComposite = (variable.variable_kind ?? 'single') === 'composite'
+          try {
+            if (isComposite) {
+              await fetchCompositePreview({
+                source: candidate.nextSource,
+                sheet: variable.sheet,
+                columns: variable.columns ?? [],
+                key_column: variable.key_column ?? '',
+                append_index_to_key: variable.append_index_to_key ?? false,
+              })
+            } else {
+              await fetchColumnPreview({
+                source: candidate.nextSource,
+                sheet: variable.sheet,
+                column: variable.column ?? '',
+              })
+            }
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : '变量预览校验失败。'
+            validationFailures.push(
+              `- ${candidate.sourceId} / ${variable.tag}：${reason}`,
+            )
+          }
+        }
+      }
+
+      if (validationFailures.length) {
+        throw new Error(
+          [
+            '以下数据源路径替换失败，本次未生效：',
+            ...validationFailures,
+          ].join('\n'),
+        )
+      }
+
+      candidateSources.forEach((candidate) => {
+        this.upsertSource(candidate.nextSource, candidate.sourceId)
+        delete this.sourceIssues[candidate.sourceId]
+        affectedSourceIds.add(candidate.sourceId)
+        updatedCount += 1
+      })
+
+      this.addPathReplacementPreset(normalizedBaseDirectory)
+      this.setSelectedPathReplacementPreset(normalizedBaseDirectory)
+      await this.saveConfigNow()
+
+      let failedCount = 0
+      for (const sourceId of affectedSourceIds) {
+        try {
+          await this.loadSourceMetadata(sourceId)
+          delete this.sourceIssues[sourceId]
+        } catch (error) {
+          failedCount += 1
+          this.sourceIssues[sourceId] =
+            error instanceof Error ? error.message : '刷新数据源元数据失败。'
+        }
+      }
+
+      this.clearExecutionResult()
+      this.clearPageError()
+
+      const activeVariable = this.variables.find((variable) => variable.tag === this.activeTag)
+      if (isAffectedVariable(activeVariable, affectedSourceIds)) {
+        try {
+          await this.loadVariablePreview(activeVariable, undefined, true)
+        } catch {
+          // 变量预览失败时保留数据源级提示即可，避免重复打断页面交互。
+        }
+      }
+
+      return {
+        updatedCount,
+        skippedCount,
+        failedCount,
+        affectedSourceIds: [...affectedSourceIds],
+      }
+    },
+
     _getAutoSavePayload(): Record<string, unknown> {
       return {
         sources: this.sources,
         variables: this.variables,
         ruleGroups: this.ruleGroups,
         orchestrationRules: this.orchestrationRules,
+        path_replacement_presets: this.pathReplacementPresets,
+        selected_path_replacement_preset: this.selectedPathReplacementPreset,
       }
     },
 
@@ -913,8 +1167,11 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.isResultPageLoading = false
         this.sourceMetadataMap = {}
         this.variablePreviewMap = {}
+        this.sourceIssues = {}
         this.activeTag = null
         this.preferredSourceId = null
+        this.pathReplacementPresets = []
+        this.selectedPathReplacementPreset = null
 
         if (data && typeof data === 'object') {
           if (Array.isArray(data.sources)) this.sources = data.sources as DataSource[]
@@ -923,6 +1180,21 @@ export const useWorkbenchStore = defineStore('workbench', {
             this.ruleGroups = data.ruleGroups as FixedRuleGroup[]
           if (Array.isArray(data.orchestrationRules))
             this.orchestrationRules = data.orchestrationRules as FixedRuleDefinition[]
+          const presetPayload =
+            (data as Record<string, unknown>).path_replacement_presets ??
+            (data as Record<string, unknown>).pathReplacementPresets
+          if (Array.isArray(presetPayload)) {
+            this.pathReplacementPresets = (presetPayload as unknown[])
+              .map((preset) => normalizeReplacementPreset(String(preset ?? '')))
+              .filter(Boolean)
+          }
+          const selectedPreset =
+            (data as Record<string, unknown>).selected_path_replacement_preset ??
+            (data as Record<string, unknown>).selectedPathReplacementPreset
+          this.selectedPathReplacementPreset =
+            typeof selectedPreset === 'string'
+              ? normalizeReplacementPreset(selectedPreset)
+              : null
         }
       } catch {
         /* 首次加载无数据正常 */

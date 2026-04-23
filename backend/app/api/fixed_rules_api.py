@@ -22,7 +22,6 @@ from backend.app.fixed_rules.service import (
     load_fixed_rules_config_with_issues,
     parse_raw_fixed_rules_config,
     run_saved_fixed_rules_svn_update,
-    save_fixed_rules_config,
     validate_and_normalize_fixed_rules_config,
 )
 from backend.app.result_store import (
@@ -82,7 +81,7 @@ async def put_fixed_rules_config(
     project_id = ctx.require_project_member()
 
     try:
-        config = validate_and_normalize_fixed_rules_config(payload)
+        config, config_issues = load_fixed_rules_config_with_issues(payload)
     except (FileNotFoundError, ValueError, ImportError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -92,11 +91,20 @@ async def put_fixed_rules_config(
         config.model_dump(mode="json", exclude_none=True),
     )
 
-    return {
+    response: dict[str, Any] = {
         "code": 200,
         "msg": "ok",
         "data": config.model_dump(mode="json", exclude_none=True),
     }
+    if config_issues:
+        response["meta"] = {
+            "config_issues": [
+                issue.model_dump(mode="json", exclude_none=True)
+                for issue in config_issues
+            ]
+        }
+
+    return response
 
 
 @router.post("/svn-update")

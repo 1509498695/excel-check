@@ -4,6 +4,17 @@ function trimValue(value?: string | null): string {
   return value?.trim() ?? ''
 }
 
+function requireNonBlankPreservedValue(
+  value: string | null | undefined,
+  errorMessage: string,
+): string {
+  const rawValue = value ?? ''
+  if (!rawValue.trim()) {
+    throw new Error(errorMessage)
+  }
+  return rawValue
+}
+
 function createCleanObject<T extends Record<string, unknown>>(value: T): T {
   const entries = Object.entries(value).filter(([, item]) => item !== undefined && item !== '')
   return Object.fromEntries(entries) as T
@@ -44,7 +55,7 @@ function normalizeSource(source: DataSource): DataSource {
 function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): VariableTag {
   const tag = trimValue(variable.tag)
   const sourceId = trimValue(variable.source_id)
-  const sheet = trimValue(variable.sheet)
+  const sheet = requireNonBlankPreservedValue(variable.sheet, `变量 "${tag}" 缺少 sheet。`)
   const variableKind = variable.variable_kind ?? 'single'
   const expectedType = variableKind === 'composite' ? 'json' : variable.expected_type ?? undefined
 
@@ -60,22 +71,17 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
     throw new Error(`变量 "${tag}" 引用了不存在的数据源 "${sourceId}"。`)
   }
 
-  if (!sheet) {
-    throw new Error(`变量 "${tag}" 缺少 sheet。`)
-  }
-
   if (variableKind === 'composite') {
     const columns = Array.isArray(variable.columns)
-      ? [...new Set(variable.columns.map((item) => trimValue(item)).filter(Boolean))]
+      ? [...new Set(variable.columns.filter((item): item is string => !!item && !!item.trim()))]
       : []
-    const keyColumn = trimValue(variable.key_column)
+    const keyColumn = requireNonBlankPreservedValue(
+      variable.key_column,
+      `组合变量 "${tag}" 缺少 key_column。`,
+    )
 
     if (columns.length < 2) {
       throw new Error(`组合变量 "${tag}" 至少需要选择 2 列。`)
-    }
-
-    if (!keyColumn) {
-      throw new Error(`组合变量 "${tag}" 缺少 key_column。`)
     }
 
     if (!columns.includes(keyColumn)) {
@@ -94,10 +100,7 @@ function normalizeVariable(variable: VariableTag, sourceIds: Set<string>): Varia
     })
   }
 
-  const column = trimValue(variable.column)
-  if (!column) {
-    throw new Error(`变量 "${tag}" 缺少 column。`)
-  }
+  const column = requireNonBlankPreservedValue(variable.column, `变量 "${tag}" 缺少 column。`)
 
   return createCleanObject({
     tag,

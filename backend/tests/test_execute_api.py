@@ -12,6 +12,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app.api import source_api
+from backend.app.api.schemas import DataSource, VariableTag
+from backend.app.loaders.local_reader import load_local_variables
 from backend.run import app
 
 
@@ -71,6 +73,20 @@ def _create_paginated_test_workbook(target_path: Path) -> Path:
             sheet_name="drops",
             index=False,
         )
+
+    return target_path
+
+
+def _create_whitespace_header_workbook(target_path: Path) -> Path:
+    """创建带尾部空格 Sheet/列名的 Excel，用于回归原始标识读取链路。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1001, 1002],
+                "STR_ABSwitch  ": ["on", "off"],
+                "DESC3": ["开", "关"],
+            }
+        ).to_excel(writer, sheet_name="Quest  ", index=False)
 
     return target_path
 
@@ -368,6 +384,28 @@ async def test_local_pick_returns_cancelled_when_user_closes_dialog(
     assert payload["code"] == 204
     assert payload["msg"] == "cancelled"
     assert payload["data"]["selected_path"] == ""
+
+
+@pytest.mark.anyio
+async def test_local_directory_validate_returns_normalized_absolute_directory(
+    tmp_path: Path,
+) -> None:
+    """验证本地目录校验接口会返回规范化后的绝对目录路径。"""
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/sources/local-directory-validate",
+            json={"directory_path": f" {tmp_path} "},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 200
+    assert payload["msg"] == "ok"
+    assert payload["data"]["directory_path"] == str(tmp_path.resolve())
 
 
 def test_show_local_file_dialog_returns_subprocess_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -695,6 +733,149 @@ async def test_composite_preview_reports_duplicate_keys_without_append_mode(
     assert payload["duplicate_keys_preview"] == ["list"]
     assert payload["mapping"] == {}
     assert payload["loaded_rows"] == 0
+
+
+@pytest.mark.anyio
+async def test_preview_endpoints_preserve_raw_sheet_and_column_names(
+    tmp_path: Path,
+) -> None:
+    """验证预览接口读取 Excel 时保留原始 Sheet 名和列名，不裁掉尾部空格。"""
+    workbook_path = _create_whitespace_header_workbook(tmp_path / "whitespace_headers.xlsx")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        column_response = await client.post(
+            "/api/v1/sources/column-preview",
+            json={
+                "source": {
+                    "id": "src_space",
+                    "type": "local_excel",
+                    "path": str(workbook_path),
+                },
+                "sheet": "Quest  ",
+                "column": "STR_ABSwitch  ",
+            },
+        )
+        composite_response = await client.post(
+            "/api/v1/sources/composite-preview",
+            json={
+                "source": {
+                    "id": "src_space",
+                    "type": "local_excel",
+                    "path": str(workbook_path),
+                },
+                "sheet": "Quest  ",
+                "columns": ["INT_ID", "STR_ABSwitch  ", "DESC3"],
+                "key_column": "INT_ID",
+            },
+        )
+
+    assert column_response.status_code == 200
+    column_payload = column_response.json()["data"]
+    assert column_payload["sheet"] == "Quest  "
+    assert column_payload["column"] == "STR_ABSwitch  "
+    assert column_payload["preview_rows"] == [
+        {"row_index": 2, "value": "on"},
+        {"row_index": 3, "value": "off"},
+    ]
+
+    assert composite_response.status_code == 200
+    composite_payload = composite_response.json()["data"]
+    assert composite_payload["sheet"] == "Quest  "
+    assert composite_payload["columns"] == ["INT_ID", "STR_ABSwitch  ", "DESC3"]
+    assert composite_payload["mapping"] == {
+        "1001": {"STR_ABSwitch  ": "on", "DESC3": "开"},
+        "1002": {"STR_ABSwitch  ": "off", "DESC3": "关"},
+    }
+
+
+@pytest.mark.anyio
+async def test_execute_engine_supports_trimmed_sheet_and_column_identifiers(
+    tmp_path: Path,
+) -> None:
+    """验证执行链路可兼容已被 trim 的 Sheet/列配置，并正确解析真实表头。"""
+    workbook_path = _create_whitespace_header_workbook(tmp_path / "trimmed_execute.xlsx")
+    payload = {
+        "sources": [
+            {
+                "id": "src_space",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[quest-switch]",
+                "source_id": "src_space",
+                "sheet": "Quest",
+                "column": "STR_ABSwitch",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "not_null",
+                "params": {"target_tags": ["[quest-switch]"]},
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    response_payload = response.json()
+    assert response_payload["meta"]["failed_sources"] == []
+    assert response_payload["meta"]["total_rows_scanned"] == 2
+    assert response_payload["data"]["abnormal_results"] == []
+
+
+def test_load_local_variables_preserves_raw_excel_identifiers(
+    tmp_path: Path,
+) -> None:
+    """验证执行链路加载变量时也保留原始 Sheet 名和列名。"""
+    workbook_path = _create_whitespace_header_workbook(tmp_path / "whitespace_execute.xlsx")
+
+    loaded_variables = load_local_variables(
+        [
+            DataSource(
+                id="src_space",
+                type="local_excel",
+                path=str(workbook_path),
+            )
+        ],
+        [
+            VariableTag(
+                tag="[quest-switch-single]",
+                source_id="src_space",
+                sheet="Quest  ",
+                variable_kind="single",
+                column="STR_ABSwitch  ",
+                expected_type="str",
+            ),
+            VariableTag(
+                tag="[quest-switch-composite]",
+                source_id="src_space",
+                sheet="Quest  ",
+                variable_kind="composite",
+                columns=["INT_ID", "STR_ABSwitch  ", "DESC3"],
+                key_column="INT_ID",
+                expected_type="json",
+            ),
+        ],
+    )
+
+    single_frame = loaded_variables["[quest-switch-single]"]
+    assert single_frame.columns.tolist() == ["STR_ABSwitch  ", "_row_index"]
+    assert single_frame["STR_ABSwitch  "].tolist() == ["on", "off"]
+
+    composite_frame = loaded_variables["[quest-switch-composite]"]
+    assert composite_frame.columns.tolist() == ["__key__", "STR_ABSwitch  ", "DESC3", "_row_index"]
+    assert composite_frame["__key__"].tolist() == ["1001", "1002"]
 
 
 @pytest.mark.anyio

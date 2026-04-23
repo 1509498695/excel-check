@@ -30,3 +30,21 @@ export interface VariablePoolStoreLike extends SourceManagementStoreLike {
   upsertVariable(variable: VariableTag, originalTag?: string): void
   removeVariable(tag: string): void
 }
+
+export interface SourcePathReplacementResult {
+  updatedCount: number
+  skippedCount: number
+  failedCount: number
+  affectedSourceIds: string[]
+}
+
+export interface SourcePathReplacementStoreLike extends SourceManagementStoreLike {
+  variables: VariableTag[]
+  activeTag: string | null
+  pathReplacementPresets: string[]
+  selectedPathReplacementPreset: string | null
+  saveConfigNow(): Promise<void>
+  setSelectedPathReplacementPreset(path: string | null): void
+  addPathReplacementPreset(path: string): void
+  replaceSourceBasePath(baseDirectory: string): Promise<SourcePathReplacementResult>
+}

@@ -95,6 +95,14 @@ export interface LocalPickResponse {
   }
 }
 
+export interface LocalDirectoryValidateResponse {
+  code: number
+  msg: string
+  data: {
+    directory_path: string
+  }
+}
+
 export interface SourceSheetMetadata {
   name: string
   columns: string[]

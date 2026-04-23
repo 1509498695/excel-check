@@ -94,6 +94,8 @@ export interface FixedRulesConfig {
   variables: VariableTag[]
   groups: FixedRuleGroup[]
   rules: FixedRuleDefinition[]
+  path_replacement_presets: string[]
+  selected_path_replacement_preset?: string | null
 }
 
 export interface FixedRulesConfigIssue {

@@ -42,6 +42,14 @@ import {
   RULE_ORCHESTRATION_PAGE_SIZE,
   UNGROUPED_GROUP,
 } from '../utils/ruleOrchestrationModel'
+import {
+  extractSourceBasename,
+  getSourceLocator,
+  isAffectedVariable,
+  isLocalFileSource,
+  joinDirectoryAndBasename,
+  normalizeReplacementPreset,
+} from '../utils/sourcePathReplacement'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
 const FIXED_RULES_PAGE_SIZE = RULE_ORCHESTRATION_PAGE_SIZE
@@ -75,12 +83,14 @@ interface FixedRulesState {
 
 function createDefaultConfig(): FixedRulesConfig {
   return {
-    version: 4,
+    version: 5,
     configured: false,
     sources: [],
     variables: [],
     groups: [{ ...UNGROUPED_GROUP }],
     rules: [],
+    path_replacement_presets: [],
+    selected_path_replacement_preset: null,
   }
 }
 
@@ -99,6 +109,24 @@ function isValidSequenceStartValue(value: string | undefined): boolean {
     return false
   }
   return Number.isFinite(Number(normalized))
+}
+
+function resolveFieldAgainstAvailable(
+  requestedField: string | undefined,
+  availableFields: string[],
+): string | null {
+  const rawField = requestedField ?? ''
+  if (availableFields.includes(rawField)) {
+    return rawField
+  }
+
+  const normalizedField = rawField.trim()
+  if (!normalizedField) {
+    return null
+  }
+
+  const matchedFields = availableFields.filter((field) => field.trim() === normalizedField)
+  return matchedFields.length === 1 ? matchedFields[0] : null
 }
 
 function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<string, VariableTag>): boolean {
@@ -127,10 +155,10 @@ function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<st
     if (!comparison.comparison_id?.trim()) {
       return false
     }
-    if (!comparison.left_field?.trim() || !leftFields.has(comparison.left_field.trim())) {
+    if (!resolveFieldAgainstAvailable(comparison.left_field, [...leftFields])) {
       return false
     }
-    if (!comparison.right_field?.trim() || !rightFields.has(comparison.right_field.trim())) {
+    if (!resolveFieldAgainstAvailable(comparison.right_field, [...rightFields])) {
       return false
     }
     return ['eq', 'ne', 'gt', 'lt', 'not_null'].includes(comparison.operator)
@@ -168,6 +196,14 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
   getters: {
     sources(state): DataSource[] {
       return state.config.sources
+    },
+
+    pathReplacementPresets(state): string[] {
+      return state.config.path_replacement_presets
+    },
+
+    selectedPathReplacementPreset(state): string | null {
+      return state.config.selected_path_replacement_preset ?? null
     },
 
     variables(state): VariableTag[] {
@@ -468,10 +504,27 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     },
 
     applyConfig(config: FixedRulesConfig): void {
+      const pathReplacementPresetMap = new Map<string, string>()
+      ;(config.path_replacement_presets ?? []).forEach((preset) => {
+        const normalizedPreset = normalizeReplacementPreset(preset)
+        if (normalizedPreset && !pathReplacementPresetMap.has(normalizedPreset.toLowerCase())) {
+          pathReplacementPresetMap.set(normalizedPreset.toLowerCase(), normalizedPreset)
+        }
+      })
+      const normalizedSelectedPreset = config.selected_path_replacement_preset
+        ? normalizeReplacementPreset(config.selected_path_replacement_preset)
+        : null
+
       this.config = {
         ...config,
-        version: 4,
+        version: 5,
         groups: ensureDefaultGroup(config.groups),
+        path_replacement_presets: [...pathReplacementPresetMap.values()],
+        selected_path_replacement_preset:
+          normalizedSelectedPreset &&
+          pathReplacementPresetMap.has(normalizedSelectedPreset.toLowerCase())
+            ? pathReplacementPresetMap.get(normalizedSelectedPreset.toLowerCase()) ?? null
+            : null,
       }
 
       if (!this.config.groups.some((group) => group.group_id === this.selectedGroupId)) {
@@ -567,7 +620,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         this.configIssues = response.meta?.config_issues ?? []
       } catch (error) {
         this.configIssues = []
-      this.pageError = error instanceof Error ? error.message : '读取项目校验配置失败。'
+        this.pageError = error instanceof Error ? error.message : '读取项目校验配置失败。'
         throw error
       } finally {
         this.isLoading = false
@@ -581,18 +634,22 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       try {
         const response = await saveFixedRulesConfig({
           ...this.config,
-          version: 4,
+          version: 5,
           groups: ensureDefaultGroup(this.config.groups),
         })
         this.applyConfig(response.data)
-        this.configIssues = []
+        this.configIssues = response.meta?.config_issues ?? []
         return response.data
       } catch (error) {
-      this.pageError = error instanceof Error ? error.message : '保存项目校验配置失败。'
+        this.pageError = error instanceof Error ? error.message : '保存项目校验配置失败。'
         throw error
       } finally {
         this.isSaving = false
       }
+    },
+
+    async saveConfigNow(): Promise<void> {
+      await this.saveConfig()
     },
 
     async executeConfig(selectedRuleIds?: string[]): Promise<void> {
@@ -600,6 +657,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       this.pageError = ''
 
       try {
+        if (this.hasBlockingConfigIssues) {
+          this.pageError = '当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。'
+          throw new Error(this.pageError)
+        }
         await this.saveConfig()
         const response = await executeFixedRules(
           {
@@ -782,10 +843,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         ...variable,
         tag: nextTag,
         source_id: variable.source_id.trim(),
-        sheet: variable.sheet.trim(),
-        column: variable.column?.trim(),
+        sheet: variable.sheet,
+        column: variable.column,
         columns: variable.columns ? [...variable.columns] : undefined,
-        key_column: variable.key_column?.trim(),
+        key_column: variable.key_column,
         append_index_to_key: variable.append_index_to_key ?? false,
       }
 
@@ -835,6 +896,20 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         rule.rule_type === 'composite_condition_check'
           ? normalizeCompositeConfig(rule.composite_config)
           : undefined
+      const variableMap = new Map(this.config.variables.map((variable) => [variable.tag, variable] as const))
+      const targetVariable = variableMap.get(rule.target_variable_tag.trim())
+      const referenceVariable =
+        rule.rule_type === 'dual_composite_compare'
+          ? variableMap.get(rule.reference_variable_tag?.trim() ?? '')
+          : undefined
+      const targetFields = [
+        '__key__',
+        ...((targetVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
+      ]
+      const referenceFields = [
+        '__key__',
+        ...((referenceVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
+      ]
 
       const nextRule: FixedRuleDefinition = {
         rule_id: rule.rule_id ?? createEntityId('fixed-rule'),
@@ -872,9 +947,13 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           rule.rule_type === 'dual_composite_compare'
             ? (rule.comparisons ?? []).map((comparison) => ({
                 comparison_id: comparison.comparison_id,
-                left_field: comparison.left_field.trim(),
+                left_field:
+                  resolveFieldAgainstAvailable(comparison.left_field, targetFields) ??
+                  comparison.left_field.trim(),
                 operator: comparison.operator,
-                right_field: comparison.right_field.trim(),
+                right_field:
+                  resolveFieldAgainstAvailable(comparison.right_field, referenceFields) ??
+                  comparison.right_field.trim(),
               }))
             : [],
       }
@@ -892,6 +971,177 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       const pageCount = Math.max(1, Math.ceil(this.currentGroupRuleTotal / FIXED_RULES_PAGE_SIZE))
       if (this.currentPage > pageCount) {
         this.currentPage = pageCount
+      }
+    },
+
+    setSelectedPathReplacementPreset(path: string | null): void {
+      this.config.selected_path_replacement_preset = path
+        ? normalizeReplacementPreset(path)
+        : null
+    },
+
+    addPathReplacementPreset(path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path)
+      if (!normalizedPath) {
+        return
+      }
+
+      const presetMap = new Map(
+        this.config.path_replacement_presets.map((preset) => [preset.toLowerCase(), preset] as const),
+      )
+      if (!presetMap.has(normalizedPath.toLowerCase())) {
+        presetMap.set(normalizedPath.toLowerCase(), normalizedPath)
+        this.config.path_replacement_presets = [...presetMap.values()]
+      }
+    },
+
+    async replaceSourceBasePath(baseDirectory: string): Promise<{
+      updatedCount: number
+      skippedCount: number
+      failedCount: number
+      affectedSourceIds: string[]
+    }> {
+      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory)
+      const candidateSources: Array<{
+        sourceId: string
+        source: DataSource
+        nextSource: DataSource
+        nextPath: string
+      }> = []
+      const affectedSourceIds = new Set<string>()
+      let updatedCount = 0
+      let skippedCount = 0
+
+      this.sources.slice().forEach((source) => {
+        if (!isLocalFileSource(source)) {
+          skippedCount += 1
+          return
+        }
+
+        const basename = extractSourceBasename(getSourceLocator(source))
+        if (!basename) {
+          skippedCount += 1
+          return
+        }
+
+        const nextPath = joinDirectoryAndBasename(normalizedBaseDirectory, basename)
+        candidateSources.push({
+          sourceId: source.id,
+          source,
+          nextSource: {
+            ...source,
+            path: nextPath,
+            pathOrUrl: nextPath,
+          },
+          nextPath,
+        })
+      })
+
+      if (!candidateSources.length) {
+        return {
+          updatedCount,
+          skippedCount,
+          failedCount: 0,
+          affectedSourceIds: [],
+        }
+      }
+
+      const validationFailures: string[] = []
+      const metadataValidatedSourceIds = new Set<string>()
+      for (const candidate of candidateSources) {
+        try {
+          await fetchSourceMetadata(candidate.nextSource)
+          metadataValidatedSourceIds.add(candidate.sourceId)
+        } catch (error) {
+          const reason =
+            error instanceof Error ? error.message : '读取数据源元数据失败。'
+          validationFailures.push(
+            `- ${candidate.sourceId} -> ${candidate.nextPath}：${reason}`,
+          )
+        }
+      }
+
+      for (const candidate of candidateSources) {
+        if (!metadataValidatedSourceIds.has(candidate.sourceId)) {
+          continue
+        }
+        const affectedVariables = this.variables.filter(
+          (variable) => variable.source_id === candidate.sourceId,
+        )
+
+        for (const variable of affectedVariables) {
+          const isComposite = (variable.variable_kind ?? 'single') === 'composite'
+          try {
+            if (isComposite) {
+              await fetchCompositePreview({
+                source: candidate.nextSource,
+                sheet: variable.sheet,
+                columns: variable.columns ?? [],
+                key_column: variable.key_column ?? '',
+                append_index_to_key: variable.append_index_to_key ?? false,
+              })
+            } else {
+              await fetchColumnPreview({
+                source: candidate.nextSource,
+                sheet: variable.sheet,
+                column: variable.column ?? '',
+              })
+            }
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : '变量预览校验失败。'
+            validationFailures.push(
+              `- ${candidate.sourceId} / ${variable.tag}：${reason}`,
+            )
+          }
+        }
+      }
+
+      if (validationFailures.length) {
+        throw new Error(
+          [
+            '以下数据源路径替换失败，本次未生效：',
+            ...validationFailures,
+          ].join('\n'),
+        )
+      }
+
+      candidateSources.forEach((candidate) => {
+        this.upsertSource(candidate.nextSource, candidate.sourceId)
+        affectedSourceIds.add(candidate.sourceId)
+        updatedCount += 1
+      })
+
+      this.addPathReplacementPreset(normalizedBaseDirectory)
+      this.setSelectedPathReplacementPreset(normalizedBaseDirectory)
+      await this.saveConfig()
+
+      let failedCount = 0
+      for (const sourceId of affectedSourceIds) {
+        try {
+          await this.loadSourceMetadata(sourceId)
+        } catch {
+          failedCount += 1
+        }
+      }
+
+      const activeVariable = this.variables.find((variable) => variable.tag === this.activeTag)
+      if (isAffectedVariable(activeVariable, affectedSourceIds)) {
+        try {
+          await this.loadVariablePreview(activeVariable, undefined, true)
+        } catch {
+          // 具体问题会由 configIssues 和数据源行提示呈现，这里只保持交互不中断。
+        }
+      }
+
+      this.clearExecutionResult()
+      this.clearPageError()
+
+      return {
+        updatedCount,
+        skippedCount,
+        failedCount,
+        affectedSourceIds: [...affectedSourceIds],
       }
     },
   },

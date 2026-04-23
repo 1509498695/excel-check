@@ -26,10 +26,12 @@ def _auth_client_ctx(headers: dict[str, str]):
 def _create_fixed_rules_workbook(
     target_path: Path,
     columns: dict[str, list[object]],
+    *,
+    sheet_name: str = "items",
 ) -> Path:
     """创建固定规则测试所需的最小 Excel 文件。"""
     with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
-        pd.DataFrame(columns).to_excel(writer, sheet_name="items", index=False)
+        pd.DataFrame(columns).to_excel(writer, sheet_name=sheet_name, index=False)
 
     return target_path
 
@@ -312,14 +314,14 @@ def _build_v4_payload(
 async def test_get_fixed_rules_config_returns_default_when_missing(
     auth_headers: dict[str, str],
 ) -> None:
-    """验证未保存配置时会返回 v4 默认空结构。"""
+    """验证未保存配置时会返回 v5 默认空结构。"""
     async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["code"] == 200
-    assert payload["data"]["version"] == 4
+    assert payload["data"]["version"] == 5
     assert payload["data"]["configured"] is False
     assert payload["data"]["sources"] == []
     assert payload["data"]["variables"] == []
@@ -396,7 +398,7 @@ async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
     auth_headers: dict[str, str],
     test_project_id: int,
 ) -> None:
-    """验证失效路径只在读取配置时降级，不放宽保存和执行。"""
+    """验证失效路径可保存并返回 config_issues，但执行仍会失败。"""
     missing_workbook_path = tmp_path / "missing-source-only.xlsx"
     payload = _build_v4_payload(
         missing_workbook_path,
@@ -410,9 +412,14 @@ async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
         save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
         execute_response = await client.post("/api/v1/fixed-rules/execute")
 
-    assert save_response.status_code == 400
+    assert save_response.status_code == 200
     assert execute_response.status_code == 400
-    assert "items-source" in save_response.json()["detail"]
+    save_payload = save_response.json()
+    assert save_payload["meta"]["config_issues"]
+    assert any(
+        issue["source_id"] == "items-source"
+        for issue in save_payload["meta"]["config_issues"]
+    )
     assert "items-source" in execute_response.json()["detail"]
 
 
@@ -435,7 +442,7 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
     assert save_response.status_code == 200
 
     get_payload = get_response.json()["data"]
-    assert get_payload["version"] == 4
+    assert get_payload["version"] == 5
     assert get_payload["configured"] is True
     assert get_payload["sources"][0]["id"] == "items-source"
     assert get_payload["variables"][0]["tag"] == "[items-source-items-INT_ID]"
@@ -617,7 +624,7 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["version"] == 4
+    assert payload["version"] == 5
     assert len(payload["sources"]) == 1
     assert payload["sources"][0]["path"] == str(workbook_path.resolve())
     assert len(payload["variables"]) == 1
@@ -663,7 +670,7 @@ async def test_get_fixed_rules_config_migrates_v3_binding_rules(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["version"] == 4
+    assert payload["version"] == 5
     assert payload["sources"][0]["id"] == "v3"
     assert payload["variables"][0]["column"] == "INT_ID"
     assert payload["rules"][0]["target_variable_tag"] == "[v3-items-INT_ID]"
@@ -2573,6 +2580,68 @@ async def test_execute_fixed_rules_filters_by_selected_rule_ids(
 
 
 @pytest.mark.anyio
+async def test_execute_fixed_rules_supports_trimmed_sheet_and_column_identifiers(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验配置中被 trim 的 Sheet/列名仍能解析到真实表头并正常执行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_trimmed_headers.xlsx",
+        {
+            "STR_ABSwitch  ": ["on", "off"],
+            "DESC3": ["开", "关"],
+        },
+        sheet_name="Quest  ",
+    )
+
+    payload = {
+        "version": 5,
+        "configured": True,
+        "sources": [
+            {
+                "id": "source-space",
+                "type": "local_excel",
+                "path": str(workbook_path),
+                "pathOrUrl": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[source-space-quest-switch]",
+                "source_id": "source-space",
+                "sheet": "Quest",
+                "variable_kind": "single",
+                "column": "STR_ABSwitch",
+                "expected_type": "str",
+            }
+        ],
+        "groups": [
+            {"group_id": "ungrouped", "group_name": "未分组", "builtin": True},
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-not-null",
+                "group_id": "ungrouped",
+                "rule_name": "开关不能为空",
+                "target_variable_tag": "[source-space-quest-switch]",
+                "rule_type": "not_null",
+            }
+        ],
+    }
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    assert execute_response.status_code == 200
+    execute_payload = execute_response.json()
+    assert execute_payload["meta"]["failed_sources"] == []
+    assert execute_payload["meta"]["total_rows_scanned"] == 2
+    assert execute_payload["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
 async def test_execute_fixed_rules_returns_first_page_and_supports_result_pagination(
     tmp_path: Path,
     auth_headers: dict[str, str],
@@ -2648,6 +2717,95 @@ async def test_execute_fixed_rules_returns_first_page_and_supports_result_pagina
     assert page_two_payload["data"]["total"] == 35
     assert len(page_two_payload["data"]["list"]) == 15
     assert page_two_payload["data"]["list"][0]["raw_value"] == 31
+
+
+@pytest.mark.anyio
+async def test_fixed_rules_composite_condition_keeps_real_spaced_field_names(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证组合条件校验会把裁剪过的字段名解析回 Excel 中的真实列名。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_composite_spaced_headers.xlsx",
+        {
+            "INT_ID": [1, 2],
+            "STR_ABSwitch  ": ["A", "B"],
+            "DESC3": ["A", "B"],
+        },
+        sheet_name="Quest  ",
+    )
+    composite_variable = {
+        "tag": "[source-space-quest-composite]",
+        "source_id": "source-space",
+        "sheet": "Quest",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "STR_ABSwitch", "DESC3"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+    payload = {
+        "version": 5,
+        "configured": True,
+        "sources": [
+            {
+                "id": "source-space",
+                "type": "local_excel",
+                "path": str(workbook_path),
+                "pathOrUrl": str(workbook_path),
+            }
+        ],
+        "variables": [composite_variable],
+        "groups": [
+            {"group_id": "ungrouped", "group_name": "未分组", "builtin": True},
+            {"group_id": "basic-checks", "group_name": "基础校验", "builtin": False},
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-composite-spaced",
+                "group_id": "basic-checks",
+                "rule_name": "组合字段尾部空格兼容",
+                "target_variable_tag": composite_variable["tag"],
+                "rule_type": "composite_condition_check",
+                "composite_config": {
+                    "global_filters": [],
+                    "branches": [
+                        {
+                            "branch_id": "branch-spaced",
+                            "filters": [],
+                            "assertions": [
+                                {
+                                    "condition_id": "assert-spaced-field",
+                                    "field": "DESC3",
+                                    "operator": "eq",
+                                    "value_source": "field",
+                                    "expected_field": "STR_ABSwitch",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    save_payload = save_response.json()["data"]
+    assert save_payload["variables"][0]["sheet"] == "Quest  "
+    assert save_payload["variables"][0]["columns"] == ["INT_ID", "STR_ABSwitch  ", "DESC3"]
+    saved_assertion = save_payload["rules"][0]["composite_config"]["branches"][0]["assertions"][0]
+    assert saved_assertion["field"] == "DESC3"
+    assert saved_assertion["expected_field"] == "STR_ABSwitch  "
+
+    assert execute_response.status_code == 200
+    execute_payload = execute_response.json()
+    assert execute_payload["meta"]["failed_sources"] == []
+    assert execute_payload["meta"]["total_rows_scanned"] == 2
+    assert execute_payload["data"]["abnormal_results"] == []
 
 
 @pytest.mark.anyio

@@ -328,7 +328,7 @@ async function refreshCompositePreview(): Promise<void> {
   try {
     const response = await fetchCompositePreview({
       source: compositeSource.value,
-      sheet: compositeDraft.sheet.trim(),
+      sheet: compositeDraft.sheet,
       columns: compositeDraft.columns ?? [],
       key_column: compositeDraft.key_column ?? '',
       append_index_to_key: compositeDraft.append_index_to_key ?? false,
@@ -558,9 +558,9 @@ async function saveSingleVariable(): Promise<void> {
     {
       tag: nextTag,
       source_id: singleDraft.source_id.trim(),
-      sheet: singleDraft.sheet.trim(),
+      sheet: singleDraft.sheet,
       variable_kind: 'single',
-      column: singleDraft.column?.trim(),
+      column: singleDraft.column,
       expected_type: singleDraft.expected_type ?? 'str',
     },
     singleEditingTag.value ?? undefined,
@@ -586,10 +586,10 @@ async function saveCompositeVariable(): Promise<void> {
     {
       tag: nextTag,
       source_id: compositeDraft.source_id.trim(),
-      sheet: compositeDraft.sheet.trim(),
+      sheet: compositeDraft.sheet,
       variable_kind: 'composite',
       columns: [...(compositeDraft.columns ?? [])],
-      key_column: compositeDraft.key_column?.trim(),
+      key_column: compositeDraft.key_column,
       append_index_to_key: compositeDraft.append_index_to_key ?? false,
       expected_type: 'json',
     },

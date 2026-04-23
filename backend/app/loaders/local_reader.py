@@ -107,19 +107,27 @@ def preview_source_column(
     _ensure_excel_metadata_source(source)
     source_path = _resolve_local_path(source)
 
-    cleaned_sheet = sheet_name.strip()
-    cleaned_column = column_name.strip()
-    if not cleaned_sheet:
+    if not sheet_name.strip():
         raise ValueError("变量详情预览缺少 Sheet 名称。")
-    if not cleaned_column:
+    if not column_name.strip():
         raise ValueError("变量详情预览缺少列名。")
 
     try:
-        dataframe = pd.read_excel(
-            source_path,
-            sheet_name=cleaned_sheet,
-            usecols=[cleaned_column],
-            engine=_get_excel_engine(source_path),
+        workbook = _open_excel_workbook(source_path, source.id)
+        resolved_sheet_name, available_columns = _resolve_excel_sheet_columns(
+            workbook,
+            source_id=source.id,
+            requested_sheet_name=sheet_name,
+        )
+        resolved_column_name = _resolve_identifier_from_available(
+            column_name,
+            available_columns,
+            identifier_label="列名",
+            context=f"Excel 数据源 '{source.id}' 的 Sheet '{resolved_sheet_name}'",
+        )
+        dataframe = workbook.parse(
+            sheet_name=resolved_sheet_name,
+            usecols=[resolved_column_name],
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(
@@ -129,8 +137,8 @@ def preview_source_column(
         raise ImportError(_build_excel_dependency_error(source_path)) from exc
     except ValueError as exc:
         raise ValueError(
-            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{cleaned_sheet}' 列 "
-            f"'{cleaned_column}' 失败：{exc}"
+            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{sheet_name}' 列 "
+            f"'{column_name}' 失败：{exc}"
         ) from exc
 
     total_rows = int(len(dataframe))
@@ -143,7 +151,7 @@ def preview_source_column(
         }
         for row_index, value in zip(
             preview_frame.index + 2,
-            preview_frame[cleaned_column].tolist(),
+            preview_frame[resolved_column_name].tolist(),
         )
     ]
 
@@ -152,8 +160,8 @@ def preview_source_column(
         "source_id": source.id,
         "source_type": source.type,
         "source_path": str(source_path),
-        "sheet": cleaned_sheet,
-        "column": cleaned_column,
+        "sheet": resolved_sheet_name,
+        "column": resolved_column_name,
         "preview_rows": preview_rows,
         "total_rows": total_rows,
         "loaded_rows": len(preview_rows),
@@ -174,26 +182,40 @@ def preview_composite_variable(
     _ensure_excel_metadata_source(source)
     source_path = _resolve_local_path(source)
 
-    cleaned_sheet = sheet_name.strip()
-    cleaned_columns = [column.strip() for column in columns if column and column.strip()]
-    cleaned_columns = _unique_preserve_order(cleaned_columns)
-    cleaned_key_column = key_column.strip()
+    preview_columns = [column for column in columns if column and column.strip()]
+    preview_columns = _unique_preserve_order(preview_columns)
 
-    if not cleaned_sheet:
+    if not sheet_name.strip():
         raise ValueError("组合变量预览缺少 Sheet 名称。")
-    if len(cleaned_columns) < 2:
+    if len(preview_columns) < 2:
         raise ValueError("组合变量至少需要选择 2 列。")
-    if not cleaned_key_column:
+    if not key_column.strip():
         raise ValueError("组合变量缺少 key 列。")
-    if cleaned_key_column not in cleaned_columns:
+    if key_column not in preview_columns:
         raise ValueError("组合变量的 key 列必须包含在关联列中。")
 
     try:
-        dataframe = pd.read_excel(
-            source_path,
-            sheet_name=cleaned_sheet,
-            usecols=cleaned_columns,
-            engine=_get_excel_engine(source_path),
+        workbook = _open_excel_workbook(source_path, source.id)
+        resolved_sheet_name, available_columns = _resolve_excel_sheet_columns(
+            workbook,
+            source_id=source.id,
+            requested_sheet_name=sheet_name,
+        )
+        resolved_preview_columns = _resolve_identifiers_from_available(
+            preview_columns,
+            available_columns,
+            identifier_label="列名",
+            context=f"Excel 数据源 '{source.id}' 的 Sheet '{resolved_sheet_name}'",
+        )
+        resolved_key_column = _resolve_identifier_from_available(
+            key_column,
+            available_columns,
+            identifier_label="key 列",
+            context=f"Excel 数据源 '{source.id}' 的 Sheet '{resolved_sheet_name}'",
+        )
+        dataframe = workbook.parse(
+            sheet_name=resolved_sheet_name,
+            usecols=resolved_preview_columns,
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(
@@ -203,11 +225,14 @@ def preview_composite_variable(
         raise ImportError(_build_excel_dependency_error(source_path)) from exc
     except ValueError as exc:
         raise ValueError(
-            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{cleaned_sheet}' 组合列 "
-            f"{cleaned_columns} 失败：{exc}"
+            f"读取 Excel 数据源 '{source.id}' 的 Sheet '{sheet_name}' 组合列 "
+            f"{preview_columns} 失败：{exc}"
         ) from exc
 
-    duplicate_keys_preview = _find_duplicate_composite_keys(dataframe[cleaned_key_column])
+    if resolved_key_column not in resolved_preview_columns:
+        raise ValueError("组合变量的 key 列必须包含在关联列中。")
+
+    duplicate_keys_preview = _find_duplicate_composite_keys(dataframe[resolved_key_column])
     has_duplicate_keys = bool(duplicate_keys_preview)
 
     if has_duplicate_keys and not append_index_to_key:
@@ -216,8 +241,8 @@ def preview_composite_variable(
     else:
         mapping, loaded_rows = _build_composite_mapping(
             dataframe,
-            columns=cleaned_columns,
-            key_column=cleaned_key_column,
+            columns=resolved_preview_columns,
+            key_column=resolved_key_column,
             append_index_to_key=append_index_to_key,
         )
 
@@ -226,9 +251,9 @@ def preview_composite_variable(
         "source_id": source.id,
         "source_type": source.type,
         "source_path": str(source_path),
-        "sheet": cleaned_sheet,
-        "columns": cleaned_columns,
-        "key_column": cleaned_key_column,
+        "sheet": resolved_sheet_name,
+        "columns": resolved_preview_columns,
+        "key_column": resolved_key_column,
         "has_duplicate_keys": has_duplicate_keys,
         "duplicate_keys_preview": duplicate_keys_preview,
         "mapping": mapping,
@@ -269,16 +294,26 @@ def read_local_excel(
             )
         variables_by_sheet[variable.sheet].append(variable)
 
+    workbook = _open_excel_workbook(source_path, source.id)
     loaded_variables: dict[str, pd.DataFrame] = {}
 
-    for sheet_name, sheet_variables in variables_by_sheet.items():
+    for requested_sheet_name, sheet_variables in variables_by_sheet.items():
+        resolved_sheet_name, available_columns = _resolve_excel_sheet_columns(
+            workbook,
+            source_id=source.id,
+            requested_sheet_name=requested_sheet_name,
+        )
         requested_columns = _collect_requested_columns(sheet_variables)
+        resolved_columns = _resolve_identifiers_from_available(
+            requested_columns,
+            available_columns,
+            identifier_label="列名",
+            context=f"Excel source '{source.id}' sheet '{resolved_sheet_name}'",
+        )
         try:
-            dataframe = pd.read_excel(
-                source_path,
-                sheet_name=sheet_name,
-                usecols=requested_columns,
-                engine=_get_excel_engine(source_path),
+            dataframe = workbook.parse(
+                sheet_name=resolved_sheet_name,
+                usecols=resolved_columns,
             )
         except FileNotFoundError as exc:
             raise FileNotFoundError(
@@ -288,8 +323,8 @@ def read_local_excel(
             raise ImportError(_build_excel_dependency_error(source_path)) from exc
         except ValueError as exc:
             raise ValueError(
-                f"Failed to read Excel source '{source.id}', sheet '{sheet_name}', "
-                f"columns {requested_columns}: {exc}"
+                f"Failed to read Excel source '{source.id}', sheet '{resolved_sheet_name}', "
+                f"columns {resolved_columns}: {exc}"
             ) from exc
 
         _merge_loaded_variables(
@@ -297,7 +332,7 @@ def read_local_excel(
             dataframe=dataframe,
             variables_for_group=sheet_variables,
             source_id=source.id,
-            group_label=f"sheet '{sheet_name}'",
+            group_label=f"sheet '{resolved_sheet_name}'",
         )
 
     return loaded_variables
@@ -317,7 +352,25 @@ def read_local_csv(
     requested_columns = _collect_requested_columns(variables_for_source)
 
     try:
-        dataframe = pd.read_csv(source_path, usecols=requested_columns)
+        header_frame = pd.read_csv(source_path, nrows=0)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"CSV source '{source.id}' file not found: '{source_path}'."
+        ) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"Failed to read CSV source '{source.id}' headers: {exc}"
+        ) from exc
+
+    resolved_columns = _resolve_identifiers_from_available(
+        requested_columns,
+        [str(column) for column in header_frame.columns.tolist()],
+        identifier_label="列名",
+        context=f"CSV source '{source.id}'",
+    )
+
+    try:
+        dataframe = pd.read_csv(source_path, usecols=resolved_columns)
     except FileNotFoundError as exc:
         raise FileNotFoundError(
             f"CSV source '{source.id}' file not found: '{source_path}'."
@@ -325,7 +378,7 @@ def read_local_csv(
     except ValueError as exc:
         raise ValueError(
             f"Failed to read CSV source '{source.id}', columns "
-            f"{requested_columns}: {exc}"
+            f"{resolved_columns}: {exc}"
         ) from exc
 
     loaded_variables: dict[str, pd.DataFrame] = {}
@@ -343,6 +396,46 @@ def _ensure_excel_metadata_source(source: DataSource) -> None:
     """限制变量池元数据读取仅支持 Excel 数据源。"""
     if source.type != "local_excel":
         raise ValueError("变量池下拉提取第一版仅支持 Excel 数据源。")
+
+
+def _open_excel_workbook(source_path: Path, source_id: str) -> pd.ExcelFile:
+    """打开 Excel 工作簿并统一错误消息。"""
+    try:
+        return pd.ExcelFile(
+            source_path,
+            engine=_get_excel_engine(source_path),
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Excel 数据源 '{source_id}' 文件不存在：'{source_path}'。"
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(_build_excel_dependency_error(source_path)) from exc
+    except ValueError as exc:
+        raise ValueError(f"读取 Excel 数据源 '{source_id}' 失败：{exc}") from exc
+
+
+def _resolve_excel_sheet_columns(
+    workbook: pd.ExcelFile,
+    *,
+    source_id: str,
+    requested_sheet_name: str,
+) -> tuple[str, list[str]]:
+    """解析真实 Sheet 名并返回该 Sheet 的原始列名列表。"""
+    resolved_sheet_name = _resolve_identifier_from_available(
+        requested_sheet_name,
+        [str(sheet_name) for sheet_name in workbook.sheet_names],
+        identifier_label="Sheet",
+        context=f"Excel 数据源 '{source_id}'",
+    )
+    try:
+        sheet_frame = workbook.parse(sheet_name=resolved_sheet_name, nrows=0)
+    except ValueError as exc:
+        raise ValueError(
+            f"读取 Excel 数据源 '{source_id}' 的 Sheet '{resolved_sheet_name}' 失败：{exc}"
+        ) from exc
+
+    return resolved_sheet_name, [str(column) for column in sheet_frame.columns.tolist()]
 
 
 def _ensure_unique_tags(variables: list[VariableTag]) -> None:
@@ -393,7 +486,7 @@ def _collect_requested_columns(variables: list[VariableTag]) -> list[str]:
     for variable in variables:
         if _get_variable_kind(variable) == "composite":
             columns = [
-                column.strip()
+                column
                 for column in (variable.columns or [])
                 if column and column.strip()
             ]
@@ -404,12 +497,71 @@ def _collect_requested_columns(variables: list[VariableTag]) -> list[str]:
             requested_columns.extend(columns)
             continue
 
-        column_name = (variable.column or "").strip()
-        if not column_name:
+        column_name = variable.column or ""
+        if not column_name.strip():
             raise ValueError(f"Variable '{variable.tag}' is missing column.")
         requested_columns.append(column_name)
 
     return _unique_preserve_order(requested_columns)
+
+
+def _resolve_identifier_from_available(
+    requested_value: str,
+    available_values: Iterable[str],
+    *,
+    identifier_label: str,
+    context: str,
+) -> str:
+    """优先按原始值匹配，找不到时兼容 trim 后的唯一候选。"""
+    available_list = [str(item) for item in available_values]
+    if requested_value in available_list:
+        return requested_value
+
+    normalized_requested = requested_value.strip()
+    if not normalized_requested:
+        raise ValueError(f"{context} 缺少{identifier_label}。")
+
+    matched_values = [
+        candidate
+        for candidate in available_list
+        if candidate.strip() == normalized_requested
+    ]
+    if len(matched_values) == 1:
+        return matched_values[0]
+    if len(matched_values) > 1:
+        raise ValueError(
+            f"{context} 中的{identifier_label}“{requested_value}”在忽略首尾空白后匹配到多个候选：{matched_values}。"
+        )
+
+    raise ValueError(
+        f"{context} 中未找到{identifier_label}“{requested_value}”。"
+    )
+
+
+def _resolve_identifiers_from_available(
+    requested_values: Iterable[str],
+    available_values: Iterable[str],
+    *,
+    identifier_label: str,
+    context: str,
+) -> list[str]:
+    """批量解析真实标识符，并保持顺序去重。"""
+    resolved_values: list[str] = []
+    seen_values: set[str] = set()
+
+    for requested_value in requested_values:
+        resolved_value = _resolve_identifier_from_available(
+            requested_value,
+            available_values,
+            identifier_label=identifier_label,
+            context=context,
+        )
+        if resolved_value in seen_values:
+            continue
+        resolved_values.append(resolved_value)
+        seen_values.add(resolved_value)
+
+    return resolved_values
 
 
 def _merge_loaded_variables(
@@ -429,44 +581,51 @@ def _merge_loaded_variables(
             )
 
         if _get_variable_kind(variable) == "composite":
-            columns = [column.strip() for column in (variable.columns or []) if column and column.strip()]
-            key_column = (variable.key_column or "").strip()
+            columns = [column for column in (variable.columns or []) if column and column.strip()]
+            key_column = variable.key_column or ""
 
             if len(columns) < 2:
                 raise ValueError(
                     f"Composite variable '{variable.tag}' must provide at least two columns."
                 )
-            if not key_column:
+            if not key_column.strip():
                 raise ValueError(
                     f"Composite variable '{variable.tag}' must provide key_column."
                 )
-            if key_column not in columns:
+            resolved_columns = _resolve_identifiers_from_available(
+                columns,
+                [str(column) for column in dataframe.columns.tolist()],
+                identifier_label="列名",
+                context=f"Source '{source_id}' {group_label} for composite variable '{variable.tag}'",
+            )
+            resolved_key_column = _resolve_identifier_from_available(
+                key_column,
+                [str(column) for column in dataframe.columns.tolist()],
+                identifier_label="key 列",
+                context=f"Source '{source_id}' {group_label} for composite variable '{variable.tag}'",
+            )
+            if resolved_key_column not in resolved_columns:
                 raise ValueError(
                     f"Composite variable '{variable.tag}' requires key_column '{key_column}' "
                     "to be included in columns."
                 )
-            missing_columns = [column for column in columns if column not in dataframe.columns]
-            if missing_columns:
-                raise ValueError(
-                    f"Source '{source_id}' {group_label} does not contain columns "
-                    f"{missing_columns} for composite variable '{variable.tag}'."
-                )
 
             target[variable.tag] = _build_composite_variable_frame(
                 dataframe,
-                columns=columns,
-                key_column=key_column,
+                columns=resolved_columns,
+                key_column=resolved_key_column,
                 append_index_to_key=variable.append_index_to_key,
             )
             continue
 
-        column_name = (variable.column or "").strip()
-        if column_name not in dataframe.columns:
-            raise ValueError(
-                f"Source '{source_id}' {group_label} does not contain column "
-                f"'{column_name}' for variable tag '{variable.tag}'."
-            )
-        target[variable.tag] = _build_variable_frame(dataframe, column_name)
+        column_name = variable.column or ""
+        resolved_column_name = _resolve_identifier_from_available(
+            column_name,
+            [str(column) for column in dataframe.columns.tolist()],
+            identifier_label="列名",
+            context=f"Source '{source_id}' {group_label} for variable tag '{variable.tag}'",
+        )
+        target[variable.tag] = _build_variable_frame(dataframe, resolved_column_name)
 
 
 def _build_variable_frame(dataframe: pd.DataFrame, column_name: str) -> pd.DataFrame:

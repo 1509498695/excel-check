@@ -154,12 +154,14 @@ class FixedRulesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int = 4
+    version: int = 5
     configured: bool = False
     sources: list[DataSource] = Field(default_factory=list)
     variables: list[VariableTag] = Field(default_factory=list)
     groups: list[FixedRuleGroup] = Field(default_factory=list)
     rules: list[FixedRuleDefinition] = Field(default_factory=list)
+    path_replacement_presets: list[str] = Field(default_factory=list)
+    selected_path_replacement_preset: str | None = None
 
 
 class FixedRulesExecuteRequest(BaseModel):

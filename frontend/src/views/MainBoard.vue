@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
+import SourcePathReplacementDialog from '../components/workbench/SourcePathReplacementDialog.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
@@ -63,6 +64,7 @@ const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)
 const resultStepRef = ref<HTMLElement | null>(null)
 const dataSourcePanelRef = ref<{ openCreateDialog: () => void } | null>(null)
+const sourcePathReplacementDialogRef = ref<{ openDialog: () => void } | null>(null)
 const variablePoolPanelRef = ref<{
   openSingleCreateTab: () => Promise<void>
   openCompositeCreateTab: () => Promise<void>
@@ -278,6 +280,13 @@ async function scrollToStep(step: StepIndex): Promise<void> {
 }
 
 async function runExecution(): Promise<void> {
+  if (store.hasBlockingSourceIssues) {
+    ElMessage.warning('当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。')
+    await ensureStepExpanded(1)
+    await scrollToStep(1)
+    return
+  }
+
   if (!selectedRuleIds.value.length) {
     ElMessage.warning('请至少勾选一条需要校验的规则')
     return
@@ -297,6 +306,10 @@ async function runExecution(): Promise<void> {
 
 function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
+}
+
+function openSourcePathReplacementDialog(): void {
+  sourcePathReplacementDialogRef.value?.openDialog()
 }
 
 function openSingleVariableCreate(): void {
@@ -453,6 +466,13 @@ function handleToggleVisibleRuleSelection(payload: {
             <button
               type="button"
               class="ec-btn-outline-compact"
+              @click="openSourcePathReplacementDialog"
+            >
+              路径替换
+            </button>
+            <button
+              type="button"
+              class="ec-btn-outline-compact"
               @click="openDataSourceCreate"
             >
               <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -462,7 +482,12 @@ function handleToggleVisibleRuleSelection(payload: {
             </button>
           </template>
 
-          <DataSourcePanel ref="dataSourcePanelRef" toolbar-mode="hidden" @saved="handleSourceSaved" />
+          <DataSourcePanel
+            ref="dataSourcePanelRef"
+            toolbar-mode="hidden"
+            :source-issues="store.sourceIssues"
+            @saved="handleSourceSaved"
+          />
         </CollapsibleSection>
       </div>
 
@@ -550,6 +575,12 @@ function handleToggleVisibleRuleSelection(payload: {
           <ResultBoardPanel :rule-count="store.orchestrationRuleCount" />
         </CollapsibleSection>
       </div>
+
+      <SourcePathReplacementDialog
+        ref="sourcePathReplacementDialogRef"
+        :store="store"
+        variant="workbench"
+      />
     </div>
   </div>
 </template>

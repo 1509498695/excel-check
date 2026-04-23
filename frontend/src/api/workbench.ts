@@ -5,6 +5,7 @@ import type {
   CompositePreviewResponse,
   DataSource,
   ExecuteResponse,
+  LocalDirectoryValidateResponse,
   LocalPickResponse,
   SourceCapabilitiesResponse,
   SourceMetadataResponse,
@@ -22,6 +23,15 @@ export async function pickLocalSourcePath(
   return apiFetch<LocalPickResponse>('/api/v1/sources/local-pick', {
     method: 'POST',
     body: JSON.stringify({ source_type: sourceType }),
+  })
+}
+
+export async function validateLocalDirectoryPath(
+  directoryPath: string,
+): Promise<LocalDirectoryValidateResponse> {
+  return apiFetch<LocalDirectoryValidateResponse>('/api/v1/sources/local-directory-validate', {
+    method: 'POST',
+    body: JSON.stringify({ directory_path: directoryPath }),
   })
 }
 

@@ -37,6 +37,14 @@ class LocalPickRequest(BaseModel):
     source_type: Literal["local_excel", "local_csv"]
 
 
+class LocalDirectoryValidateRequest(BaseModel):
+    """本地目录校验请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    directory_path: str
+
+
 class ColumnPreviewRequest(BaseModel):
     """单列预览请求。"""
 
@@ -169,6 +177,25 @@ def _show_local_file_dialog(source_type: str) -> str:
     return (completed.stdout or "").strip()
 
 
+def _validate_directory_path(raw_directory_path: str) -> str:
+    """校验并规范化本地目录路径。"""
+    normalized_input = raw_directory_path.strip()
+    if not normalized_input:
+        raise HTTPException(status_code=400, detail="替换目录不能为空。")
+
+    directory_path = Path(normalized_input).expanduser()
+    if not directory_path.is_absolute():
+        raise HTTPException(status_code=400, detail="替换目录必须是本地绝对路径。")
+
+    resolved_path = directory_path.resolve(strict=False)
+    if not resolved_path.exists():
+        raise HTTPException(status_code=400, detail=f"替换目录不存在：{resolved_path}")
+    if not resolved_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"替换路径不是目录：{resolved_path}")
+
+    return str(resolved_path)
+
+
 @router.get("/capabilities")
 def get_source_capabilities() -> dict[str, Any]:
     """返回当前后端声明支持的数据源能力。"""
@@ -209,6 +236,21 @@ async def pick_local_source_file(payload: LocalPickRequest) -> dict[str, Any]:
         "data": {
             "selected_path": resolved_path,
             "source_type": payload.source_type,
+        },
+    }
+
+
+@router.post("/local-directory-validate")
+async def validate_local_directory_path(
+    payload: LocalDirectoryValidateRequest,
+) -> dict[str, Any]:
+    """校验并返回规范化后的本地目录路径。"""
+    normalized_directory = _validate_directory_path(payload.directory_path)
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            "directory_path": normalized_directory,
         },
     }
 

@@ -68,9 +68,14 @@ function createBranchId(): string {
   return createEntityId('branch')
 }
 
+function preserveNonBlankIdentifier(value: string | undefined): string {
+  const rawValue = value ?? ''
+  return rawValue.trim() ? rawValue : ''
+}
+
 export function normalizeCompositeCondition(condition: CompositeCondition): CompositeCondition {
   const operator = condition.operator
-  const normalizedField = condition.field.trim()
+  const normalizedField = preserveNonBlankIdentifier(condition.field)
   const normalizedConditionId = condition.condition_id.trim() || createConditionId()
 
   if (isCompareOperator(operator)) {
@@ -82,7 +87,10 @@ export function normalizeCompositeCondition(condition: CompositeCondition): Comp
       value_source: valueSource,
       expected_value:
         valueSource === 'literal' ? normalizeExpectedValue(condition.expected_value) : undefined,
-      expected_field: valueSource === 'field' ? condition.expected_field?.trim() : undefined,
+      expected_field:
+        valueSource === 'field'
+          ? preserveNonBlankIdentifier(condition.expected_field) || undefined
+          : undefined,
     }
   }
 

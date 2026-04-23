@@ -31,7 +31,7 @@ from backend.app.utils.formatter import build_execution_response
 from backend.config import settings
 
 
-FIXED_RULES_CONFIG_VERSION = 4
+FIXED_RULES_CONFIG_VERSION = 5
 COMPOSITE_KEY_FIELD = "__key__"
 SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
@@ -108,6 +108,8 @@ def build_default_fixed_rules_config() -> FixedRulesConfig:
         variables=[],
         groups=[_build_default_group()],
         rules=[],
+        path_replacement_presets=[],
+        selected_path_replacement_preset=None,
     )
 
 
@@ -334,6 +336,13 @@ def _validate_and_normalize_fixed_rules_config(
             variables=variables,
             groups=groups,
             rules=rules,
+            path_replacement_presets=_normalize_path_replacement_presets(
+                migrated_config.path_replacement_presets
+            ),
+            selected_path_replacement_preset=_normalize_selected_path_replacement_preset(
+                migrated_config.selected_path_replacement_preset,
+                migrated_config.path_replacement_presets,
+            ),
         ),
         config_issues,
     )
@@ -427,8 +436,8 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
         variable_tag_by_key[
             (
                 variable.source_id,
-                variable.sheet.strip(),
-                variable.column.strip(),
+                variable.sheet,
+                variable.column,
             )
         ] = variable.tag
 
@@ -501,8 +510,8 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
 
         variable_key = (
             source_id,
-            binding.sheet.strip(),
-            binding.column.strip(),
+            binding.sheet,
+            binding.column,
         )
         target_tag = variable_tag_by_key.get(variable_key)
         if target_tag is None:
@@ -518,9 +527,9 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 VariableTag(
                     tag=target_tag,
                     source_id=source_id,
-                    sheet=binding.sheet.strip(),
+                    sheet=binding.sheet,
                     variable_kind="single",
-                    column=binding.column.strip(),
+                    column=binding.column,
                     expected_type="str",
                 )
             )
@@ -552,6 +561,13 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
         variables=migrated_variables,
         groups=config.groups,
         rules=migrated_rules,
+        path_replacement_presets=_normalize_path_replacement_presets(
+            config.path_replacement_presets
+        ),
+        selected_path_replacement_preset=_normalize_selected_path_replacement_preset(
+            config.selected_path_replacement_preset,
+            config.path_replacement_presets,
+        ),
     )
 
 
@@ -725,7 +741,7 @@ def _normalize_variables(
     for variable in variables:
         tag = variable.tag.strip()
         source_id = variable.source_id.strip()
-        sheet = variable.sheet.strip()
+        sheet = variable.sheet or ""
         variable_kind = (variable.variable_kind or "single").strip()
 
         if not tag:
@@ -734,7 +750,7 @@ def _normalize_variables(
             raise ValueError(f"???????????'{tag}'?")
         if source_id not in source_map:
             raise ValueError(f"?????? '{tag}' ?????????? '{source_id}'?")
-        if not sheet:
+        if not sheet.strip():
             raise ValueError(f"?????? '{tag}' ?? Sheet?")
 
         source = source_map[source_id]
@@ -744,7 +760,9 @@ def _normalize_variables(
                 f"????????? '{source.type}'?"
             )
 
-        available_columns = _load_sheet_columns(
+        resolved_sheet = sheet
+        available_columns: list[str] | None = None
+        sheet_details = _load_sheet_columns(
             source=source,
             sheet_name=sheet,
             metadata_cache=metadata_cache,
@@ -752,33 +770,55 @@ def _normalize_variables(
             config_issues=config_issues,
             issue_keys=issue_keys,
         )
+        if sheet_details is not None:
+            resolved_sheet, available_columns = sheet_details
 
         if variable_kind == "composite":
             columns = _normalize_columns(variable.columns or [])
-            key_column = (variable.key_column or "").strip()
+            key_column = variable.key_column or ""
 
             if len(columns) < 2:
                 raise ValueError(f"???? '{tag}' ?????? 2 ??")
-            if not key_column:
+            if not key_column.strip():
                 raise ValueError(f"???? '{tag}' ?? key_column?")
-            if key_column not in columns:
-                raise ValueError(f"???? '{tag}' ? key_column ??????????")
+            resolved_columns = columns
+            resolved_key_column = key_column
 
             if available_columns is not None:
-                missing_columns = [column for column in columns if column not in available_columns]
-                if missing_columns:
+                try:
+                    resolved_columns = _resolve_identifiers_against_available(
+                        columns,
+                        available_columns,
+                        identifier_label="列名",
+                        context=f"变量“{tag}”",
+                    )
+                    resolved_key_column = _resolve_identifier_against_available(
+                        key_column,
+                        available_columns,
+                        identifier_label="key 列",
+                        context=f"变量“{tag}”",
+                    )
+                except ValueError as exc:
                     if config_issues is None:
-                        raise ValueError(
-                            f"???? '{tag}' ?????????{missing_columns}?"
-                        )
+                        raise
+                    _append_config_issue(
+                        config_issues,
+                        issue_keys,
+                        source_id=source_id,
+                        variable_tag=tag,
+                        message=f"{exc}???????????????????????",
+                    )
+                if resolved_key_column not in resolved_columns:
+                    if config_issues is None:
+                        raise ValueError(f"???? '{tag}' ? key_column ??????????")
                     _append_config_issue(
                         config_issues,
                         issue_keys,
                         source_id=source_id,
                         variable_tag=tag,
                         message=(
-                            f"???{tag}?????????{', '.join(missing_columns)}?"
-                            "???????????????????????"
+                            f"变量“{tag}”的 key 列“{resolved_key_column}”未包含在关联列中。"
+                            "请到变量配置中修复后再保存或执行。"
                         ),
                     )
 
@@ -786,41 +826,45 @@ def _normalize_variables(
                 VariableTag(
                     tag=tag,
                     source_id=source_id,
-                    sheet=sheet,
+                    sheet=resolved_sheet,
                     variable_kind="composite",
-                    columns=columns,
-                    key_column=key_column,
+                    columns=resolved_columns,
+                    key_column=resolved_key_column,
                     append_index_to_key=variable.append_index_to_key,
                     expected_type="json",
                 )
             )
         elif variable_kind == "single":
-            column = (variable.column or "").strip()
-            if not column:
+            column = variable.column or ""
+            if not column.strip():
                 raise ValueError(f"??? '{tag}' ?? column?")
-            if available_columns is not None and column not in available_columns:
-                if config_issues is None:
-                    raise ValueError(
-                        f"??? '{tag}' ???? '{column}' ???? Sheet '{sheet}' ??"
+            resolved_column = column
+            if available_columns is not None:
+                try:
+                    resolved_column = _resolve_identifier_against_available(
+                        column,
+                        available_columns,
+                        identifier_label="列名",
+                        context=f"变量“{tag}”",
                     )
-                _append_config_issue(
-                    config_issues,
-                    issue_keys,
-                    source_id=source_id,
-                    variable_tag=tag,
-                    message=(
-                        f"???{tag}??????{column}?????? Sheet ?{sheet}? ??"
-                        "???????????????????????"
-                    ),
-                )
+                except ValueError as exc:
+                    if config_issues is None:
+                        raise
+                    _append_config_issue(
+                        config_issues,
+                        issue_keys,
+                        source_id=source_id,
+                        variable_tag=tag,
+                        message=f"{exc}???????????????????????",
+                    )
 
             normalized_variables.append(
                 VariableTag(
                     tag=tag,
                     source_id=source_id,
-                    sheet=sheet,
+                    sheet=resolved_sheet,
                     variable_kind="single",
-                    column=column,
+                    column=resolved_column,
                     expected_type=variable.expected_type or "str",
                 )
             )
@@ -1131,9 +1175,9 @@ def _normalize_dual_composite_rule(
 
     for index, comparison in enumerate(comparisons, start=1):
         comparison_id = comparison.comparison_id.strip()
-        left_field = comparison.left_field.strip()
+        left_field = comparison.left_field or ""
         operator = str(comparison.operator).strip()
-        right_field = comparison.right_field.strip()
+        right_field = comparison.right_field or ""
 
         if not comparison_id:
             raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少 comparison_id。")
@@ -1141,29 +1185,43 @@ def _normalize_dual_composite_rule(
             raise ValueError(
                 f"规则 '{rule_id}' 的字段比对存在重复 comparison_id '{comparison_id}'。"
             )
-        if not left_field:
+        if not left_field.strip():
             raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少左侧字段。")
-        if left_field not in left_fields:
+        try:
+            resolved_left_field = _resolve_identifier_against_available(
+                left_field,
+                left_fields,
+                identifier_label="左侧字段",
+                context=f"规则 '{rule_id}' 的字段比对 {index}",
+            )
+        except ValueError as exc:
             raise ValueError(
                 f"规则 '{rule_id}' 的字段比对 {index} 引用了无效的左侧字段 '{left_field}'。"
-            )
+            ) from exc
         if operator not in SUPPORTED_DUAL_COMPOSITE_OPERATORS:
             raise ValueError(
                 f"规则 '{rule_id}' 的字段比对 {index} 使用了不支持的运算符 '{operator}'。"
             )
-        if not right_field:
+        if not right_field.strip():
             raise ValueError(f"规则 '{rule_id}' 的字段比对 {index} 缺少右侧字段。")
-        if right_field not in right_fields:
+        try:
+            resolved_right_field = _resolve_identifier_against_available(
+                right_field,
+                right_fields,
+                identifier_label="右侧字段",
+                context=f"规则 '{rule_id}' 的字段比对 {index}",
+            )
+        except ValueError as exc:
             raise ValueError(
                 f"规则 '{rule_id}' 的字段比对 {index} 引用了无效的右侧字段 '{right_field}'。"
-            )
+            ) from exc
 
         normalized_comparisons.append(
             DualCompositeComparison(
                 comparison_id=comparison_id,
-                left_field=left_field,
+                left_field=resolved_left_field,
                 operator=operator,
-                right_field=right_field,
+                right_field=resolved_right_field,
             )
         )
         seen_comparison_ids.add(comparison_id)
@@ -1180,7 +1238,7 @@ def _normalize_composite_conditions(
     rule_id: str,
     conditions: list[CompositeCondition],
     section_label: str,
-    available_fields: set[str],
+    available_fields: list[str],
     allowed_operators: set[str],
 ) -> list[CompositeCondition]:
     """????????????????"""
@@ -1189,11 +1247,11 @@ def _normalize_composite_conditions(
 
     for condition in conditions:
         condition_id = condition.condition_id.strip()
-        field = condition.field.strip()
+        field = condition.field or ""
         operator = str(condition.operator).strip()
         value_source = condition.value_source
         expected_value = condition.expected_value.strip() if condition.expected_value else ""
-        expected_field = condition.expected_field.strip() if condition.expected_field else ""
+        expected_field = condition.expected_field or ""
 
         if not condition_id:
             raise ValueError(f"???? '{rule_id}' ?{section_label}???? condition_id ????")
@@ -1201,12 +1259,19 @@ def _normalize_composite_conditions(
             raise ValueError(
                 f"???? '{rule_id}' ?{section_label}???? condition_id?'{condition_id}'?"
             )
-        if not field:
+        if not field.strip():
             raise ValueError(f"???? '{rule_id}' ?{section_label}??????????")
-        if field not in available_fields:
+        try:
+            resolved_field = _resolve_identifier_against_available(
+                field,
+                available_fields,
+                identifier_label="字段",
+                context=f"规则 '{rule_id}' 的{section_label}",
+            )
+        except ValueError as exc:
             raise ValueError(
                 f"???? '{rule_id}' ?{section_label}????????? '{field}'?"
-            )
+            ) from exc
         if operator not in allowed_operators:
             raise ValueError(
                 f"???? '{rule_id}' ?{section_label}?????????? '{operator}'?"
@@ -1230,13 +1295,20 @@ def _normalize_composite_conditions(
                         ) from exc
                 normalized_expected_value = expected_value
             elif normalized_value_source == "field":
-                if not expected_field:
+                if not expected_field.strip():
                     raise ValueError(f"???? '{rule_id}' ?{section_label}?????????")
-                if expected_field not in available_fields:
+                try:
+                    resolved_expected_field = _resolve_identifier_against_available(
+                        expected_field,
+                        available_fields,
+                        identifier_label="右侧字段",
+                        context=f"规则 '{rule_id}' 的{section_label}",
+                    )
+                except ValueError as exc:
                     raise ValueError(
                         f"???? '{rule_id}' ?{section_label}??????????? '{expected_field}'?"
-                    )
-                normalized_expected_field = expected_field
+                    ) from exc
+                normalized_expected_field = resolved_expected_field
             else:
                 raise ValueError(
                     f"???? '{rule_id}' ?{section_label}??????? value_source '{value_source}'?"
@@ -1292,7 +1364,7 @@ def _normalize_composite_conditions(
         normalized_conditions.append(
             CompositeCondition(
                 condition_id=condition_id,
-                field=field,
+                field=resolved_field,
                 operator=operator,
                 value_source=normalized_value_source,
                 expected_value=normalized_expected_value,
@@ -1304,14 +1376,14 @@ def _normalize_composite_conditions(
     return normalized_conditions
 
 
-def _collect_composite_available_fields(variable: VariableTag) -> set[str]:
+def _collect_composite_available_fields(variable: VariableTag) -> list[str]:
     """??????????????????"""
-    available_fields = {COMPOSITE_KEY_FIELD}
-    key_column = (variable.key_column or "").strip()
-    available_fields.update(
-        column.strip()
+    available_fields = [COMPOSITE_KEY_FIELD]
+    key_column = variable.key_column or ""
+    available_fields.extend(
+        column
         for column in (variable.columns or [])
-        if column and column.strip() and column.strip() != key_column
+        if column and column.strip() and column != key_column
     )
     return available_fields
 
@@ -1335,17 +1407,105 @@ def _normalize_local_source_path(
     return normalized_path
 
 
+def _normalize_path_replacement_presets(presets: list[str] | None) -> list[str]:
+    """规范化并去重路径替换目录列表。"""
+    normalized_presets: list[str] = []
+    seen_presets: set[str] = set()
+    for preset in presets or []:
+        normalized_preset = str(preset or "").strip()
+        if not normalized_preset:
+            continue
+        resolved_preset = str(Path(normalized_preset).expanduser().resolve(strict=False))
+        dedupe_key = resolved_preset.lower()
+        if dedupe_key in seen_presets:
+            continue
+        seen_presets.add(dedupe_key)
+        normalized_presets.append(resolved_preset)
+    return normalized_presets
+
+
+def _normalize_selected_path_replacement_preset(
+    selected_preset: str | None,
+    presets: list[str] | None,
+) -> str | None:
+    """规范化当前选中的路径替换目录。"""
+    normalized_selected = str(selected_preset or "").strip()
+    if not normalized_selected:
+        return None
+
+    resolved_selected = str(Path(normalized_selected).expanduser().resolve(strict=False))
+    normalized_presets = _normalize_path_replacement_presets(presets)
+    if any(preset.lower() == resolved_selected.lower() for preset in normalized_presets):
+        return resolved_selected
+    return None
+
+
 def _normalize_columns(columns: list[str]) -> list[str]:
     """?????????"""
     normalized_columns: list[str] = []
     seen_columns: set[str] = set()
     for column in columns:
-        normalized_column = column.strip()
-        if not normalized_column or normalized_column in seen_columns:
+        if not column.strip() or column in seen_columns:
             continue
-        normalized_columns.append(normalized_column)
-        seen_columns.add(normalized_column)
+        normalized_columns.append(column)
+        seen_columns.add(column)
     return normalized_columns
+
+
+def _resolve_identifier_against_available(
+    requested_value: str,
+    available_values: list[str],
+    *,
+    identifier_label: str,
+    context: str,
+) -> str:
+    """优先按原始值匹配，找不到时兼容 trim 后的唯一匹配。"""
+    if requested_value in available_values:
+        return requested_value
+
+    normalized_requested = requested_value.strip()
+    if not normalized_requested:
+        raise ValueError(f"{context}缺少{identifier_label}。")
+
+    matched_values = [
+        candidate
+        for candidate in available_values
+        if candidate.strip() == normalized_requested
+    ]
+    if len(matched_values) == 1:
+        return matched_values[0]
+    if len(matched_values) > 1:
+        raise ValueError(
+            f"{context}中的{identifier_label}“{requested_value}”在忽略首尾空白后匹配到多个候选：{matched_values}。"
+        )
+
+    raise ValueError(f"{context}中未找到{identifier_label}“{requested_value}”。")
+
+
+def _resolve_identifiers_against_available(
+    requested_values: list[str],
+    available_values: list[str],
+    *,
+    identifier_label: str,
+    context: str,
+) -> list[str]:
+    """批量解析真实标识，并保持顺序去重。"""
+    resolved_values: list[str] = []
+    seen_values: set[str] = set()
+
+    for requested_value in requested_values:
+        resolved_value = _resolve_identifier_against_available(
+            requested_value,
+            available_values,
+            identifier_label=identifier_label,
+            context=context,
+        )
+        if resolved_value in seen_values:
+            continue
+        resolved_values.append(resolved_value)
+        seen_values.add(resolved_value)
+
+    return resolved_values
 
 
 def _load_sheet_columns(
@@ -1356,7 +1516,7 @@ def _load_sheet_columns(
     variable_tag: str | None = None,
     config_issues: list[FixedRulesConfigIssue] | None = None,
     issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None = None,
-) -> list[str] | None:
+) -> tuple[str, list[str]] | None:
     """????????? Sheet ???????????"""
     metadata = metadata_cache.get(source.id)
     if metadata is None:
@@ -1381,9 +1541,28 @@ def _load_sheet_columns(
     elif metadata.get("__missing__"):
         return None
 
+    try:
+        resolved_sheet_name = _resolve_identifier_against_available(
+            sheet_name,
+            [str(sheet["name"]) for sheet in metadata["sheets"]],
+            identifier_label="Sheet",
+            context=f"数据源“{source.id}”",
+        )
+    except ValueError as exc:
+        if config_issues is not None:
+            _append_config_issue(
+                config_issues,
+                issue_keys,
+                source_id=source.id,
+                variable_tag=variable_tag,
+                message=f"{exc}请到“数据源接入管理”或变量配置中修复后再保存或执行。",
+            )
+            return None
+        raise
+
     for sheet in metadata["sheets"]:
-        if sheet["name"] == sheet_name:
-            return list(sheet["columns"])
+        if sheet["name"] == resolved_sheet_name:
+            return resolved_sheet_name, list(sheet["columns"])
 
     if config_issues is not None:
         _append_config_issue(
