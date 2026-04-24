@@ -76,6 +76,20 @@ export interface SvnCredentialListResponse {
   data: { items: SvnCredentialItem[] }
 }
 
+export interface SvnCredentialDetail {
+  host: string
+  username: string
+  password: string
+  updated_at: string | null
+  test_dir_url?: string | null
+}
+
+export interface SvnCredentialDetailResponse {
+  code: number
+  msg: string
+  data: SvnCredentialDetail
+}
+
 export interface SvnCredentialUpsertResponse {
   code: number
   msg: string
@@ -155,6 +169,53 @@ export async function listSvnDirectory(dirUrl: string): Promise<SvnListResponse>
 
 export async function listSvnCredentialHosts(): Promise<SvnCredentialListResponse> {
   return apiFetch<SvnCredentialListResponse>('/api/v1/sources/svn-credentials')
+}
+
+export async function fetchSvnCredential(
+  host: string,
+): Promise<SvnCredentialDetailResponse | null> {
+  const token = getToken()
+  const headers = new Headers()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(
+    `/api/v1/sources/svn-credentials/${encodeURIComponent(host)}`,
+    {
+      headers,
+    },
+  )
+
+  if (response.status === 401) {
+    clearToken()
+    window.location.href = '/login'
+    throw new Error('登录态已过期，请重新登录。')
+  }
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    let detailMessage = `请求失败：${response.status}`
+    try {
+      const payload = (await response.json()) as { detail?: unknown }
+      if (typeof payload.detail === 'string' && payload.detail.trim()) {
+        detailMessage = payload.detail
+      } else if (payload.detail && typeof payload.detail === 'object') {
+        const detailObj = payload.detail as { msg?: unknown }
+        if (typeof detailObj.msg === 'string' && detailObj.msg.trim()) {
+          detailMessage = detailObj.msg
+        }
+      }
+    } catch {
+      detailMessage = `${response.status} ${response.statusText}`
+    }
+    throw new Error(detailMessage)
+  }
+
+  return (await response.json()) as SvnCredentialDetailResponse
 }
 
 export async function saveSvnCredentials(

@@ -23,6 +23,8 @@
 - 工作台数据源弹窗修复：`POST /api/v1/sources/local-pick` 改为以独立子进程驱动 `tkinter` 文件选择框，避免在 uvicorn 主进程里残留 Tcl 解释器与窗口焦点资源；用户在选完本地配置表后立即修改「数据源标识」时，整页不再被卡住，连续多次选择文件也不会越用越慢。
 - SVN 数据源（HTTP）打通：用户在数据源弹窗里选「SVN（推荐 HTTP 链接）」，输入目录 URL 后弹窗浏览选择 `.xls/.xlsx` 文件即可保存；后端新增 `POST /api/v1/sources/svn-list / svn-credentials / svn-refresh`，凭据按当前登录用户与 host 维度 Fernet 加密落 `<runtime>/svn-credentials.json`，远端 URL 落到 `<runtime>/svn-cache/<host>/<key>/` 后复用统一执行引擎；变量池下拉与 `/api/v1/engine/execute`、`/api/v1/fixed-rules/{execute,svn-update}` 都自动支持 SVN 远端文件，命中默认 60s TTL 时不重复访问 SVN。SVN 业务级鉴权失败用 HTTP 403 表达，避免与登录态过期混淆；远端 host 通过 `settings.svn_url_allowlist`（默认 `samosvn`）做 SSRF 兜底。
 - SVN 凭据弹窗支持可配置“测试目录 URL”，并按当前登录用户 + host 维度持久化记忆；`samosvn` 默认回填 `https://samosvn/data/project/samo/GameDatas/`，测试连接会先保存凭据与测试目录，再对该目录执行一次 `svn list`。后端继续把 `forbidden` 归类为权限/鉴权失败，前端会给出更准确的权限提示。
+- SVN 凭据弹窗再次打开时，现会按当前登录用户 + host 读取并回填已保存的用户名、密码与测试目录 URL；host 列表接口继续不返回 password，密码仅通过单 host 详情接口回填到当前弹窗，避免浏览器自动填充把密码显示成别的值。
+- 页面刷新后，步骤 1 的远端 SVN 数据源现会主动加载当前登录用户已保存的 SVN host 凭据列表；状态列按 `检测中 / 已就绪 / 待授权 / 状态未知` 实时收口，不再因为内存中的凭据列表尚未加载而误报 `待授权`。
 - 修复步骤 2 变量弹窗的前端错误拦截：SVN Excel 数据源不再被误判为“仅本地 Excel 可提取字段”，个人校验与项目校验现在都可直接基于 SVN `.xls/.xlsx` 数据源添加单变量和组合变量；CSV 仍继续显示不支持字段映射提取。
 - 数据源弹窗交互调整：本地 Excel 与 SVN Excel 现支持“先选文件，再自动回填数据源标识”；若标识为空，系统会按 Excel 文件名生成只含字母、数字与下划线的默认标识。若自动生成的标识与现有数据源重复，则要求用户手动修改后再保存，不再强制“先填标识再选文件”。
 

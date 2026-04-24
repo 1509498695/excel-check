@@ -18,6 +18,8 @@ const props = defineProps<{
   defaultTestDirUrl?: string
   /** 已保存的用户名，回填表单。 */
   defaultUsername?: string
+  /** 已保存的密码，回填表单。 */
+  defaultPassword?: string
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +30,7 @@ const emit = defineEmits<{
 
 const form = reactive({
   username: props.defaultUsername ?? '',
-  password: '',
+  password: props.defaultPassword ?? '',
   testDirUrl: props.defaultTestDirUrl ?? '',
   showPassword: false,
 })
@@ -43,7 +45,7 @@ watch(
   (next) => {
     if (next) {
       form.username = props.defaultUsername ?? ''
-      form.password = ''
+      form.password = props.defaultPassword ?? ''
       form.testDirUrl =
         props.defaultTestDirUrl?.trim() ||
         getDefaultSvnCredentialTestDirUrl(props.host)
@@ -183,7 +185,11 @@ function handleCancel(): void {
 
       <div>
         <label class="mb-1.5 block text-[12px] font-medium text-ink-500">用户名</label>
-        <el-input v-model="form.username" placeholder="例如：alice" />
+        <el-input
+          v-model="form.username"
+          placeholder="例如：alice"
+          autocomplete="off"
+        />
       </div>
 
       <div>
@@ -193,6 +199,7 @@ function handleCancel(): void {
           :type="form.showPassword ? 'text' : 'password'"
           show-password
           placeholder="登录 SVN 的密码"
+          autocomplete="new-password"
         />
       </div>
     </div>

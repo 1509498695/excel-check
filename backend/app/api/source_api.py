@@ -27,6 +27,7 @@ from backend.app.loaders.svn_cache import (
 )
 from backend.app.loaders.svn_credentials import (
     delete_credentials,
+    load_credentials,
     list_hosts as list_svn_credential_hosts,
     save_credentials,
 )
@@ -393,8 +394,6 @@ async def list_remote_svn_directory(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    from backend.app.loaders.svn_credentials import load_credentials
-
     credentials = load_credentials(host=host, user_scope=ctx.user.username)
 
     try:
@@ -481,6 +480,34 @@ async def list_svn_credentials_endpoint(
         "code": 200,
         "msg": "ok",
         "data": {"items": items},
+    }
+
+
+@router.get("/svn-credentials/{host}")
+async def get_svn_credential_detail_endpoint(
+    host: str,
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """读取当前登录用户在某 host 上已保存的 SVN 凭据详情。"""
+    try:
+        normalized_host = enforce_host_allowlist(host)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    credential = load_credentials(host=normalized_host, user_scope=ctx.user.username)
+    if credential is None:
+        raise HTTPException(status_code=404, detail="当前 host 尚未保存 SVN 凭据。")
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            "host": credential.host,
+            "username": credential.username,
+            "password": credential.password,
+            "updated_at": credential.updated_at,
+            "test_dir_url": credential.test_dir_url,
+        },
     }
 
 

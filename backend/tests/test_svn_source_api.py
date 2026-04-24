@@ -155,6 +155,15 @@ async def test_svn_credentials_crud_round_trip(
     assert saved.json()["data"]["host"] == "samosvn"
     assert saved.json()["data"]["test_dir_url"] == "https://samosvn/data/project/samo/GameDatas/"
 
+    # 单 host 详情：允许返回 password，用于弹窗再次打开时回填
+    detail = await auth_client.get("/api/v1/sources/svn-credentials/samosvn")
+    assert detail.status_code == 200
+    detail_data = detail.json()["data"]
+    assert detail_data["host"] == "samosvn"
+    assert detail_data["username"] == "alice"
+    assert detail_data["password"] == "secret"
+    assert detail_data["test_dir_url"] == "https://samosvn/data/project/samo/GameDatas/"
+
     # 列出
     listed = await auth_client.get("/api/v1/sources/svn-credentials")
     items = listed.json()["data"]["items"]
@@ -170,6 +179,17 @@ async def test_svn_credentials_crud_round_trip(
 
     after = await auth_client.get("/api/v1/sources/svn-credentials")
     assert after.json()["data"]["items"] == []
+
+
+@pytest.mark.anyio
+async def test_svn_credential_detail_returns_404_when_host_not_saved(
+    auth_client: AsyncClient,
+    temp_svn_runtime: Path,
+) -> None:
+    """未保存过该 host 时，详情接口应返回 404。"""
+    response = await auth_client.get("/api/v1/sources/svn-credentials/samosvn")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "当前 host 尚未保存 SVN 凭据。"
 
 
 @pytest.mark.anyio

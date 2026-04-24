@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { pickLocalSourcePath } from '../../api/workbench'
 import {
   ensureTrailingSlash,
+  fetchSvnCredential,
   getDefaultSvnCredentialTestDirUrl,
   isHttpDirUrl,
   parseSvnHost,
@@ -72,8 +73,10 @@ const svnCredentialDialogVisible = ref(false)
 const svnCredentialDialogHost = ref('')
 const svnCredentialDialogDefaultTestDirUrl = ref('')
 const svnCredentialDialogDefaultUsername = ref('')
+const svnCredentialDialogDefaultPassword = ref('')
 const svnPickerDirUrl = ref('')
 const svnCredentialItems = ref<SvnCredentialItem[]>([])
+const svnCredentialLoadState = ref<'loading' | 'ready' | 'error'>('loading')
 
 const panelCopy = computed(() => ({
   emptyText: isFixedRulesVariant.value ? '暂无数据源。' : '还没有录入数据源。',
@@ -299,7 +302,16 @@ function getStatusTone(source: DataSource): 'success' | 'warning' | 'info' {
   }
 
   if (source.type === 'svn') {
-    if (isRemoteSvnSource(source) && !hasCredentialFor(source)) {
+    if (!isRemoteSvnSource(source)) {
+      return 'success'
+    }
+    if (svnCredentialLoadState.value === 'loading') {
+      return 'info'
+    }
+    if (svnCredentialLoadState.value === 'error') {
+      return 'info'
+    }
+    if (!hasCredentialFor(source)) {
       return 'warning'
     }
     return 'success'
@@ -317,7 +329,16 @@ function getStatusLabel(source: DataSource): string {
   }
 
   if (source.type === 'svn') {
-    if (isRemoteSvnSource(source) && !hasCredentialFor(source)) {
+    if (!isRemoteSvnSource(source)) {
+      return '已就绪'
+    }
+    if (svnCredentialLoadState.value === 'loading') {
+      return '检测中'
+    }
+    if (svnCredentialLoadState.value === 'error') {
+      return '状态未知'
+    }
+    if (!hasCredentialFor(source)) {
       return '待授权'
     }
     return '已就绪'
@@ -352,11 +373,15 @@ function hasCredentialFor(source: DataSource): boolean {
 }
 
 async function refreshSvnCredentialItems(): Promise<void> {
+  svnCredentialLoadState.value = 'loading'
   try {
     const response = await listSvnCredentialHosts()
     svnCredentialItems.value = response.data.items
+    svnCredentialLoadState.value = 'ready'
   } catch {
-    // 凭据列表加载失败不阻塞主流程，状态标签会回退为"已就绪"。
+    svnCredentialItems.value = []
+    svnCredentialLoadState.value = 'error'
+    // 凭据列表加载失败不阻塞主流程，但状态需回退为“状态未知”，避免误报“待授权”。
   }
 }
 
@@ -378,16 +403,34 @@ function handleSvnPicked(fileUrl: string): void {
 
 function handleCredentialRequiredFromPicker(host: string): void {
   svnPickerVisible.value = false
-  openSvnCredentialDialog(host)
+  void openSvnCredentialDialog(host)
 }
 
-function openSvnCredentialDialog(host: string): void {
+async function openSvnCredentialDialog(host: string): Promise<void> {
   const normalizedHost = host.trim().toLowerCase()
   const matchedCredential = svnCredentialItems.value.find((item) => item.host === normalizedHost)
-  svnCredentialDialogHost.value = host
-  svnCredentialDialogDefaultTestDirUrl.value =
+  const fallbackTestDirUrl =
     matchedCredential?.test_dir_url?.trim() || getDefaultSvnCredentialTestDirUrl(normalizedHost)
+
+  svnCredentialDialogHost.value = normalizedHost
   svnCredentialDialogDefaultUsername.value = matchedCredential?.username ?? ''
+  svnCredentialDialogDefaultPassword.value = ''
+  svnCredentialDialogDefaultTestDirUrl.value = fallbackTestDirUrl
+
+  try {
+    const response = await fetchSvnCredential(normalizedHost)
+    if (response?.data) {
+      svnCredentialDialogDefaultUsername.value = response.data.username
+      svnCredentialDialogDefaultPassword.value = response.data.password
+      svnCredentialDialogDefaultTestDirUrl.value =
+        response.data.test_dir_url?.trim() || fallbackTestDirUrl
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : '读取已保存的 SVN 凭据失败，已回退到默认值。'
+    ElMessage.warning(message)
+  }
+
   svnCredentialDialogVisible.value = true
 }
 
@@ -407,7 +450,7 @@ function handleManageSvnCredential(): void {
     ElMessage.warning('请先输入 SVN 目录 URL，再配置凭据。')
     return
   }
-  openSvnCredentialDialog(host)
+  void openSvnCredentialDialog(host)
 }
 
 function getSourceIssue(sourceId: string): string {
@@ -445,6 +488,10 @@ async function chooseLocalFile(): Promise<void> {
 
 defineExpose({
   openCreateDialog,
+})
+
+onMounted(() => {
+  void refreshSvnCredentialItems()
 })
 </script>
 
@@ -683,6 +730,7 @@ defineExpose({
       :host="svnCredentialDialogHost"
       :default-test-dir-url="svnCredentialDialogDefaultTestDirUrl"
       :default-username="svnCredentialDialogDefaultUsername"
+      :default-password="svnCredentialDialogDefaultPassword"
       @saved="handleSvnCredentialSaved"
     />
   </div>
