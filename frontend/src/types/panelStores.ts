@@ -49,6 +49,12 @@ export interface SourcePathReplacementStoreLike extends SourceManagementStoreLik
   saveConfigNow(): Promise<void>
   setSelectedPathReplacementPreset(group: SourcePathReplacementGroup, path: string | null): void
   addPathReplacementPreset(group: SourcePathReplacementGroup, path: string): void
+  updatePathReplacementPreset(
+    group: SourcePathReplacementGroup,
+    originalPath: string,
+    nextPath: string,
+  ): void
+  removePathReplacementPreset(group: SourcePathReplacementGroup, path: string): void
   replaceSourceBasePath(
     group: SourcePathReplacementGroup,
     baseDirectory: string,

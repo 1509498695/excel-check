@@ -2371,7 +2371,7 @@ async function handleSvnUpdate(): Promise<void> {
             </button>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               @click="openDataSourceCreate"
             >
               <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2408,18 +2408,20 @@ async function handleSvnUpdate(): Promise<void> {
           <template #actions>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               :disabled="!store.sources.length"
               @click="openSingleVariableCreate"
             >
+              <Plus class="h-3.5 w-3.5" />
               添加单个变量
             </button>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               :disabled="!store.sources.length"
               @click="openCompositeVariableCreate"
             >
+              <Plus class="h-3.5 w-3.5" />
               添加组合变量
             </button>
           </template>
@@ -2921,7 +2923,7 @@ async function handleSvnUpdate(): Promise<void> {
                   <span class="text-[12px] font-medium text-ink-700">字段比较 {{ index + 1 }}</span>
                   <button
                     type="button"
-                    class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="ec-btn-danger-outline-compact"
                     :disabled="dualCompositeComparisons.length === 1"
                     @click="removeDualCompositeComparison(comparison.comparison_id)"
                   >
@@ -3013,7 +3015,7 @@ async function handleSvnUpdate(): Promise<void> {
                   </button>
                   <button
                     type="button"
-                    class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="ec-btn-danger-outline-compact"
                     :disabled="pipelineRuleForm.nodes.length === 1"
                     @click="removePipelineNode(node.node_id)"
                   >
@@ -3070,7 +3072,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger"
+                      class="ec-btn-danger-outline-compact"
                       @click="removePipelineNodeFilter(node, condition.condition_id)"
                     >
                       删除
@@ -3158,7 +3160,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <span class="text-[12px] text-ink-700">最终判定 {{ assertionIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="ec-btn-danger-outline-compact"
                       :disabled="node.assertions.length === 1"
                       @click="removePipelineNodeAssertion(node, condition.condition_id)"
                     >
@@ -3243,7 +3245,7 @@ async function handleSvnUpdate(): Promise<void> {
                   <span class="text-[12px] font-medium text-ink-700">全局条件 {{ index + 1 }}</span>
                   <button
                     type="button"
-                    class="ec-btn-link-danger"
+                    class="ec-btn-danger-outline-compact"
                     @click="removeGlobalFilter(condition.condition_id)"
                   >
                     删除
@@ -3330,7 +3332,7 @@ async function handleSvnUpdate(): Promise<void> {
                 <div class="text-[13px] font-medium text-ink-900">分支 {{ branchIndex + 1 }}</div>
                 <button
                   type="button"
-                  class="ec-btn-link-danger"
+                  class="ec-btn-danger-outline-compact"
                   @click="removeBranch(branch.branch_id)"
                 >
                   删除分支
@@ -3361,7 +3363,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger"
+                      class="ec-btn-danger-outline-compact"
                       @click="removeBranchFilter(branch, condition.condition_id)"
                     >
                       删除
@@ -3448,7 +3450,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <span class="text-[12px] text-ink-700">校验条件 {{ assertionIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="ec-btn-danger-outline-compact"
                       :disabled="branch.assertions.length === 1"
                       @click="removeBranchAssertion(branch, condition.condition_id)"
                     >

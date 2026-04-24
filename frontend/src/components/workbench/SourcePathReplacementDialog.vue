@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { listSvnDirectory } from '../../api/svn'
@@ -17,25 +17,36 @@ const props = withDefaults(
   },
 )
 
+type ManagedInputInstance = {
+  focus?: () => void
+}
+
 type GroupFormState = {
   selectedDirectory: string
-  newDirectory: string
+  addingDraft: string | null
+  editingOriginalPath: string | null
+  editingValue: string
   isSavingPreset: boolean
   isApplying: boolean
 }
 
 const dialogVisible = ref(false)
 const activeGroup = ref<SourcePathReplacementGroup>('local')
+const inputRefs = reactive<Record<string, ManagedInputInstance | null>>({})
 const formState = reactive<Record<SourcePathReplacementGroup, GroupFormState>>({
   local: {
     selectedDirectory: '',
-    newDirectory: '',
+    addingDraft: null,
+    editingOriginalPath: null,
+    editingValue: '',
     isSavingPreset: false,
     isApplying: false,
   },
   svn: {
     selectedDirectory: '',
-    newDirectory: '',
+    addingDraft: null,
+    editingOriginalPath: null,
+    editingValue: '',
     isSavingPreset: false,
     isApplying: false,
   },
@@ -66,46 +77,70 @@ const groupCopy = computed<
     {
       chooseTitle: string
       choosePlaceholder: string
-      addTitle: string
+      addButtonLabel: string
       addPlaceholder: string
       saveButtonLabel: string
       emptyText: string
+      listHint: string
       applyButtonLabel: string
       noCandidateText: string
       successText: (updatedCount: number, failedCount: number) => string
       failureTitle: string
+      saveSuccessText: string
+      updateSuccessText: string
+      removeSuccessText: string
+      duplicateText: string
+      missingSelectionText: string
+      deleteConfirmText: string
+      invalidInputText: string
     }
   >
 >(() => ({
   local: {
-    chooseTitle: '选择本地目录',
+    chooseTitle: '当前用于替换的本地目录',
     choosePlaceholder: '从已保存的本地目录中选择',
-    addTitle: '新增并保存本地目录',
+    addButtonLabel: '+ 添加新目录',
     addPlaceholder: '输入本地绝对目录路径，例如 D:\\project_samo\\GameDatas\\datas_qa89',
-    saveButtonLabel: '保存本地目录',
-    emptyText: '还没有保存本地目录。先在上方输入一个目录并保存，我们就可以在不同版本的本地目录之间快速切换了。',
-    applyButtonLabel: '一键替换本地路径并刷新',
+    saveButtonLabel: '保存',
+    emptyText: '还没有保存本地目录。点击右上角“+ 添加新目录”后，就可以把常用版本目录保存在这里。',
+    listHint: '点击列表项即可切换当前替换目录；支持行内编辑与删除。',
+    applyButtonLabel: '本地路径替换',
     noCandidateText: '当前没有可替换的本地路径型数据源。',
     successText: (updatedCount, failedCount) =>
       failedCount > 0
         ? `已替换 ${updatedCount} 个本地数据源，其中 ${failedCount} 个刷新失败，请检查数据源状态提示。`
         : `已替换并刷新 ${updatedCount} 个本地数据源，请重新执行校验。`,
     failureTitle: '本地路径替换失败',
+    saveSuccessText: '本地目录已保存。',
+    updateSuccessText: '本地目录已更新。',
+    removeSuccessText: '本地目录已删除。',
+    duplicateText: '该本地目录已存在，请直接选择或修改为新的目录。',
+    missingSelectionText: '请先选择一个本地目录。',
+    deleteConfirmText: '确定要删除该保存的本地目录吗？',
+    invalidInputText: '请先输入需要保存的本地目录。',
   },
   svn: {
-    chooseTitle: '选择 SVN 目录',
+    chooseTitle: '当前用于替换的 SVN 目录',
     choosePlaceholder: '从已保存的 SVN 目录 URL 中选择',
-    addTitle: '新增并保存 SVN 目录',
+    addButtonLabel: '+ 添加新目录',
     addPlaceholder: '输入 SVN 目录 URL，例如 https://samosvn/data/project/samo/GameDatas/datas_qa89/',
-    saveButtonLabel: '保存 SVN 目录',
-    emptyText: '还没有保存 SVN 目录。先在上方输入一个目录 URL 并保存，我们就可以在不同版本的 SVN 目录之间快速切换了。',
-    applyButtonLabel: '一键替换 SVN 路径并刷新',
+    saveButtonLabel: '保存',
+    emptyText: '还没有保存 SVN 目录。点击右上角“+ 添加新目录”后，就可以把常用版本目录保存在这里。',
+    listHint: '点击列表项即可切换当前替换目录；支持行内编辑与删除。',
+    applyButtonLabel: 'svn路径替换',
     noCandidateText: '当前没有可替换的远端 SVN 数据源。',
     successText: (updatedCount, failedCount) =>
       failedCount > 0
         ? `已替换 ${updatedCount} 个 SVN 数据源，其中 ${failedCount} 个刷新失败，请检查数据源状态提示。`
         : `已替换并刷新 ${updatedCount} 个 SVN 数据源，请重新执行校验。`,
     failureTitle: 'SVN 路径替换失败',
+    saveSuccessText: 'SVN 目录已保存。',
+    updateSuccessText: 'SVN 目录已更新。',
+    removeSuccessText: 'SVN 目录已删除。',
+    duplicateText: '该 SVN 目录已存在，请直接选择或修改为新的目录。',
+    missingSelectionText: '请先选择一个 SVN 目录 URL。',
+    deleteConfirmText: '确定要删除该保存的 SVN 目录吗？',
+    invalidInputText: '请先输入需要保存的 SVN 目录 URL。',
   },
 }))
 
@@ -129,12 +164,65 @@ function syncSelectedDirectory(group: SourcePathReplacementGroup): void {
   getGroupState(group).selectedDirectory = getSelectedPreset(group) ?? ''
 }
 
+function resetGroupDrafts(group: SourcePathReplacementGroup): void {
+  const state = getGroupState(group)
+  state.addingDraft = null
+  state.editingOriginalPath = null
+  state.editingValue = ''
+}
+
+function bindManagedInputRef(key: string, instance: ManagedInputInstance | null): void {
+  inputRefs[key] = instance
+}
+
+function bindAddInputRef(
+  group: SourcePathReplacementGroup,
+  instance: ManagedInputInstance | null,
+): void {
+  bindManagedInputRef(`add:${group}`, instance)
+}
+
+function bindEditInputRef(
+  group: SourcePathReplacementGroup,
+  preset: string,
+  instance: ManagedInputInstance | null,
+): void {
+  bindManagedInputRef(`edit:${group}:${preset}`, instance)
+}
+
+function getAddInputRefBinder(
+  group: SourcePathReplacementGroup,
+): (instance: ManagedInputInstance | null) => void {
+  return (instance) => bindAddInputRef(group, instance)
+}
+
+function getEditInputRefBinder(
+  group: SourcePathReplacementGroup,
+  preset: string,
+): (instance: ManagedInputInstance | null) => void {
+  return (instance) => bindEditInputRef(group, preset, instance)
+}
+
+function focusManagedInput(key: string): void {
+  nextTick(() => {
+    inputRefs[key]?.focus?.()
+  })
+}
+
+function focusAddInput(group: SourcePathReplacementGroup): void {
+  focusManagedInput(`add:${group}`)
+}
+
+function focusEditInput(group: SourcePathReplacementGroup, preset: string): void {
+  focusManagedInput(`edit:${group}:${preset}`)
+}
+
 function openDialog(): void {
   activeGroup.value = 'local'
   syncSelectedDirectory('local')
   syncSelectedDirectory('svn')
-  formState.local.newDirectory = ''
-  formState.svn.newDirectory = ''
+  resetGroupDrafts('local')
+  resetGroupDrafts('svn')
   dialogVisible.value = true
 }
 
@@ -155,23 +243,56 @@ async function normalizeDirectoryPath(
   return response.data.directory_path
 }
 
-async function handleSavePreset(group: SourcePathReplacementGroup): Promise<void> {
+function isDuplicatePreset(
+  group: SourcePathReplacementGroup,
+  normalizedPath: string,
+  excludePath?: string | null,
+): boolean {
+  const normalizedExclude = excludePath?.trim().toLowerCase() ?? null
+  return getPresetList(group).some((preset) => {
+    const presetKey = preset.toLowerCase()
+    return presetKey === normalizedPath.toLowerCase() && presetKey !== normalizedExclude
+  })
+}
+
+function handleSelectPreset(group: SourcePathReplacementGroup, preset: string): void {
+  getGroupState(group).selectedDirectory = preset
+}
+
+function handleStartAdd(group: SourcePathReplacementGroup): void {
   const state = getGroupState(group)
-  const candidatePath = state.newDirectory.trim()
+  state.editingOriginalPath = null
+  state.editingValue = ''
+  state.addingDraft = ''
+  focusAddInput(group)
+}
+
+function handleCancelAdd(group: SourcePathReplacementGroup): void {
+  getGroupState(group).addingDraft = null
+}
+
+async function handleSaveNewPreset(group: SourcePathReplacementGroup): Promise<void> {
+  const state = getGroupState(group)
+  const candidatePath = state.addingDraft?.trim() ?? ''
   if (!candidatePath) {
-    ElMessage.warning(group === 'svn' ? '请先输入需要保存的 SVN 目录 URL。' : '请先输入需要保存的本地目录。')
+    ElMessage.warning(groupCopy.value[group].invalidInputText)
     return
   }
 
   state.isSavingPreset = true
   try {
     const normalizedPath = await normalizeDirectoryPath(group, candidatePath)
+    if (isDuplicatePreset(group, normalizedPath)) {
+      ElMessage.warning(groupCopy.value[group].duplicateText)
+      return
+    }
+
     props.store.addPathReplacementPreset(group, normalizedPath)
     props.store.setSelectedPathReplacementPreset(group, normalizedPath)
     await props.store.saveConfigNow()
     state.selectedDirectory = normalizedPath
-    state.newDirectory = ''
-    ElMessage.success(group === 'svn' ? 'SVN 目录已保存。' : '本地目录已保存。')
+    state.addingDraft = null
+    ElMessage.success(groupCopy.value[group].saveSuccessText)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存目录失败。')
   } finally {
@@ -179,11 +300,84 @@ async function handleSavePreset(group: SourcePathReplacementGroup): Promise<void
   }
 }
 
+function handleStartEdit(group: SourcePathReplacementGroup, preset: string): void {
+  const state = getGroupState(group)
+  state.addingDraft = null
+  state.editingOriginalPath = preset
+  state.editingValue = preset
+  focusEditInput(group, preset)
+}
+
+function handleCancelEdit(group: SourcePathReplacementGroup): void {
+  const state = getGroupState(group)
+  state.editingOriginalPath = null
+  state.editingValue = ''
+}
+
+async function handleSaveEditedPreset(group: SourcePathReplacementGroup): Promise<void> {
+  const state = getGroupState(group)
+  const originalPath = state.editingOriginalPath
+  const candidatePath = state.editingValue.trim()
+  if (!originalPath) {
+    return
+  }
+  if (!candidatePath) {
+    ElMessage.warning(groupCopy.value[group].invalidInputText)
+    return
+  }
+
+  state.isSavingPreset = true
+  try {
+    const normalizedPath = await normalizeDirectoryPath(group, candidatePath)
+    if (isDuplicatePreset(group, normalizedPath, originalPath)) {
+      ElMessage.warning(groupCopy.value[group].duplicateText)
+      return
+    }
+
+    const wasSelectedLocally =
+      state.selectedDirectory.toLowerCase() === originalPath.toLowerCase()
+    props.store.updatePathReplacementPreset(group, originalPath, normalizedPath)
+    await props.store.saveConfigNow()
+    if (wasSelectedLocally) {
+      state.selectedDirectory = normalizedPath
+    }
+    state.editingOriginalPath = null
+    state.editingValue = ''
+    ElMessage.success(groupCopy.value[group].updateSuccessText)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '更新目录失败。')
+  } finally {
+    state.isSavingPreset = false
+  }
+}
+
+async function handleDeletePreset(
+  group: SourcePathReplacementGroup,
+  preset: string,
+): Promise<void> {
+  try {
+    const state = getGroupState(group)
+    const wasSelectedLocally = state.selectedDirectory.toLowerCase() === preset.toLowerCase()
+    props.store.removePathReplacementPreset(group, preset)
+    await props.store.saveConfigNow()
+    if (wasSelectedLocally) {
+      state.selectedDirectory = ''
+    }
+    if (state.editingOriginalPath === preset) {
+      state.editingOriginalPath = null
+      state.editingValue = ''
+    }
+    ElMessage.success(groupCopy.value[group].removeSuccessText)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除目录失败。')
+  }
+}
+
 async function handleApplyReplacement(group: SourcePathReplacementGroup): Promise<void> {
   const state = getGroupState(group)
   const candidatePath = state.selectedDirectory.trim()
   if (!candidatePath) {
-    ElMessage.warning(group === 'svn' ? '请先选择一个 SVN 目录 URL。' : '请先选择一个本地目录。')
+    ElMessage.warning(groupCopy.value[group].missingSelectionText)
     return
   }
 
@@ -220,42 +414,52 @@ defineExpose({
 <template>
   <el-dialog
     v-model="dialogVisible"
-    width="780px"
+    width="820px"
     :title="copy.title"
+    class="source-path-management-dialog"
     destroy-on-close
   >
-    <div class="space-y-5">
-      <p class="text-[13px] leading-6 text-ink-500">
+    <div class="space-y-6">
+      <p class="text-[13px] leading-6 text-gray-500">
         {{ copy.subtitle }}
       </p>
 
-      <div class="rounded-card border border-line bg-canvas p-2">
+      <section class="rounded-lg border border-gray-200 bg-white p-2">
         <div class="grid grid-cols-2 gap-2">
           <button
             v-for="tab in groupTabs"
             :key="tab.key"
             type="button"
-            class="rounded-field border px-4 py-3 text-left transition"
+            class="rounded-md border bg-white px-4 py-4 text-left transition-colors duration-150"
             :class="
               activeGroup === tab.key
-                ? 'border-blue-200 bg-blue-50 text-accent shadow-sm'
-                : 'border-line bg-white text-ink-700 hover:border-blue-200 hover:bg-blue-50/40'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-gray-200 text-gray-700 hover:border-blue-200 hover:text-blue-600'
             "
             @click="activeGroup = tab.key"
           >
-            <div class="text-[13px] font-semibold">
+            <div class="text-[13px] font-semibold leading-5">
               {{ tab.label }}
             </div>
-            <div class="mt-1 text-[12px] text-ink-500">
+            <div class="mt-1 text-[12px] leading-5 text-gray-500">
               {{ tab.description }}
             </div>
           </button>
         </div>
-      </div>
+      </section>
 
-      <section class="space-y-3 rounded-card border border-line bg-canvas px-5 py-4">
-        <div class="text-[13px] font-semibold text-ink-900">
-          {{ groupCopy[activeGroup].chooseTitle }}
+      <section class="space-y-3 rounded-lg border border-gray-200 bg-white px-5 py-5">
+        <div class="space-y-1">
+          <div class="text-[13px] font-semibold text-gray-900">
+            {{ groupCopy[activeGroup].chooseTitle }}
+          </div>
+          <div class="text-[12px] leading-5 text-gray-500">
+            {{
+              activeGroup === 'local'
+                ? '选择一个已保存的本地目录，作为当前本地数据源的统一替换目标。'
+                : '选择一个已保存的 SVN 目录 URL，作为当前远端 SVN 数据源的统一替换目标。'
+            }}
+          </div>
         </div>
         <el-select
           v-model="formState[activeGroup].selectedDirectory"
@@ -273,59 +477,154 @@ defineExpose({
         </el-select>
       </section>
 
-      <section class="space-y-3 rounded-card border border-line bg-canvas px-5 py-4">
-        <div class="text-[13px] font-semibold text-ink-900">
-          {{ groupCopy[activeGroup].addTitle }}
-        </div>
-        <div class="flex flex-col gap-3 md:flex-row md:items-center">
-          <el-input
-            v-model="formState[activeGroup].newDirectory"
-            :placeholder="groupCopy[activeGroup].addPlaceholder"
-            clearable
-          />
-          <button
-            type="button"
-            class="ec-btn-outline whitespace-nowrap"
-            :disabled="formState[activeGroup].isSavingPreset"
-            @click="handleSavePreset(activeGroup)"
-          >
-            {{ groupCopy[activeGroup].saveButtonLabel }}
-          </button>
-        </div>
-      </section>
-
-      <section class="space-y-3 rounded-card border border-line bg-canvas px-5 py-4">
-        <div class="flex items-center justify-between gap-3">
-          <div class="text-[13px] font-semibold text-ink-900">已保存目录列表</div>
-          <span class="text-[12px] text-ink-500">
-            共 {{ getPresetList(activeGroup).length }} 个
-          </span>
-        </div>
-        <div
-          v-if="getPresetList(activeGroup).length"
-          class="max-h-52 space-y-2 overflow-y-auto pr-1"
-        >
-          <button
-            v-for="preset in getPresetList(activeGroup)"
-            :key="preset"
-            type="button"
-            class="flex w-full items-start justify-between gap-3 rounded-field border border-line bg-white px-4 py-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40"
-            @click="formState[activeGroup].selectedDirectory = preset"
-          >
-            <span class="break-all text-[13px] text-ink-900">{{ preset }}</span>
-            <span
-              v-if="formState[activeGroup].selectedDirectory === preset"
-              class="shrink-0 text-[12px] font-medium text-accent"
-            >
-              当前选择
+      <section class="space-y-4 rounded-lg border border-gray-200 bg-white px-5 py-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-[13px] font-semibold text-gray-900">已保存目录列表</div>
+            <div class="mt-1 text-[12px] leading-5 text-gray-500">
+              {{ groupCopy[activeGroup].listHint }}
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-[12px] text-gray-500">
+              共 {{ getPresetList(activeGroup).length }} 个
             </span>
-          </button>
+            <button
+              type="button"
+              class="ec-btn ec-btn-secondary ec-btn-sm"
+              :disabled="formState[activeGroup].isSavingPreset"
+              @click="handleStartAdd(activeGroup)"
+            >
+              {{ groupCopy[activeGroup].addButtonLabel }}
+            </button>
+          </div>
         </div>
-        <div
-          v-else
-          class="rounded-field border border-dashed border-line bg-white px-4 py-5 text-[13px] text-ink-500"
-        >
-          {{ groupCopy[activeGroup].emptyText }}
+
+        <div class="rounded-md border border-gray-200 bg-white">
+          <div
+            v-if="formState[activeGroup].addingDraft !== null"
+            class="flex items-center justify-between gap-4 border-b border-gray-100 px-4 py-3"
+          >
+            <div class="min-w-0 flex-1">
+              <el-input
+                :ref="getAddInputRefBinder(activeGroup)"
+                v-model="formState[activeGroup].addingDraft"
+                :placeholder="groupCopy[activeGroup].addPlaceholder"
+                clearable
+                @keyup.enter="handleSaveNewPreset(activeGroup)"
+              />
+            </div>
+            <div class="flex shrink-0 items-center gap-3">
+              <button
+                type="button"
+                class="ec-btn ec-btn-secondary ec-btn-sm"
+                :disabled="formState[activeGroup].isSavingPreset"
+                @click="handleSaveNewPreset(activeGroup)"
+              >
+                {{ groupCopy[activeGroup].saveButtonLabel }}
+              </button>
+              <button
+                type="button"
+                class="ec-btn ec-btn-secondary ec-btn-sm"
+                :disabled="formState[activeGroup].isSavingPreset"
+                @click="handleCancelAdd(activeGroup)"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="getPresetList(activeGroup).length"
+            class="max-h-64 divide-y divide-gray-100 overflow-y-auto"
+          >
+            <div
+              v-for="preset in getPresetList(activeGroup)"
+              :key="preset"
+              class="flex items-center justify-between gap-4 px-4 py-3 transition-colors duration-150 hover:bg-gray-50/50"
+            >
+              <div class="min-w-0 flex-1">
+                <button
+                  v-if="formState[activeGroup].editingOriginalPath !== preset"
+                  type="button"
+                  class="preset-select-button"
+                  @click="handleSelectPreset(activeGroup, preset)"
+                >
+                  <span class="break-all">{{ preset }}</span>
+                </button>
+                <el-input
+                  v-else
+                  :ref="getEditInputRefBinder(activeGroup, preset)"
+                  v-model="formState[activeGroup].editingValue"
+                  @keyup.enter="handleSaveEditedPreset(activeGroup)"
+                />
+              </div>
+
+              <div class="flex shrink-0 items-center gap-3">
+                <span
+                  v-if="
+                    formState[activeGroup].selectedDirectory === preset &&
+                    formState[activeGroup].editingOriginalPath !== preset
+                  "
+                  class="rounded-full border border-blue-200 px-2.5 py-1 text-[12px] font-medium text-blue-600"
+                >
+                  当前选择
+                </span>
+
+                <template v-if="formState[activeGroup].editingOriginalPath === preset">
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    :disabled="formState[activeGroup].isSavingPreset"
+                    @click="handleSaveEditedPreset(activeGroup)"
+                  >
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    :disabled="formState[activeGroup].isSavingPreset"
+                    @click="handleCancelEdit(activeGroup)"
+                  >
+                    取消
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    class="ec-action-link text-[13px]"
+                    @click.stop="handleStartEdit(activeGroup, preset)"
+                  >
+                    编辑
+                  </button>
+                  <el-popconfirm
+                    width="260"
+                    :title="groupCopy[activeGroup].deleteConfirmText"
+                    confirm-button-text="删除"
+                    cancel-button-text="取消"
+                    @confirm="handleDeletePreset(activeGroup, preset)"
+                  >
+                    <template #reference>
+                      <button
+                        type="button"
+                        class="ec-action-link-danger text-[13px]"
+                        @click.stop
+                      >
+                        删除
+                      </button>
+                    </template>
+                  </el-popconfirm>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else-if="formState[activeGroup].addingDraft === null"
+            class="rounded-md border border-dashed border-gray-200 px-4 py-5 text-[13px] leading-6 text-gray-500"
+          >
+            {{ groupCopy[activeGroup].emptyText }}
+          </div>
         </div>
       </section>
     </div>
@@ -334,7 +633,7 @@ defineExpose({
       <div class="flex justify-end gap-3">
         <button
           type="button"
-          class="ec-btn-ghost"
+          class="inline-flex min-h-[42px] items-center justify-center rounded-md border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-800 transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="formState.local.isApplying || formState.local.isSavingPreset || formState.svn.isApplying || formState.svn.isSavingPreset"
           @click="dialogVisible = false"
         >
@@ -342,7 +641,7 @@ defineExpose({
         </button>
         <button
           type="button"
-          class="ec-btn-primary"
+          class="inline-flex min-h-[42px] items-center justify-center rounded-md bg-blue-600 px-4 text-[14px] font-semibold text-white shadow-[0_8px_18px_rgba(37,99,235,0.18)] transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="formState[activeGroup].isApplying"
           @click="handleApplyReplacement(activeGroup)"
         >
@@ -352,3 +651,61 @@ defineExpose({
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.source-path-management-dialog :deep(.el-input__wrapper),
+.source-path-management-dialog :deep(.el-select__wrapper) {
+  min-height: 42px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.source-path-management-dialog :deep(.el-input__wrapper:hover),
+.source-path-management-dialog :deep(.el-select__wrapper:hover) {
+  border-color: #9ca3af !important;
+}
+
+.source-path-management-dialog :deep(.el-input__wrapper.is-focus),
+.source-path-management-dialog :deep(.el-select__wrapper.is-focused),
+.source-path-management-dialog :deep(.el-input.is-focus .el-input__wrapper) {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 1px #3b82f6 inset !important;
+}
+
+.source-path-management-dialog :deep(.el-input__inner),
+.source-path-management-dialog :deep(.el-select__placeholder) {
+  color: #111827;
+  font-size: 14px;
+}
+
+.preset-select-button {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px 12px;
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.preset-select-button:hover {
+  border-color: #9ca3af;
+}
+
+.preset-select-button:focus-visible {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6 inset;
+}
+</style>

@@ -495,8 +495,8 @@ function getMemberRoleLabel(member: ProjectMember): string {
                 class="group relative flex min-h-[112px] cursor-pointer flex-col justify-between rounded-lg border bg-white p-4 transition"
                 :class="
                   selectedProject?.id === project.id
-                    ? 'border-blue-500 bg-blue-50 border-l-[3px] border-l-blue-500 ring-1 ring-blue-100'
-                    : 'border-gray-200 border-l-[3px] border-l-transparent hover:border-gray-300'
+                    ? 'border-blue-500 shadow-sm'
+                    : 'border-gray-300 hover:border-gray-400'
                 "
                 @click="selectProject(project)"
               >
@@ -504,7 +504,7 @@ function getMemberRoleLabel(member: ProjectMember): string {
                   <div class="flex items-start justify-between gap-2">
                     <div
                       class="truncate text-[14px] font-semibold"
-                      :class="selectedProject?.id === project.id ? 'text-accent-ink' : 'text-ink-900'"
+                      :class="selectedProject?.id === project.id ? 'text-ink-900' : 'text-ink-900'"
                     >
                       {{ project.name }}
                     </div>
@@ -599,38 +599,54 @@ function getMemberRoleLabel(member: ProjectMember): string {
               v-else-if="selectedProject"
               class="overflow-hidden rounded-lg border border-gray-200 bg-white"
             >
-              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left md:border-r">
-                  <div class="text-[12px] font-medium text-ink-500">项目名称</div>
-                  <div class="mt-3 text-[14px] font-semibold text-ink-900">
-                    {{ selectedProject.name }}
-                  </div>
-                </div>
-                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left xl:border-r">
-                  <div class="text-[12px] font-medium text-ink-500">归属类型</div>
-                  <div class="mt-3 text-[14px] text-ink-900">
-                    {{ isDefaultProject(selectedProject) ? '系统保留' : '自定义项目' }}
-                  </div>
-                </div>
-                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left md:border-r xl:border-r">
-                  <div class="text-[12px] font-medium text-ink-500">成员数</div>
-                  <div class="mt-3 font-mono text-[14px] text-ink-900">
-                    {{ selectedProject.member_count ?? members.length }}
-                  </div>
-                </div>
-                <div class="flex flex-col items-start border-b border-gray-100 px-6 py-4 text-left">
-                  <div class="text-[12px] font-medium text-ink-500">创建时间</div>
-                  <div class="mt-3 font-mono text-[13px] text-ink-700">
-                    {{ formatDate(selectedProject.created_at) }}
-                  </div>
-                </div>
-                <div class="flex min-h-[112px] flex-col items-start px-6 py-4 text-left md:col-span-2 xl:col-span-4">
-                  <div class="text-[12px] font-medium text-ink-500">项目描述</div>
-                  <div class="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-700">
-                    {{ selectedProject.description || '无项目描述' }}
-                  </div>
-                </div>
-              </div>
+              <table class="w-full table-fixed border-collapse text-[13px]">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      项目名称
+                    </th>
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      归属类型
+                    </th>
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      成员数
+                    </th>
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      创建时间
+                    </th>
+                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      项目描述
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="bg-white transition hover:bg-gray-50">
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="text-[14px] font-semibold text-ink-900">
+                        {{ selectedProject.name }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle text-[13px] text-ink-900">
+                      {{ isDefaultProject(selectedProject) ? '系统保留' : '自定义项目' }}
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="font-mono text-[14px] text-ink-900">
+                        {{ selectedProject.member_count ?? members.length }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="font-mono text-[13px] text-ink-700">
+                        {{ formatDate(selectedProject.created_at) }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <div class="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-700">
+                        {{ selectedProject.description || '无项目描述' }}
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

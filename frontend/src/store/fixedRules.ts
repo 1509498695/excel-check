@@ -1089,6 +1089,61 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       }
     },
 
+    updatePathReplacementPreset(
+      group: SourcePathReplacementGroup,
+      originalPath: string,
+      nextPath: string,
+    ): void {
+      const normalizedOriginalPath = normalizeReplacementPreset(originalPath, group)
+      const normalizedNextPath = normalizeReplacementPreset(nextPath, group)
+      if (!normalizedOriginalPath || !normalizedNextPath) {
+        return
+      }
+
+      const presetList = getPresetListByGroup(this.config, group)
+      const nextPresetList = presetList.map((preset) =>
+        preset.toLowerCase() === normalizedOriginalPath.toLowerCase()
+          ? normalizedNextPath
+          : preset,
+      )
+      setPresetListByGroup(
+        this.config,
+        group,
+        [...new Map(nextPresetList.map((preset) => [preset.toLowerCase(), preset] as const)).values()],
+      )
+
+      const selectedPreset =
+        group === 'svn'
+          ? this.config.selected_svn_path_replacement_preset
+          : this.config.selected_local_path_replacement_preset
+      if (selectedPreset?.toLowerCase() === normalizedOriginalPath.toLowerCase()) {
+        this.setSelectedPathReplacementPreset(group, normalizedNextPath)
+      }
+    },
+
+    removePathReplacementPreset(group: SourcePathReplacementGroup, path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path, group)
+      if (!normalizedPath) {
+        return
+      }
+
+      setPresetListByGroup(
+        this.config,
+        group,
+        getPresetListByGroup(this.config, group).filter(
+          (preset) => preset.toLowerCase() !== normalizedPath.toLowerCase(),
+        ),
+      )
+
+      const selectedPreset =
+        group === 'svn'
+          ? this.config.selected_svn_path_replacement_preset
+          : this.config.selected_local_path_replacement_preset
+      if (selectedPreset?.toLowerCase() === normalizedPath.toLowerCase()) {
+        this.setSelectedPathReplacementPreset(group, null)
+      }
+    },
+
     async replaceSourceBasePath(group: SourcePathReplacementGroup, baseDirectory: string): Promise<{
       updatedCount: number
       skippedCount: number

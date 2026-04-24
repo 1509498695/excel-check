@@ -2370,7 +2370,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                   <span class="text-[12px] font-medium text-ink-700">字段比较 {{ index + 1 }}</span>
                   <button
                     type="button"
-                    class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="ec-btn-danger-outline-compact"
                     :disabled="dualCompositeComparisons.length === 1"
                     @click="removeDualCompositeComparison(comparison.comparison_id)"
                   >
@@ -2462,7 +2462,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                   </button>
                   <button
                     type="button"
-                    class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="ec-btn-danger-outline-compact"
                     :disabled="pipelineRuleForm.nodes.length === 1"
                     @click="removePipelineNode(node.node_id)"
                   >
@@ -2519,7 +2519,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                     <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger"
+                      class="ec-btn-danger-outline-compact"
                       @click="removePipelineNodeFilter(node, condition.condition_id)"
                     >
                       删除
@@ -2607,7 +2607,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                     <span class="text-[12px] text-ink-700">最终判定 {{ assertionIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="ec-btn-danger-outline-compact"
                       :disabled="node.assertions.length === 1"
                       @click="removePipelineNodeAssertion(node, condition.condition_id)"
                     >
@@ -2691,7 +2691,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                   <span class="text-[12px] font-medium text-ink-700">全局条件 {{ index + 1 }}</span>
                   <button
                     type="button"
-                    class="ec-btn-link-danger"
+                    class="ec-btn-danger-outline-compact"
                     @click="removeGlobalFilter(condition.condition_id)"
                   >
                     删除
@@ -2777,7 +2777,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                 <div class="text-[13px] font-medium text-ink-900">分支 {{ branchIndex + 1 }}</div>
                 <button
                   type="button"
-                  class="ec-btn-link-danger"
+                  class="ec-btn-danger-outline-compact"
                   @click="removeBranch(branch.branch_id)"
                 >
                   删除分支
@@ -2807,7 +2807,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                     <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger"
+                      class="ec-btn-danger-outline-compact"
                       @click="removeBranchFilter(branch, condition.condition_id)"
                     >
                       删除
@@ -2893,7 +2893,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                     <span class="text-[12px] text-ink-700">校验条件 {{ assertionIndex + 1 }}</span>
                     <button
                       type="button"
-                      class="ec-btn-link-danger disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+                      class="ec-btn-danger-outline-compact"
                       :disabled="branch.assertions.length === 1"
                       @click="removeBranchAssertion(branch, condition.condition_id)"
                     >

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 
 import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
@@ -472,12 +473,10 @@ function handleToggleVisibleRuleSelection(payload: {
             </button>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               @click="openDataSourceCreate"
             >
-              <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+              <Plus class="h-3.5 w-3.5" />
               新增数据源
             </button>
           </template>
@@ -506,18 +505,20 @@ function handleToggleVisibleRuleSelection(payload: {
           <template #actions>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               :disabled="!store.sources.length"
               @click="openSingleVariableCreate"
             >
+              <Plus class="h-3.5 w-3.5" />
               添加单个变量
             </button>
             <button
               type="button"
-              class="ec-btn-outline-compact"
+              class="ec-btn ec-btn-primary ec-btn-sm"
               :disabled="!store.sources.length"
               @click="openCompositeVariableCreate"
             >
+              <Plus class="h-3.5 w-3.5" />
               添加组合变量
             </button>
           </template>

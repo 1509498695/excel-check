@@ -144,6 +144,19 @@ function setPresetListByGroup(
   state.localPathReplacementPresets = presets
 }
 
+function getSelectedPresetByGroup(
+  state: Pick<
+    WorkbenchState,
+    | 'selectedLocalPathReplacementPreset'
+    | 'selectedSvnPathReplacementPreset'
+  >,
+  group: SourcePathReplacementGroup,
+): string | null {
+  return group === 'svn'
+    ? state.selectedSvnPathReplacementPreset
+    : state.selectedLocalPathReplacementPreset
+}
+
 function setSelectedPresetByGroup(
   state: WorkbenchState,
   group: SourcePathReplacementGroup,
@@ -509,6 +522,53 @@ export const useWorkbenchStore = defineStore('workbench', {
       if (!presetMap.has(normalizedPath.toLowerCase())) {
         presetMap.set(normalizedPath.toLowerCase(), normalizedPath)
         setPresetListByGroup(this, group, [...presetMap.values()])
+      }
+    },
+
+    updatePathReplacementPreset(
+      group: SourcePathReplacementGroup,
+      originalPath: string,
+      nextPath: string,
+    ): void {
+      const normalizedOriginalPath = normalizeReplacementPreset(originalPath, group)
+      const normalizedNextPath = normalizeReplacementPreset(nextPath, group)
+      if (!normalizedOriginalPath || !normalizedNextPath) {
+        return
+      }
+
+      const presetList = getPresetListByGroup(this, group)
+      const nextPresetList = presetList.map((preset) =>
+        preset.toLowerCase() === normalizedOriginalPath.toLowerCase()
+          ? normalizedNextPath
+          : preset,
+      )
+      setPresetListByGroup(this, group, [...new Map(
+        nextPresetList.map((preset) => [preset.toLowerCase(), preset] as const),
+      ).values()])
+
+      const selectedPreset = getSelectedPresetByGroup(this, group)
+      if (selectedPreset?.toLowerCase() === normalizedOriginalPath.toLowerCase()) {
+        this.setSelectedPathReplacementPreset(group, normalizedNextPath)
+      }
+    },
+
+    removePathReplacementPreset(group: SourcePathReplacementGroup, path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path, group)
+      if (!normalizedPath) {
+        return
+      }
+
+      setPresetListByGroup(
+        this,
+        group,
+        getPresetListByGroup(this, group).filter(
+          (preset) => preset.toLowerCase() !== normalizedPath.toLowerCase(),
+        ),
+      )
+
+      const selectedPreset = getSelectedPresetByGroup(this, group)
+      if (selectedPreset?.toLowerCase() === normalizedPath.toLowerCase()) {
+        this.setSelectedPathReplacementPreset(group, null)
       }
     },
 

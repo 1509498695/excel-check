@@ -141,45 +141,53 @@ async function handleSwitchProject(projectId: number): Promise<void> {
               />
             </div>
 
-            <!-- 单行 4 列横向排版：组内上标题、下数值；组间极浅竖线 -->
-            <div class="mt-4 rounded-md border border-gray-200 bg-white">
-              <dl
-                class="grid grid-cols-2 divide-y divide-gray-100 md:grid-cols-4 md:divide-x md:divide-y-0 md:divide-gray-200"
-              >
-                <div class="flex flex-col items-start gap-1 px-5 py-4 text-left">
-                  <dt class="m-0 text-[12px] font-medium text-ink-500">用户名</dt>
-                  <dd class="m-0 text-[15px] font-semibold text-ink-900">
-                    {{ auth.user?.username ?? '—' }}
-                  </dd>
-                </div>
-
-                <div class="flex flex-col items-start gap-1 px-5 py-4 text-left">
-                  <dt class="m-0 text-[12px] font-medium text-ink-500">角色</dt>
-                  <dd class="m-0">
-                    <span
-                      class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-semibold"
-                      :class="roleTagClass"
-                    >
-                      {{ roleLabel }}
-                    </span>
-                  </dd>
-                </div>
-
-                <div class="flex flex-col items-start gap-1 px-5 py-4 text-left">
-                  <dt class="m-0 text-[12px] font-medium text-ink-500">当前项目</dt>
-                  <dd class="m-0 text-[15px] font-semibold text-ink-900">
-                    {{ auth.currentProjectName || '未选择' }}
-                  </dd>
-                </div>
-
-                <div class="flex flex-col items-start gap-1 px-5 py-4 text-left">
-                  <dt class="m-0 text-[12px] font-medium text-ink-500">可访问项目</dt>
-                  <dd class="m-0 text-[15px] text-ink-900">
-                    <span class="font-mono font-semibold">{{ auth.userProjects.length }}</span>
-                    <span class="ml-1 text-[13px] font-normal text-ink-500">个</span>
-                  </dd>
-                </div>
-              </dl>
+            <div class="mt-4 overflow-hidden rounded-md border border-gray-200">
+              <table class="w-full table-fixed border-collapse text-[13px]">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      用户名
+                    </th>
+                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      角色
+                    </th>
+                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      当前项目
+                    </th>
+                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+                      可访问项目
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="bg-white transition hover:bg-gray-50">
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="text-[14px] font-semibold text-ink-900">
+                        {{ auth.user?.username ?? '—' }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span
+                        class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-medium"
+                        :class="roleTagClass"
+                      >
+                        {{ roleLabel }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="text-[14px] font-semibold text-ink-900">
+                        {{ auth.currentProjectName || '未选择' }}
+                      </span>
+                    </td>
+                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                      <span class="text-[14px] text-ink-900">
+                        <span class="font-mono font-semibold">{{ auth.userProjects.length }}</span>
+                        <span class="ml-1 text-[13px] font-normal text-ink-500">个</span>
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -200,7 +208,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
 
             <!-- 表单整体左对齐 + max-w-md 约束 -->
             <form
-              class="mt-5 flex w-full max-w-md flex-col gap-4"
+              class="profile-password-form mt-5 flex w-full max-w-md flex-col gap-4"
               @submit.prevent="handleChangePassword"
             >
               <div>
@@ -356,3 +364,39 @@ async function handleSwitchProject(projectId: number): Promise<void> {
     </div>
   </div>
 </template>
+
+<style scoped>
+.profile-password-form :deep(.el-input__wrapper) {
+  min-height: 42px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.profile-password-form :deep(.el-input__wrapper:hover) {
+  border-color: #9ca3af !important;
+}
+
+.profile-password-form :deep(.el-input__wrapper.is-focus),
+.profile-password-form :deep(.el-input.is-focus .el-input__wrapper) {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 1px #3b82f6 inset !important;
+}
+
+.profile-password-form :deep(.el-input__inner) {
+  color: #111827;
+  font-size: 14px;
+}
+
+.profile-password-form :deep(.el-input__inner::placeholder) {
+  color: #9ca3af;
+}
+
+.profile-password-form :deep(.el-input__suffix-inner) {
+  color: #94a3b8;
+}
+</style>

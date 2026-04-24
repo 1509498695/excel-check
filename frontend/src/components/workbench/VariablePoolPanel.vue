@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 
 import { fetchCompositePreview } from '../../api/workbench'
 import { useWorkbenchStore } from '../../store/workbench'
@@ -684,18 +685,20 @@ defineExpose({
         <div class="workbench-section-toolbar__actions">
           <button
             type="button"
-            class="ec-btn-outline-compact"
+            class="ec-btn ec-btn-primary ec-btn-sm"
             :disabled="!store.sources.length"
             @click="openSingleCreateTab"
           >
+            <Plus class="h-3.5 w-3.5" />
             添加单个变量
           </button>
           <button
             type="button"
-            class="ec-btn-outline-compact"
+            class="ec-btn ec-btn-primary ec-btn-sm"
             :disabled="!store.sources.length"
             @click="openCompositeCreateTab"
           >
+            <Plus class="h-3.5 w-3.5" />
             添加组合变量
           </button>
         </div>

@@ -501,7 +501,7 @@ onMounted(() => {
       <div class="workbench-section-toolbar__actions">
         <button
           type="button"
-          class="ec-btn-outline-compact"
+          class="ec-btn ec-btn-primary ec-btn-sm"
           @click="openCreateDialog"
         >
           <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
