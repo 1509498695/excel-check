@@ -80,6 +80,7 @@ frontend/src
 SVN 数据源接入：
 
 - 在「新增数据源」弹窗里把类型切到 `SVN（推荐 HTTP 链接）`，默认进入「远端 URL」子模式；输入目录 URL（例如 `https://samosvn/data/project/samo/GameDatas/datas_qa88/`）后点「浏览此目录」即可在弹窗里挑选 `.xls/.xlsx` 文件。
+- 本地 Excel 与 SVN Excel 现在都支持“先选文件，再自动回填数据源标识”；若当时标识为空，会按文件名自动生成一个只含字母、数字与下划线的标识。若自动生成值与现有数据源重复，页面会提示你手动修改后再保存。
 - 步骤 2 的字段映射与变量添加现同时支持本地 Excel 和 SVN Excel；CSV 仍不支持字段映射提取。
 - 首次访问某 host 时会弹出「配置 SVN 凭据」弹窗：用户名 / 密码会按当前登录用户与 host 维度加密落到 `<runtime>/svn-credentials.json`，凭据保存后会自动重新触发一次浏览。
 - `samosvn` 的“测试目录 URL”默认回填为 `https://samosvn/data/project/samo/GameDatas/`；你也可以改成别的 SVN 目录并保存。系统会按当前登录用户与 host 记住这个目录，“测试连接”会先保存凭据，再对当前输入的目录执行一次 `svn list`。
