@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+- 个人校验 `/` 与项目校验 `/fixed-rules` 的 `数据源路径管理` 收口为仅管理远端 SVN 目录 URL；本地 Excel / CSV 不再提供本地路径替换管理，历史本地路径配置字段继续保留兼容。
+- 本机共享部署升级：新增 `scripts/start-local-deploy.ps1`，支持前端构建后由 FastAPI 单服务托管；后端监听、端口、前端产物目录、CORS、上传大小、JWT 密钥与默认管理员密码均可通过环境变量配置。
+- 数据源新增浏览器上传链路：`POST /api/v1/sources/upload` 支持 `.xlsx/.xls/.csv`，按当前项目与用户隔离保存到 `backend/.runtime_uploads/`，远程访问用户无需依赖服务器本机 `tkinter` 文件选择框。
+- 默认管理员播种策略收口：启动时继续确保唯一默认超级管理员存在，但已有 `admin` 不再被每次启动强制重置密码；首次共享部署建议设置 `DEFAULT_SUPER_ADMIN_PASSWORD`。
 - 用户可见命名统一：侧边栏、页面头部、结果面板与稳定文档中的“工作台 / 固定规则”统一更名为“个人校验 / 项目校验”；路由路径与内部实现名保持不变。
 - 文档重整：根 `README.md` 收口为 6 节骨架；新建 `docs/ARCHITECTURE.md`、`docs/MODULES.md` 集中沉淀稳定文档；`PROJECT_RECORD.md` 与 `需求文档.md` 归档到 `docs/archive/`。
 - 管理后台修复：超级管理员在成员表中调整自己的归属项目后，前端会立即调用现有项目切换接口，同步 JWT 与当前项目上下文，不再停留在旧项目。

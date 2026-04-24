@@ -95,6 +95,20 @@ export interface LocalPickResponse {
   }
 }
 
+export interface SourceUploadResponse {
+  code: number
+  msg: string
+  data: {
+    source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
+    original_filename: string
+    stored_filename: string
+    selected_path: string
+    size: number
+    project_id: number
+    user_id: number
+  }
+}
+
 export interface LocalDirectoryValidateResponse {
   code: number
   msg: string

@@ -8,6 +8,8 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,6 +25,7 @@ from backend.config import settings
 async def lifespan(application: FastAPI):
     """应用生命周期：启动时初始化数据库表。"""
     settings.runtime_dir.mkdir(parents=True, exist_ok=True)
+    settings.runtime_upload_dir.mkdir(parents=True, exist_ok=True)
     await init_db()
     yield
 
@@ -33,7 +36,7 @@ def create_app() -> FastAPI:
 
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=list(settings.cors_allow_origins),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -44,6 +47,52 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def configure_static_frontend(
+    application: FastAPI,
+    *,
+    frontend_dist_dir: Path | None = None,
+) -> bool:
+    """若存在前端构建产物，则由 FastAPI 托管 SPA 静态资源。"""
+    dist_dir = (frontend_dist_dir or settings.frontend_dist_dir).resolve()
+    index_file = dist_dir / "index.html"
+    if not index_file.is_file():
+        return False
+
+    assets_dir = dist_dir / "assets"
+    if assets_dir.is_dir():
+        application.mount(
+            "/assets",
+            StaticFiles(directory=assets_dir),
+            name="frontend-assets",
+        )
+
+    @application.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str) -> FileResponse:
+        """返回前端静态文件；未知前端路由回退到 index.html。"""
+        guarded_prefixes = (
+            settings.api_v1_prefix.strip("/"),
+            "docs",
+            "openapi.json",
+            "health",
+        )
+        normalized_path = full_path.strip("/")
+        if normalized_path.startswith(guarded_prefixes):
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        candidate = (dist_dir / normalized_path).resolve()
+        if (
+            normalized_path
+            and dist_dir in candidate.parents
+            and candidate.is_file()
+        ):
+            return FileResponse(candidate)
+        return FileResponse(index_file)
+
+    return True
 
 
 @app.get("/health", tags=["system"])
@@ -57,6 +106,9 @@ def health_check() -> dict[str, Any]:
             "service": settings.app_name,
         },
     }
+
+
+configure_static_frontend(app)
 
 
 if __name__ == "__main__":

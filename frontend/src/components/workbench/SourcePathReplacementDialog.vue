@@ -3,7 +3,6 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { listSvnDirectory } from '../../api/svn'
-import { validateLocalDirectoryPath } from '../../api/workbench'
 import type { SourcePathReplacementStoreLike } from '../../types/panelStores'
 import type { SourcePathReplacementGroup } from '../../utils/sourcePathReplacement'
 
@@ -21,6 +20,8 @@ type ManagedInputInstance = {
   focus?: () => void
 }
 
+type ManagedPathGroup = Extract<SourcePathReplacementGroup, 'svn'>
+
 type GroupFormState = {
   selectedDirectory: string
   addingDraft: string | null
@@ -31,17 +32,9 @@ type GroupFormState = {
 }
 
 const dialogVisible = ref(false)
-const activeGroup = ref<SourcePathReplacementGroup>('local')
+const activeGroup = ref<ManagedPathGroup>('svn')
 const inputRefs = reactive<Record<string, ManagedInputInstance | null>>({})
-const formState = reactive<Record<SourcePathReplacementGroup, GroupFormState>>({
-  local: {
-    selectedDirectory: '',
-    addingDraft: null,
-    editingOriginalPath: null,
-    editingValue: '',
-    isSavingPreset: false,
-    isApplying: false,
-  },
+const formState = reactive<Record<ManagedPathGroup, GroupFormState>>({
   svn: {
     selectedDirectory: '',
     addingDraft: null,
@@ -55,70 +48,31 @@ const formState = reactive<Record<SourcePathReplacementGroup, GroupFormState>>({
 const copy = computed(() => ({
   title: props.variant === 'fixed-rules' ? '项目校验数据源路径管理' : '个人校验数据源路径管理',
   subtitle:
-    '按数据源类型分别管理本地目录与 SVN 目录。只替换文件名前的目录路径，保留原文件名不变，并在完成后立即刷新当前已接入数据源的元数据与变量预览。',
+    '管理远端 SVN 目录 URL。只替换文件名前的目录路径，保留原文件名不变，并在完成后立即刷新当前已接入 SVN 数据源的元数据与变量预览。',
 }))
 
-const groupTabs = computed(() => [
-  {
-    key: 'local' as const,
-    label: '本地路径',
-    description: '管理本地 Excel / CSV 和 SVN 工作副本路径。',
-  },
-  {
-    key: 'svn' as const,
-    label: 'SVN 路径',
-    description: '管理远端 SVN 目录 URL，并用于替换远端 HTTP 链接型数据源。',
-  },
-])
+type GroupCopy = {
+  chooseTitle: string
+  choosePlaceholder: string
+  addButtonLabel: string
+  addPlaceholder: string
+  saveButtonLabel: string
+  emptyText: string
+  listHint: string
+  applyButtonLabel: string
+  noCandidateText: string
+  successText: (updatedCount: number, failedCount: number) => string
+  failureTitle: string
+  saveSuccessText: string
+  updateSuccessText: string
+  removeSuccessText: string
+  duplicateText: string
+  missingSelectionText: string
+  deleteConfirmText: string
+  invalidInputText: string
+}
 
-const groupCopy = computed<
-  Record<
-    SourcePathReplacementGroup,
-    {
-      chooseTitle: string
-      choosePlaceholder: string
-      addButtonLabel: string
-      addPlaceholder: string
-      saveButtonLabel: string
-      emptyText: string
-      listHint: string
-      applyButtonLabel: string
-      noCandidateText: string
-      successText: (updatedCount: number, failedCount: number) => string
-      failureTitle: string
-      saveSuccessText: string
-      updateSuccessText: string
-      removeSuccessText: string
-      duplicateText: string
-      missingSelectionText: string
-      deleteConfirmText: string
-      invalidInputText: string
-    }
-  >
->(() => ({
-  local: {
-    chooseTitle: '当前用于替换的本地目录',
-    choosePlaceholder: '从已保存的本地目录中选择',
-    addButtonLabel: '+ 添加新目录',
-    addPlaceholder: '输入本地绝对目录路径，例如 D:\\project_samo\\GameDatas\\datas_qa89',
-    saveButtonLabel: '保存',
-    emptyText: '还没有保存本地目录。点击右上角“+ 添加新目录”后，就可以把常用版本目录保存在这里。',
-    listHint: '点击列表项即可切换当前替换目录；支持行内编辑与删除。',
-    applyButtonLabel: '本地路径替换',
-    noCandidateText: '当前没有可替换的本地路径型数据源。',
-    successText: (updatedCount, failedCount) =>
-      failedCount > 0
-        ? `已替换 ${updatedCount} 个本地数据源，其中 ${failedCount} 个刷新失败，请检查数据源状态提示。`
-        : `已替换并刷新 ${updatedCount} 个本地数据源，请重新执行校验。`,
-    failureTitle: '本地路径替换失败',
-    saveSuccessText: '本地目录已保存。',
-    updateSuccessText: '本地目录已更新。',
-    removeSuccessText: '本地目录已删除。',
-    duplicateText: '该本地目录已存在，请直接选择或修改为新的目录。',
-    missingSelectionText: '请先选择一个本地目录。',
-    deleteConfirmText: '确定要删除该保存的本地目录吗？',
-    invalidInputText: '请先输入需要保存的本地目录。',
-  },
+const groupCopy: Record<ManagedPathGroup, GroupCopy> = {
   svn: {
     chooseTitle: '当前用于替换的 SVN 目录',
     choosePlaceholder: '从已保存的 SVN 目录 URL 中选择',
@@ -127,7 +81,7 @@ const groupCopy = computed<
     saveButtonLabel: '保存',
     emptyText: '还没有保存 SVN 目录。点击右上角“+ 添加新目录”后，就可以把常用版本目录保存在这里。',
     listHint: '点击列表项即可切换当前替换目录；支持行内编辑与删除。',
-    applyButtonLabel: 'svn路径替换',
+    applyButtonLabel: 'SVN 路径替换',
     noCandidateText: '当前没有可替换的远端 SVN 数据源。',
     successText: (updatedCount, failedCount) =>
       failedCount > 0
@@ -142,29 +96,25 @@ const groupCopy = computed<
     deleteConfirmText: '确定要删除该保存的 SVN 目录吗？',
     invalidInputText: '请先输入需要保存的 SVN 目录 URL。',
   },
-}))
+}
 
-function getGroupState(group: SourcePathReplacementGroup): GroupFormState {
+function getGroupState(group: ManagedPathGroup): GroupFormState {
   return formState[group]
 }
 
-function getPresetList(group: SourcePathReplacementGroup): string[] {
-  return group === 'svn'
-    ? props.store.svnPathReplacementPresets
-    : props.store.localPathReplacementPresets
+function getPresetList(_group: ManagedPathGroup): string[] {
+  return props.store.svnPathReplacementPresets
 }
 
-function getSelectedPreset(group: SourcePathReplacementGroup): string | null {
-  return group === 'svn'
-    ? props.store.selectedSvnPathReplacementPreset
-    : props.store.selectedLocalPathReplacementPreset
+function getSelectedPreset(_group: ManagedPathGroup): string | null {
+  return props.store.selectedSvnPathReplacementPreset
 }
 
-function syncSelectedDirectory(group: SourcePathReplacementGroup): void {
+function syncSelectedDirectory(group: ManagedPathGroup): void {
   getGroupState(group).selectedDirectory = getSelectedPreset(group) ?? ''
 }
 
-function resetGroupDrafts(group: SourcePathReplacementGroup): void {
+function resetGroupDrafts(group: ManagedPathGroup): void {
   const state = getGroupState(group)
   state.addingDraft = null
   state.editingOriginalPath = null
@@ -176,14 +126,14 @@ function bindManagedInputRef(key: string, instance: ManagedInputInstance | null)
 }
 
 function bindAddInputRef(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
   instance: ManagedInputInstance | null,
 ): void {
   bindManagedInputRef(`add:${group}`, instance)
 }
 
 function bindEditInputRef(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
   preset: string,
   instance: ManagedInputInstance | null,
 ): void {
@@ -191,13 +141,13 @@ function bindEditInputRef(
 }
 
 function getAddInputRefBinder(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
 ): (instance: ManagedInputInstance | null) => void {
   return (instance) => bindAddInputRef(group, instance)
 }
 
 function getEditInputRefBinder(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
   preset: string,
 ): (instance: ManagedInputInstance | null) => void {
   return (instance) => bindEditInputRef(group, preset, instance)
@@ -209,42 +159,35 @@ function focusManagedInput(key: string): void {
   })
 }
 
-function focusAddInput(group: SourcePathReplacementGroup): void {
+function focusAddInput(group: ManagedPathGroup): void {
   focusManagedInput(`add:${group}`)
 }
 
-function focusEditInput(group: SourcePathReplacementGroup, preset: string): void {
+function focusEditInput(group: ManagedPathGroup, preset: string): void {
   focusManagedInput(`edit:${group}:${preset}`)
 }
 
 function openDialog(): void {
-  activeGroup.value = 'local'
-  syncSelectedDirectory('local')
+  activeGroup.value = 'svn'
   syncSelectedDirectory('svn')
-  resetGroupDrafts('local')
   resetGroupDrafts('svn')
   dialogVisible.value = true
 }
 
 async function normalizeDirectoryPath(
-  group: SourcePathReplacementGroup,
+  _group: ManagedPathGroup,
   rawDirectoryPath: string,
 ): Promise<string> {
-  if (group === 'svn') {
-    const normalizedDirUrl = rawDirectoryPath.trim()
-    if (!normalizedDirUrl) {
-      throw new Error('SVN 目录 URL 不能为空。')
-    }
-    const response = await listSvnDirectory(normalizedDirUrl)
-    return response.data.dir_url
+  const normalizedDirUrl = rawDirectoryPath.trim()
+  if (!normalizedDirUrl) {
+    throw new Error('SVN 目录 URL 不能为空。')
   }
-
-  const response = await validateLocalDirectoryPath(rawDirectoryPath)
-  return response.data.directory_path
+  const response = await listSvnDirectory(normalizedDirUrl)
+  return response.data.dir_url
 }
 
 function isDuplicatePreset(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
   normalizedPath: string,
   excludePath?: string | null,
 ): boolean {
@@ -255,11 +198,11 @@ function isDuplicatePreset(
   })
 }
 
-function handleSelectPreset(group: SourcePathReplacementGroup, preset: string): void {
+function handleSelectPreset(group: ManagedPathGroup, preset: string): void {
   getGroupState(group).selectedDirectory = preset
 }
 
-function handleStartAdd(group: SourcePathReplacementGroup): void {
+function handleStartAdd(group: ManagedPathGroup): void {
   const state = getGroupState(group)
   state.editingOriginalPath = null
   state.editingValue = ''
@@ -267,15 +210,15 @@ function handleStartAdd(group: SourcePathReplacementGroup): void {
   focusAddInput(group)
 }
 
-function handleCancelAdd(group: SourcePathReplacementGroup): void {
+function handleCancelAdd(group: ManagedPathGroup): void {
   getGroupState(group).addingDraft = null
 }
 
-async function handleSaveNewPreset(group: SourcePathReplacementGroup): Promise<void> {
+async function handleSaveNewPreset(group: ManagedPathGroup): Promise<void> {
   const state = getGroupState(group)
   const candidatePath = state.addingDraft?.trim() ?? ''
   if (!candidatePath) {
-    ElMessage.warning(groupCopy.value[group].invalidInputText)
+    ElMessage.warning(groupCopy[group].invalidInputText)
     return
   }
 
@@ -283,7 +226,7 @@ async function handleSaveNewPreset(group: SourcePathReplacementGroup): Promise<v
   try {
     const normalizedPath = await normalizeDirectoryPath(group, candidatePath)
     if (isDuplicatePreset(group, normalizedPath)) {
-      ElMessage.warning(groupCopy.value[group].duplicateText)
+      ElMessage.warning(groupCopy[group].duplicateText)
       return
     }
 
@@ -292,7 +235,7 @@ async function handleSaveNewPreset(group: SourcePathReplacementGroup): Promise<v
     await props.store.saveConfigNow()
     state.selectedDirectory = normalizedPath
     state.addingDraft = null
-    ElMessage.success(groupCopy.value[group].saveSuccessText)
+    ElMessage.success(groupCopy[group].saveSuccessText)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存目录失败。')
   } finally {
@@ -300,7 +243,7 @@ async function handleSaveNewPreset(group: SourcePathReplacementGroup): Promise<v
   }
 }
 
-function handleStartEdit(group: SourcePathReplacementGroup, preset: string): void {
+function handleStartEdit(group: ManagedPathGroup, preset: string): void {
   const state = getGroupState(group)
   state.addingDraft = null
   state.editingOriginalPath = preset
@@ -308,13 +251,13 @@ function handleStartEdit(group: SourcePathReplacementGroup, preset: string): voi
   focusEditInput(group, preset)
 }
 
-function handleCancelEdit(group: SourcePathReplacementGroup): void {
+function handleCancelEdit(group: ManagedPathGroup): void {
   const state = getGroupState(group)
   state.editingOriginalPath = null
   state.editingValue = ''
 }
 
-async function handleSaveEditedPreset(group: SourcePathReplacementGroup): Promise<void> {
+async function handleSaveEditedPreset(group: ManagedPathGroup): Promise<void> {
   const state = getGroupState(group)
   const originalPath = state.editingOriginalPath
   const candidatePath = state.editingValue.trim()
@@ -322,7 +265,7 @@ async function handleSaveEditedPreset(group: SourcePathReplacementGroup): Promis
     return
   }
   if (!candidatePath) {
-    ElMessage.warning(groupCopy.value[group].invalidInputText)
+    ElMessage.warning(groupCopy[group].invalidInputText)
     return
   }
 
@@ -330,20 +273,19 @@ async function handleSaveEditedPreset(group: SourcePathReplacementGroup): Promis
   try {
     const normalizedPath = await normalizeDirectoryPath(group, candidatePath)
     if (isDuplicatePreset(group, normalizedPath, originalPath)) {
-      ElMessage.warning(groupCopy.value[group].duplicateText)
+      ElMessage.warning(groupCopy[group].duplicateText)
       return
     }
 
-    const wasSelectedLocally =
-      state.selectedDirectory.toLowerCase() === originalPath.toLowerCase()
+    const wasSelected = state.selectedDirectory.toLowerCase() === originalPath.toLowerCase()
     props.store.updatePathReplacementPreset(group, originalPath, normalizedPath)
     await props.store.saveConfigNow()
-    if (wasSelectedLocally) {
+    if (wasSelected) {
       state.selectedDirectory = normalizedPath
     }
     state.editingOriginalPath = null
     state.editingValue = ''
-    ElMessage.success(groupCopy.value[group].updateSuccessText)
+    ElMessage.success(groupCopy[group].updateSuccessText)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '更新目录失败。')
   } finally {
@@ -352,32 +294,32 @@ async function handleSaveEditedPreset(group: SourcePathReplacementGroup): Promis
 }
 
 async function handleDeletePreset(
-  group: SourcePathReplacementGroup,
+  group: ManagedPathGroup,
   preset: string,
 ): Promise<void> {
   try {
     const state = getGroupState(group)
-    const wasSelectedLocally = state.selectedDirectory.toLowerCase() === preset.toLowerCase()
+    const wasSelected = state.selectedDirectory.toLowerCase() === preset.toLowerCase()
     props.store.removePathReplacementPreset(group, preset)
     await props.store.saveConfigNow()
-    if (wasSelectedLocally) {
+    if (wasSelected) {
       state.selectedDirectory = ''
     }
     if (state.editingOriginalPath === preset) {
       state.editingOriginalPath = null
       state.editingValue = ''
     }
-    ElMessage.success(groupCopy.value[group].removeSuccessText)
+    ElMessage.success(groupCopy[group].removeSuccessText)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '删除目录失败。')
   }
 }
 
-async function handleApplyReplacement(group: SourcePathReplacementGroup): Promise<void> {
+async function handleApplyReplacement(group: ManagedPathGroup): Promise<void> {
   const state = getGroupState(group)
   const candidatePath = state.selectedDirectory.trim()
   if (!candidatePath) {
-    ElMessage.warning(groupCopy.value[group].missingSelectionText)
+    ElMessage.warning(groupCopy[group].missingSelectionText)
     return
   }
 
@@ -389,15 +331,15 @@ async function handleApplyReplacement(group: SourcePathReplacementGroup): Promis
     const result = await props.store.replaceSourceBasePath(group, normalizedPath)
 
     if (!result.updatedCount) {
-      ElMessage.warning(groupCopy.value[group].noCandidateText)
+      ElMessage.warning(groupCopy[group].noCandidateText)
       return
     }
 
-    ElMessage.success(groupCopy.value[group].successText(result.updatedCount, result.failedCount))
+    ElMessage.success(groupCopy[group].successText(result.updatedCount, result.failedCount))
     dialogVisible.value = false
   } catch (error) {
     const message = error instanceof Error ? error.message : '数据源路径管理失败。'
-    await ElMessageBox.alert(message, groupCopy.value[group].failureTitle, {
+    await ElMessageBox.alert(message, groupCopy[group].failureTitle, {
       type: 'error',
       confirmButtonText: '知道了',
     })
@@ -424,41 +366,13 @@ defineExpose({
         {{ copy.subtitle }}
       </p>
 
-      <section class="rounded-lg border border-gray-200 bg-white p-2">
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            v-for="tab in groupTabs"
-            :key="tab.key"
-            type="button"
-            class="rounded-md border bg-white px-4 py-4 text-left transition-colors duration-150"
-            :class="
-              activeGroup === tab.key
-                ? 'border-blue-500 text-blue-600'
-                : 'border-gray-200 text-gray-700 hover:border-blue-200 hover:text-blue-600'
-            "
-            @click="activeGroup = tab.key"
-          >
-            <div class="text-[13px] font-semibold leading-5">
-              {{ tab.label }}
-            </div>
-            <div class="mt-1 text-[12px] leading-5 text-gray-500">
-              {{ tab.description }}
-            </div>
-          </button>
-        </div>
-      </section>
-
       <section class="space-y-3 rounded-lg border border-gray-200 bg-white px-5 py-5">
         <div class="space-y-1">
           <div class="text-[13px] font-semibold text-gray-900">
             {{ groupCopy[activeGroup].chooseTitle }}
           </div>
           <div class="text-[12px] leading-5 text-gray-500">
-            {{
-              activeGroup === 'local'
-                ? '选择一个已保存的本地目录，作为当前本地数据源的统一替换目标。'
-                : '选择一个已保存的 SVN 目录 URL，作为当前远端 SVN 数据源的统一替换目标。'
-            }}
+            选择一个已保存的 SVN 目录 URL，作为当前远端 SVN 数据源的统一替换目标。
           </div>
         </div>
         <el-select
@@ -634,7 +548,7 @@ defineExpose({
         <button
           type="button"
           class="inline-flex min-h-[42px] items-center justify-center rounded-md border border-gray-300 bg-white px-4 text-[14px] font-semibold text-gray-800 transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="formState.local.isApplying || formState.local.isSavingPreset || formState.svn.isApplying || formState.svn.isSavingPreset"
+          :disabled="formState.svn.isApplying || formState.svn.isSavingPreset"
           @click="dialogVisible = false"
         >
           取消

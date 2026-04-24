@@ -106,16 +106,18 @@ async def _seed_default_super_admin(default_project_id: int) -> None:
             await session.flush()
             admin_user_id = admin_user.id
         else:
+            update_values = {
+                "is_super_admin": True,
+                "primary_project_id": default_project_id,
+            }
+            if settings.default_super_admin_password_configured:
+                update_values["hashed_password"] = hash_password(
+                    settings.default_super_admin_password
+                )
             await session.execute(
                 update(User)
                 .where(User.id == admin_user_id)
-                .values(
-                    hashed_password=hash_password(
-                        settings.default_super_admin_password
-                    ),
-                    is_super_admin=True,
-                    primary_project_id=default_project_id,
-                )
+                .values(**update_values)
             )
         if admin_user_id is None:
             raise RuntimeError("默认超级管理员创建失败")

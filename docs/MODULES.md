@@ -85,7 +85,7 @@
 
 | 模块 | 作用 |
 |:---|:---|
-| [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、metadata、列预览、组合预览。 |
+| [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、浏览器上传、metadata、列预览、组合预览。 |
 | [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config`：个人校验配置按 `project_id + user_id` 隔离持久化。 |
 | [app/api/execute_api.py](../backend/app/api/execute_api.py) | `/api/v1/engine/execute`：消费 `TaskTree`，调用规则引擎，返回统一结果。 |
 | [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、SVN 更新、执行。 |

@@ -56,7 +56,7 @@ async def test_seed_default_super_admin_repairs_existing_state(test_db) -> None:
 
         admin_user = User(
             username=settings.default_super_admin_username,
-            hashed_password="old_hash",
+            hashed_password=hash_password("legacy-admin-pass"),
             is_super_admin=False,
         )
         other_super_admin = User(
@@ -91,7 +91,7 @@ async def test_seed_default_super_admin_repairs_existing_state(test_db) -> None:
     legacy_user = next(user for user in users if user.username == "legacy_super_admin")
 
     assert admin_user.is_super_admin is True
-    assert verify_password(settings.default_super_admin_password, admin_user.hashed_password)
+    assert verify_password("legacy-admin-pass", admin_user.hashed_password)
     assert legacy_user.is_super_admin is False
     assert any(role.user_id == admin_user.id for role in admin_roles)
 

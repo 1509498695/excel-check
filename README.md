@@ -21,10 +21,11 @@
 
 - 后端：FastAPI + SQLAlchemy（异步）+ SQLite + bcrypt + python-jose。
 - 前端：Vue 3 + TypeScript + Pinia + Element Plus + Tailwind v3。
-- 默认服务地址：
+- 默认开发地址：
   - 前端：<http://127.0.0.1:5173>
   - 后端健康检查：<http://127.0.0.1:8000/health>
   - 后端 OpenAPI：<http://127.0.0.1:8000/docs>
+- 本机共享部署地址：前端构建后由后端单服务托管，其他同网段用户访问 `http://<本机局域网IP>:8000`。
 - API 前缀：`/api/v1`。
 
 ## 3. 快速开始
@@ -57,7 +58,35 @@ cd frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-### 3.4 测试与构建
+### 3.4 本机共享部署
+
+适用于“服务部署在本机，其他同网段用户通过浏览器访问”的场景。前端会先构建到 `frontend/dist/`，再由 FastAPI 统一托管，只开放一个后端端口。
+
+```powershell
+.\scripts\start-local-deploy.ps1
+```
+
+脚本默认监听 `0.0.0.0:8000`，启动后会打印本机局域网访问地址。远程用户添加 Excel / CSV 数据源时应使用「上传文件」；「服务器选择」与手动路径只适合服务所在机器或共享盘路径。
+
+建议首次共享前固定设置：
+
+```powershell
+$env:JWT_SECRET_KEY="替换为一段固定随机字符串"
+$env:DEFAULT_SUPER_ADMIN_PASSWORD="替换默认管理员密码"
+```
+
+可选环境变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `APP_HOST` | `127.0.0.1` | 后端监听地址，共享部署脚本会设为 `0.0.0.0`。 |
+| `APP_PORT` | `8000` | 后端端口。 |
+| `FRONTEND_DIST_DIR` | `frontend/dist` | 前端生产包目录。 |
+| `CORS_ALLOW_ORIGINS` | `*` | 开发 / 反代场景允许的来源，逗号分隔。 |
+| `MAX_UPLOAD_MB` | `50` | 单个上传文件大小上限。 |
+| `DB_URL` | SQLite 运行库 | 后续内网部署可切换外部数据库。 |
+
+### 3.5 测试与构建
 
 ```powershell
 python -m pytest backend/tests -q

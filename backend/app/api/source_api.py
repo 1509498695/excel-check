@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import textwrap
+from uuid import uuid4
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.api.schemas import DataSource
@@ -46,6 +48,12 @@ LOCAL_PICK_SUFFIXES: dict[str, tuple[str, ...]] = {
     "local_excel": (".xlsx", ".xls"),
     "local_csv": (".csv",),
 }
+UPLOAD_SUFFIX_SOURCE_TYPES: dict[str, str] = {
+    ".xlsx": "local_excel",
+    ".xls": "local_excel",
+    ".csv": "local_csv",
+}
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class LocalPickRequest(BaseModel):
@@ -263,6 +271,70 @@ def _validate_directory_path(raw_directory_path: str) -> str:
     return str(resolved_path)
 
 
+def _sanitize_upload_filename(filename: str) -> str:
+    """将浏览器上传文件名规整成安全的本地文件名。"""
+    basename = Path(filename).name.strip()
+    if not basename:
+        raise HTTPException(status_code=400, detail="上传文件名不能为空。")
+
+    suffix = Path(basename).suffix.lower()
+    if suffix not in UPLOAD_SUFFIX_SOURCE_TYPES:
+        allowed_text = "、".join(sorted(UPLOAD_SUFFIX_SOURCE_TYPES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"仅支持上传 {allowed_text} 文件。",
+        )
+
+    stem = Path(basename).stem
+    safe_stem = re.sub(r"[^A-Za-z0-9_\-.]+", "_", stem).strip("._-") or "upload"
+    return f"{safe_stem}{suffix}"
+
+
+async def _save_upload_file(
+    upload: UploadFile,
+    *,
+    project_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    """保存上传文件并返回可复用为 DataSource.pathOrUrl 的绝对路径。"""
+    safe_filename = _sanitize_upload_filename(upload.filename or "")
+    suffix = Path(safe_filename).suffix.lower()
+    source_type = UPLOAD_SUFFIX_SOURCE_TYPES[suffix]
+    upload_dir = settings.runtime_upload_dir / str(project_id) / str(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = upload_dir / f"{uuid4().hex}_{safe_filename}"
+    total_size = 0
+
+    try:
+        with target_path.open("wb") as file_handle:
+            while True:
+                chunk = await upload.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > settings.max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"上传文件不能超过 {settings.max_upload_mb} MB。",
+                    )
+                file_handle.write(chunk)
+    except Exception:
+        if target_path.exists():
+            target_path.unlink()
+        raise
+    finally:
+        await upload.close()
+
+    return {
+        "source_type": source_type,
+        "original_filename": Path(upload.filename or safe_filename).name,
+        "stored_filename": target_path.name,
+        "selected_path": str(target_path.resolve()),
+        "size": total_size,
+    }
+
+
 @router.get("/capabilities")
 def get_source_capabilities() -> dict[str, Any]:
     """返回当前后端声明支持的数据源能力。"""
@@ -303,6 +375,29 @@ async def pick_local_source_file(payload: LocalPickRequest) -> dict[str, Any]:
         "data": {
             "selected_path": resolved_path,
             "source_type": payload.source_type,
+        },
+    }
+
+
+@router.post("/upload")
+async def upload_source_file(
+    file: UploadFile = File(...),
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """接收浏览器上传的 Excel/CSV，并保存到当前项目/用户隔离目录。"""
+    project_id = ctx.require_project_member()
+    saved_file = await _save_upload_file(
+        file,
+        project_id=project_id,
+        user_id=ctx.user_id,
+    )
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            **saved_file,
+            "project_id": project_id,
+            "user_id": ctx.user_id,
         },
     }
 

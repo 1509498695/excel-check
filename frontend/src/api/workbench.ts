@@ -9,6 +9,7 @@ import type {
   LocalPickResponse,
   SourceCapabilitiesResponse,
   SourceMetadataResponse,
+  SourceUploadResponse,
   TaskTree,
 } from '../types/workbench'
 import { apiFetch } from '../utils/apiFetch'
@@ -23,6 +24,15 @@ export async function pickLocalSourcePath(
   return apiFetch<LocalPickResponse>('/api/v1/sources/local-pick', {
     method: 'POST',
     body: JSON.stringify({ source_type: sourceType }),
+  })
+}
+
+export async function uploadSourceFile(file: File): Promise<SourceUploadResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiFetch<SourceUploadResponse>('/api/v1/sources/upload', {
+    method: 'POST',
+    body: formData,
   })
 }
 

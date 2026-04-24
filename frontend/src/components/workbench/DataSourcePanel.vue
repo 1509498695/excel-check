@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-import { pickLocalSourcePath } from '../../api/workbench'
+import { pickLocalSourcePath, uploadSourceFile } from '../../api/workbench'
 import {
   ensureTrailingSlash,
   fetchSvnCredential,
@@ -47,6 +47,8 @@ const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const isPicking = ref(false)
+const isUploading = ref(false)
+const uploadInputRef = ref<HTMLInputElement | null>(null)
 const sourceIdTouched = ref(false)
 
 const draft = reactive<DataSource>({
@@ -80,8 +82,8 @@ const svnCredentialLoadState = ref<'loading' | 'ready' | 'error'>('loading')
 
 const panelCopy = computed(() => ({
   emptyText: isFixedRulesVariant.value ? '暂无数据源。' : '还没有录入数据源。',
-  localExcelHelper: '可先选择文件；若未填写数据源标识，将自动带出 Excel 文件名。',
-  localCsvHelper: 'CSV 数据源仍需先填写数据源标识，再选择文件。',
+  localExcelHelper: '远程访问时请用上传文件；服务器本机或共享盘路径可手动输入或选择。',
+  localCsvHelper: '远程访问时请用上传文件；CSV 仍不支持变量池字段下拉。',
 }))
 const canPickLocalFile = computed(
   () =>
@@ -89,6 +91,7 @@ const canPickLocalFile = computed(
     !isPicking.value &&
     (draft.type === 'local_excel' || draft.id.trim().length > 0),
 )
+const canUploadLocalFile = computed(() => localSource.value && !isUploading.value)
 const canBrowseSvnDirectory = computed(
   () =>
     isSvnSource.value &&
@@ -486,6 +489,38 @@ async function chooseLocalFile(): Promise<void> {
   }
 }
 
+function triggerUploadFile(): void {
+  if (!canUploadLocalFile.value) {
+    return
+  }
+  uploadInputRef.value?.click()
+}
+
+async function handleUploadFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !localSource.value || isUploading.value) {
+    return
+  }
+
+  isUploading.value = true
+  draftErrors.pathOrUrl = ''
+
+  try {
+    const response = await uploadSourceFile(file)
+    draft.type = response.data.source_type
+    draft.pathOrUrl = response.data.selected_path
+    autofillSourceIdFromLocator(response.data.original_filename)
+    ElMessage.success('文件已上传并记录为服务器路径。')
+  } catch (error) {
+    draftErrors.pathOrUrl = error instanceof Error ? error.message : '上传文件失败。'
+    ElMessage.error(draftErrors.pathOrUrl)
+  } finally {
+    isUploading.value = false
+  }
+}
+
 defineExpose({
   openCreateDialog,
 })
@@ -627,7 +662,7 @@ onMounted(() => {
               class="flex-1"
               :placeholder="
                 localSource
-                  ? '请选择或输入本地文件路径'
+                  ? '上传文件，或输入服务器本机/共享盘文件路径'
                   : isSvnSource && svnSubMode === 'remote'
                     ? '例如 https://samosvn/data/project/samo/GameDatas/datas_qa88/'
                     : isSvnSource
@@ -636,6 +671,23 @@ onMounted(() => {
               "
               @input="draftErrors.pathOrUrl = ''"
             />
+            <input
+              v-if="localSource"
+              ref="uploadInputRef"
+              class="hidden"
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              @change="handleUploadFile"
+            />
+            <button
+              v-if="localSource"
+              type="button"
+              class="ec-btn ec-btn-primary shrink-0"
+              :disabled="!canUploadLocalFile"
+              @click="triggerUploadFile"
+            >
+              {{ isUploading ? '上传中…' : '上传文件' }}
+            </button>
             <button
               v-if="localSource"
               type="button"
@@ -646,7 +698,7 @@ onMounted(() => {
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 4h12l4 4v12H4z M14 4v6h6" />
               </svg>
-              {{ isPicking ? '文件选择中…' : '选择文件' }}
+              {{ isPicking ? '选择中…' : '服务器选择' }}
             </button>
             <button
               v-if="isSvnSource && svnSubMode === 'remote'"
