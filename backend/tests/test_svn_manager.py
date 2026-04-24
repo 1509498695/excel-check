@@ -114,3 +114,182 @@ def test_update_svn_working_copy_raises_clear_error_when_cli_missing(
 
     with pytest.raises(NotImplementedError, match="svn 命令"):
         svn_manager.update_svn_working_copy(working_copy)
+
+
+def _stub_svn_run(
+    *,
+    stdout: str = "",
+    stderr: str = "",
+    returncode: int = 0,
+    raise_timeout: bool = False,
+):
+    def _runner(args, **kwargs):
+        if raise_timeout:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 1))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    return _runner
+
+
+_SAMPLE_LIST_XML = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<lists>
+  <list path=\"https://samosvn/data/project/samo/GameDatas/datas_qa88\">
+    <entry kind=\"file\">
+      <name>quests.xls</name>
+      <size>4521984</size>
+      <commit revision=\"11823\">
+        <author>liming</author>
+        <date>2026-04-18T03:11:09.123456Z</date>
+      </commit>
+    </entry>
+    <entry kind=\"file\">
+      <name>items.xlsx</name>
+      <size>32100</size>
+      <commit revision=\"11900\">
+        <author>wangwu</author>
+        <date>2026-04-19T05:00:00Z</date>
+      </commit>
+    </entry>
+    <entry kind=\"dir\">
+      <name>archive</name>
+      <commit revision=\"11500\">
+        <author>liu</author>
+        <date>2026-04-12T09:00:00Z</date>
+      </commit>
+    </entry>
+  </list>
+</lists>
+"""
+
+
+def test_list_svn_directory_parses_xml_and_sorts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """正向：能正确解析 XML，dir 在前，file 按 name 升序。"""
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+    monkeypatch.setattr(
+        svn_manager.subprocess,
+        "run",
+        _stub_svn_run(stdout=_SAMPLE_LIST_XML),
+    )
+
+    result = svn_manager.list_svn_directory(
+        "https://samosvn/data/project/samo/GameDatas/datas_qa88",
+        credentials=None,
+    )
+
+    assert result["dir_url"].endswith("/datas_qa88/")
+    entries = result["entries"]
+    # dir 在前，file 按 name 升序
+    assert [item["kind"] for item in entries] == ["dir", "file", "file"]
+    assert entries[0]["name"] == "archive"
+    assert entries[1]["name"] == "items.xlsx"
+    assert entries[2]["name"] == "quests.xls"
+    assert entries[2]["size"] == 4521984
+    assert entries[2]["revision"] == 11823
+
+
+def test_list_svn_directory_rejects_host_outside_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非白名单 host 直接 ValueError，不会触达 subprocess。"""
+    import dataclasses
+
+    monkeypatch.setattr(
+        svn_manager,
+        "settings",
+        dataclasses.replace(svn_manager.settings, svn_url_allowlist=("samosvn",)),
+    )
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+
+    with pytest.raises(ValueError, match="不在允许列表中"):
+        svn_manager.list_svn_directory(
+            "https://evil.example.com/data/",
+            credentials=None,
+        )
+
+
+def test_list_svn_directory_translates_authorization_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stderr 含 Authorization failed → SvnRemoteError(auth_failed)。"""
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+    monkeypatch.setattr(
+        svn_manager.subprocess,
+        "run",
+        _stub_svn_run(returncode=1, stderr="svn: E170001: Authorization failed"),
+    )
+
+    with pytest.raises(svn_manager.SvnRemoteError) as info:
+        svn_manager.list_svn_directory(
+            "https://samosvn/data/project/samo/GameDatas/datas_qa88/",
+            credentials=None,
+        )
+    assert info.value.category == "auth_failed"
+
+
+def test_list_svn_directory_translates_forbidden_to_auth_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stderr 含 forbidden → 归类为鉴权/权限失败，而不是 unknown。"""
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+    monkeypatch.setattr(
+        svn_manager.subprocess,
+        "run",
+        _stub_svn_run(
+            returncode=1,
+            stderr="svn: E175013: Access to '/data/project/samo' forbidden",
+        ),
+    )
+
+    with pytest.raises(svn_manager.SvnRemoteError) as info:
+        svn_manager.list_svn_directory(
+            "https://samosvn/data/project/samo/",
+            credentials=None,
+        )
+    assert info.value.category == "auth_failed"
+    assert "无权访问测试目录" in info.value.message
+
+
+def test_list_svn_directory_translates_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stderr 含 non-existent → SvnRemoteError(not_found)。"""
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+    monkeypatch.setattr(
+        svn_manager.subprocess,
+        "run",
+        _stub_svn_run(returncode=1, stderr="svn: warning: W160013: 'X' path not found"),
+    )
+
+    with pytest.raises(svn_manager.SvnRemoteError) as info:
+        svn_manager.list_svn_directory(
+            "https://samosvn/data/project/samo/GameDatas/datas_qa88/",
+            credentials=None,
+        )
+    assert info.value.category == "not_found"
+
+
+def test_list_svn_directory_handles_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """subprocess timeout → SvnRemoteError(timeout)。"""
+    monkeypatch.setattr(svn_manager, "resolve_svn_executable", lambda: "svn")
+    monkeypatch.setattr(
+        svn_manager.subprocess,
+        "run",
+        _stub_svn_run(raise_timeout=True),
+    )
+
+    with pytest.raises(svn_manager.SvnRemoteError) as info:
+        svn_manager.list_svn_directory(
+            "https://samosvn/data/project/samo/GameDatas/datas_qa88/",
+            credentials=None,
+        )
+    assert info.value.category == "timeout"

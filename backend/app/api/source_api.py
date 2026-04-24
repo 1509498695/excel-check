@@ -8,15 +8,33 @@ import sys
 import textwrap
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.api.schemas import DataSource
+from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.loaders.local_reader import (
     preview_composite_variable,
     preview_source_column,
     read_source_metadata,
+)
+from backend.app.loaders.svn_cache import (
+    get_remote_cache_state,
+    is_remote_svn_locator,
+    prepare_remote_svn_source,
+)
+from backend.app.loaders.svn_credentials import (
+    delete_credentials,
+    list_hosts as list_svn_credential_hosts,
+    save_credentials,
+)
+from backend.app.loaders.svn_manager import (
+    SvnRemoteError,
+    enforce_host_allowlist,
+    list_svn_directory,
+    normalize_dir_url,
 )
 from backend.config import settings
 
@@ -66,6 +84,54 @@ class CompositePreviewRequest(BaseModel):
     columns: list[str] = Field(default_factory=list)
     key_column: str
     append_index_to_key: bool = False
+
+
+class SvnListRequest(BaseModel):
+    """SVN 远端目录列表请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dir_url: str
+
+
+class SvnCredentialUpsertRequest(BaseModel):
+    """保存 SVN host 凭据请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str
+    username: str
+    password: str
+    test_dir_url: str | None = None
+
+
+class SvnRefreshRequest(BaseModel):
+    """强制刷新某 SVN 数据源的缓存。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: DataSource
+
+
+# SvnRemoteError.category → (HTTP 状态码, code)
+# 注意：这里的 401 不能直接用于"SVN 业务凭据失败"——前端 apiFetch 会把任何
+# 401 当成登录态过期并自动跳 /login。因此 auth_failed 用 403 表达"业务级
+# 拒绝"，由前端 SVN 弹窗自己引导用户重新输入 SVN 凭据。
+_SVN_ERROR_HTTP_MAP: dict[str, tuple[int, int]] = {
+    "auth_failed": (403, 4030),
+    "not_found": (404, 404),
+    "network": (502, 502),
+    "timeout": (504, 504),
+    "unknown": (500, 500),
+}
+
+
+def _raise_for_svn_error(error: SvnRemoteError) -> None:
+    status_code, code_value = _SVN_ERROR_HTTP_MAP.get(error.category, (500, 500))
+    raise HTTPException(
+        status_code=status_code,
+        detail={"code": code_value, "msg": error.message, "category": error.category},
+    )
 
 
 def _get_pick_filetypes(source_type: str) -> list[tuple[str, str]]:
@@ -308,4 +374,166 @@ async def get_composite_variable_preview(payload: CompositePreviewRequest) -> di
         "code": 200,
         "msg": "ok",
         "data": preview,
+    }
+
+
+@router.post("/svn-list")
+async def list_remote_svn_directory(
+    payload: SvnListRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """列出 SVN 远端目录下的文件与子目录（最多 1 层下钻在前端控制）。"""
+    try:
+        normalized_dir_url = normalize_dir_url(payload.dir_url)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
+        host = enforce_host_allowlist(urlparse(normalized_dir_url).hostname)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    from backend.app.loaders.svn_credentials import load_credentials
+
+    credentials = load_credentials(host=host, user_scope=ctx.user.username)
+
+    try:
+        result = list_svn_directory(
+            normalized_dir_url,
+            credentials=credentials,
+        )
+    except SvnRemoteError as error:
+        _raise_for_svn_error(error)
+    except NotImplementedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            "dir_url": result["dir_url"],
+            "host": host,
+            "entries": result["entries"],
+            "credential_username": credentials.username if credentials else "",
+        },
+    }
+
+
+@router.post("/svn-credentials")
+async def save_svn_credentials_endpoint(
+    payload: SvnCredentialUpsertRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """保存当前登录用户在某 SVN host 上的凭据。"""
+    try:
+        host = enforce_host_allowlist(payload.host)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    if not payload.username.strip() or not payload.password:
+        raise HTTPException(status_code=400, detail="用户名与密码不能为空。")
+
+    normalized_test_dir_url: str | None = None
+    if payload.test_dir_url is not None:
+        try:
+            normalized_test_dir_url = normalize_dir_url(payload.test_dir_url)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        try:
+            test_dir_host = enforce_host_allowlist(urlparse(normalized_test_dir_url).hostname)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        if test_dir_host != host:
+            raise HTTPException(status_code=400, detail="测试目录 URL 与当前 SVN host 不匹配。")
+
+    try:
+        record = save_credentials(
+            host=host,
+            username=payload.username.strip(),
+            password=payload.password,
+            user_scope=ctx.user.username,
+            test_dir_url=normalized_test_dir_url,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            "host": record.host,
+            "username": record.username,
+            "updated_at": record.updated_at,
+            "test_dir_url": record.test_dir_url,
+        },
+    }
+
+
+@router.get("/svn-credentials")
+async def list_svn_credentials_endpoint(
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """列出当前登录用户已保存的 SVN host（不返回密码）。"""
+    items = list_svn_credential_hosts(user_scope=ctx.user.username)
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {"items": items},
+    }
+
+
+@router.delete("/svn-credentials/{host}")
+async def delete_svn_credentials_endpoint(
+    host: str,
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """删除当前登录用户在某 host 上的凭据。"""
+    deleted = delete_credentials(host=host, user_scope=ctx.user.username)
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {"host": host.strip().lower(), "deleted": deleted},
+    }
+
+
+@router.post("/svn-refresh")
+async def refresh_remote_svn_source(
+    payload: SvnRefreshRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    """强制刷新某 SVN 数据源缓存（绕过 TTL）。"""
+    if payload.source.type != "svn":
+        raise HTTPException(status_code=400, detail="仅支持 SVN 数据源刷新。")
+
+    locator = (payload.source.pathOrUrl or payload.source.path or "").strip()
+    if not is_remote_svn_locator(locator):
+        raise HTTPException(
+            status_code=400,
+            detail="该数据源的 path/pathOrUrl 不是远端 HTTP URL，无需刷新缓存。",
+        )
+
+    try:
+        cached_path = prepare_remote_svn_source(
+            payload.source,
+            user_scope=ctx.user.username,
+            force_refresh=True,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    state = get_remote_cache_state(locator)
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": {
+            "source_id": payload.source.id,
+            "cached_path": str(cached_path),
+            "host": state["host"],
+            "revision": state["revision"],
+            "last_updated_at": state["last_updated_at"],
+        },
     }

@@ -3423,3 +3423,201 @@ async def test_fixed_rules_svn_update_returns_clear_error_when_cli_missing(
 
     assert response.status_code == 400
     assert "svn 命令" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_fixed_rules_svn_update_handles_local_and_remote_mix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    auth_headers: dict[str, str],
+) -> None:
+    """同时存在本地工作副本与 SVN 远端 URL 时，两类目标都被更新且各自分流。"""
+    import dataclasses
+
+    from backend.app.loaders import svn_cache, svn_credentials, svn_manager
+
+    new_settings = dataclasses.replace(
+        svn_cache.settings,
+        svn_cache_dir=tmp_path / "svn-cache",
+        svn_credentials_path=tmp_path / "svn-credentials.json",
+        svn_credentials_key_path=tmp_path / ".svn-key",
+        svn_url_allowlist=("samosvn",),
+    )
+    monkeypatch.setattr(svn_cache, "settings", new_settings)
+    monkeypatch.setattr(svn_credentials, "settings", new_settings)
+    monkeypatch.setattr(svn_manager, "settings", new_settings)
+
+    local_dir = tmp_path / "svn-local"
+    local_dir.mkdir()
+    workbook_local = _create_fixed_rules_workbook(
+        local_dir / "items_local.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+
+    remote_url = "https://samosvn/data/project/samo/GameDatas/datas_qa88/items_remote.xlsx"
+
+    payload = {
+        "version": 4,
+        "configured": True,
+        "sources": [
+            {
+                "id": "source-local",
+                "type": "local_excel",
+                "path": str(workbook_local),
+                "pathOrUrl": str(workbook_local),
+            },
+            {
+                "id": "source-remote",
+                "type": "svn",
+                "pathOrUrl": remote_url,
+            },
+        ],
+        "variables": [
+            {
+                "tag": "[source-local-items-INT_ID]",
+                "source_id": "source-local",
+                "sheet": "items",
+                "variable_kind": "single",
+                "column": "INT_ID",
+                "expected_type": "str",
+            }
+        ],
+        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "rules": [
+            {
+                "rule_id": "rule-a",
+                "group_id": "ungrouped",
+                "rule_name": "A",
+                "target_variable_tag": "[source-local-items-INT_ID]",
+                "rule_type": "fixed_value_compare",
+                "operator": "gt",
+                "expected_value": "0",
+            }
+        ],
+    }
+
+    local_calls: list[str] = []
+
+    def fake_update_local(working_copy: Path) -> dict[str, str]:
+        local_calls.append(str(working_copy))
+        return {"output": "Updated local.", "used_executable": "svn.exe"}
+
+    monkeypatch.setattr(fixed_rules_service, "update_svn_working_copy", fake_update_local)
+
+    remote_calls: list[bool] = []
+
+    def fake_prepare_remote(source, *, user_scope=None, force_refresh=False):
+        remote_calls.append(force_refresh)
+        cache_dir, file_name, _host = svn_cache.derive_cache_paths(source.pathOrUrl)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / file_name).write_bytes(b"x")
+        return cache_dir / file_name
+
+    def fake_remote_state(_url):
+        return {
+            "host": "samosvn",
+            "cache_dir": "ignored",
+            "file_name": "items_remote.xlsx",
+            "cached_path": "ignored",
+            "revision": 11900,
+            "last_updated_at": "2026-04-21T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(svn_cache, "prepare_remote_svn_source", fake_prepare_remote)
+    monkeypatch.setattr(svn_cache, "get_remote_cache_state", fake_remote_state)
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        response = await client.post("/api/v1/fixed-rules/svn-update")
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["total_paths"] == 2
+    assert data["updated_paths"] == 2
+
+    kinds = sorted(item["kind"] for item in data["results"])
+    assert kinds == ["remote_cache", "working_copy"]
+
+    remote_entries = [r for r in data["results"] if r["kind"] == "remote_cache"]
+    assert len(remote_entries) == 1
+    assert remote_entries[0]["source_id"] == "source-remote"
+    assert remote_entries[0]["source_url"] == remote_url
+    assert "11900" in remote_entries[0]["output"]
+    assert remote_calls == [True]
+
+    local_entries = [r for r in data["results"] if r["kind"] == "working_copy"]
+    assert len(local_entries) == 1
+    assert local_entries[0]["source_id"] == "source-local"
+    assert local_entries[0]["source_url"] == ""
+    assert local_calls == [str(local_dir.resolve())]
+
+
+@pytest.mark.anyio
+async def test_fixed_rules_svn_update_dedupes_same_remote_url_across_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    auth_headers: dict[str, str],
+) -> None:
+    """同一目录下 2 个远端 URL（不同文件）应只触发 1 次缓存目录更新。"""
+    import dataclasses
+
+    from backend.app.loaders import svn_cache, svn_credentials, svn_manager
+
+    new_settings = dataclasses.replace(
+        svn_cache.settings,
+        svn_cache_dir=tmp_path / "svn-cache",
+        svn_credentials_path=tmp_path / "svn-credentials.json",
+        svn_credentials_key_path=tmp_path / ".svn-key",
+        svn_url_allowlist=("samosvn",),
+    )
+    monkeypatch.setattr(svn_cache, "settings", new_settings)
+    monkeypatch.setattr(svn_credentials, "settings", new_settings)
+    monkeypatch.setattr(svn_manager, "settings", new_settings)
+
+    workbook_a = "https://samosvn/data/project/samo/GameDatas/datas_qa88/a.xlsx"
+    workbook_b = "https://samosvn/data/project/samo/GameDatas/datas_qa88/b.xlsx"
+
+    payload = {
+        "version": 4,
+        "configured": True,
+        "sources": [
+            {"id": "source-a", "type": "svn", "pathOrUrl": workbook_a},
+            {"id": "source-b", "type": "svn", "pathOrUrl": workbook_b},
+        ],
+        "variables": [],
+        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "rules": [],
+    }
+
+    prepare_calls: list[str] = []
+
+    def fake_prepare_remote(source, *, user_scope=None, force_refresh=False):
+        prepare_calls.append(source.pathOrUrl)
+        cache_dir, file_name, _host = svn_cache.derive_cache_paths(source.pathOrUrl)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / file_name).write_bytes(b"x")
+        return cache_dir / file_name
+
+    monkeypatch.setattr(svn_cache, "prepare_remote_svn_source", fake_prepare_remote)
+    monkeypatch.setattr(
+        svn_cache,
+        "get_remote_cache_state",
+        lambda _url: {
+            "host": "samosvn",
+            "cache_dir": "ignored",
+            "file_name": "x",
+            "cached_path": "ignored",
+            "revision": 11900,
+            "last_updated_at": "2026-04-21T00:00:00+00:00",
+        },
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        response = await client.post("/api/v1/fixed-rules/svn-update")
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["total_paths"] == 1
+    assert data["updated_paths"] == 1
+    assert len(prepare_calls) == 1

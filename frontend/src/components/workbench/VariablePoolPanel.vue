@@ -83,12 +83,29 @@ const isFixedRulesVariant = computed(() => props.variant === 'fixed-rules')
 const panelCopy = computed(() => ({
   emptyText: '请先添加单个变量或组合变量。',
   sourceTypeError: isFixedRulesVariant.value
-    ? '当前项目校验页的字段映射提取先支持本地 Excel。'
-    : '当前步骤 2 的字段映射提取先支持本地 Excel。',
+    ? '当前项目校验页的字段映射提取仅支持 Excel 数据源（本地 Excel / SVN Excel）。'
+    : '当前步骤 2 的字段映射提取仅支持 Excel 数据源（本地 Excel / SVN Excel）。',
   compositeTypeError: isFixedRulesVariant.value
-    ? '当前项目校验页的组合变量提取先支持本地 Excel。'
-    : '当前步骤 2 的组合变量提取先支持本地 Excel。',
+    ? '当前项目校验页的组合变量提取仅支持 Excel 数据源（本地 Excel / SVN Excel）。'
+    : '当前步骤 2 的组合变量提取仅支持 Excel 数据源（本地 Excel / SVN Excel）。',
 }))
+
+function getSourceLocator(source: DataSource | null | undefined): string {
+  return (source?.pathOrUrl ?? source?.path ?? source?.url ?? '').trim()
+}
+
+function isExcelLocator(locator: string): boolean {
+  const normalized = locator.trim().split(/[?#]/, 1)[0] ?? ''
+  return /\.xlsx?$/i.test(normalized)
+}
+
+function supportsVariableMappingSource(source: DataSource | null | undefined): boolean {
+  if (!source) return false
+  if (source.type === 'local_excel') return true
+  if (source.type === 'svn') return isExcelLocator(getSourceLocator(source))
+  return false
+}
+
 const singleSource = computed<DataSource | null>(
   () => sourceOptions.value.find((item) => item.id === singleDraft.source_id) ?? null,
 )
@@ -144,7 +161,7 @@ const detailSourcePath = computed(
 const canSaveSingle = computed(
   () =>
     !singleMetadataLoading.value &&
-    singleSource.value?.type === 'local_excel' &&
+    supportsVariableMappingSource(singleSource.value) &&
     !!singleDraft.source_id.trim() &&
     !!singleDraft.sheet.trim() &&
     !!singleDraft.column?.trim() &&
@@ -155,7 +172,7 @@ const canSaveComposite = computed(
   () =>
     !compositeMetadataLoading.value &&
     !compositePreviewLoading.value &&
-    compositeSource.value?.type === 'local_excel' &&
+    supportsVariableMappingSource(compositeSource.value) &&
     !!compositeDraft.source_id.trim() &&
     !!compositeDraft.sheet.trim() &&
     !!compositeDraft.tag.trim() &&
@@ -239,7 +256,7 @@ function resetCompositeDraft(): void {
 
 async function prepareSingleEditorForSource(sourceId: string, preserve = false): Promise<void> {
   if (!sourceId) return
-  if (singleSource.value?.type !== 'local_excel') {
+  if (!supportsVariableMappingSource(singleSource.value)) {
     singleMetadataError.value = panelCopy.value.sourceTypeError
     if (!preserve) {
       singleDraft.sheet = ''
@@ -276,7 +293,7 @@ async function prepareSingleEditorForSource(sourceId: string, preserve = false):
 
 async function prepareCompositeEditorForSource(sourceId: string, preserve = false): Promise<void> {
   if (!sourceId) return
-  if (compositeSource.value?.type !== 'local_excel') {
+  if (!supportsVariableMappingSource(compositeSource.value)) {
     compositeMetadataError.value = panelCopy.value.compositeTypeError
     if (!preserve) {
       compositeDraft.sheet = ''

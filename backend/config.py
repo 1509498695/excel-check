@@ -33,6 +33,32 @@ class Settings:
     supported_source_types: tuple[str, ...] = field(
         default_factory=lambda: ("local_excel", "local_csv", "feishu", "svn")
     )
+    svn_cache_dir: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent
+        / ".runtime"
+        / "svn-cache"
+    )
+    svn_credentials_path: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent
+        / ".runtime"
+        / "svn-credentials.json"
+    )
+    svn_credentials_key_path: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent
+        / ".runtime"
+        / ".svn-key"
+    )
+    svn_cache_ttl_seconds: int = 60
+    svn_url_allowlist: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            host.strip()
+            for host in (os.getenv("SVN_URL_ALLOWLIST") or "samosvn").split(",")
+            if host.strip()
+        )
+        or ("samosvn",)
+    )
+    svn_list_timeout_seconds: int = 30
+    svn_subprocess_timeout_seconds: int = 600
 
     # --- 数据库 ---
     db_url: str = field(

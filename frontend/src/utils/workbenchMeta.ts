@@ -4,7 +4,7 @@ export const SOURCE_TYPE_OPTIONS: Array<{ label: string; value: SourceType }> = 
   { label: '本地 Excel (.xlsx / .xls)', value: 'local_excel' },
   { label: '本地 CSV (.csv)', value: 'local_csv' },
   { label: '飞书表格', value: 'feishu' },
-  { label: 'SVN 工作副本', value: 'svn' },
+  { label: 'SVN（推荐 HTTP 链接）', value: 'svn' },
 ]
 
 export const EXPECTED_TYPE_OPTIONS: Array<{ label: string; value: ExpectedType }> = [

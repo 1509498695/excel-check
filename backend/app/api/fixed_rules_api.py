@@ -126,7 +126,10 @@ async def trigger_fixed_rules_svn_update(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        update_result = run_saved_fixed_rules_svn_update(config)
+        update_result = run_saved_fixed_rules_svn_update(
+            config,
+            user_scope=ctx.user.username,
+        )
     except (FileNotFoundError, ValueError, ImportError, NotImplementedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

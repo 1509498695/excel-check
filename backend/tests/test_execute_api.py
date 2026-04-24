@@ -526,7 +526,7 @@ async def test_source_metadata_rejects_csv_for_variable_pool_dropdown(
         )
 
     assert response.status_code == 400
-    assert "变量池下拉提取第一版仅支持 Excel 数据源" in response.json()["detail"]
+    assert "变量池下拉提取目前仅支持 Excel 与 SVN" in response.json()["detail"]
 
 
 @pytest.mark.anyio
@@ -1171,3 +1171,60 @@ async def test_execute_engine_persists_latest_result_and_supports_server_side_pa
     assert page_two_payload["data"]["total"] == 35
     assert len(page_two_payload["data"]["list"]) == 15
     assert page_two_payload["data"]["list"][0]["raw_value"] == 31
+
+
+@pytest.mark.anyio
+async def test_execute_engine_runs_svn_remote_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SVN 远端 URL 数据源走 prepare_remote_svn_source 落到本地 fixture，
+    应当与等价的 local_excel 配置产出相同的异常结果。"""
+    from backend.app.loaders import svn_cache
+
+    fixture_xlsx = tmp_path / "remote_quests.xlsx"
+    pd.DataFrame({"ID": [1, 2, 3], "Name": ["A", "", "C"]}).to_excel(
+        fixture_xlsx,
+        sheet_name="items",
+        index=False,
+    )
+
+    def _fake_prepare(source, *, user_scope=None, force_refresh=False):
+        return fixture_xlsx
+
+    monkeypatch.setattr(svn_cache, "prepare_remote_svn_source", _fake_prepare)
+
+    payload = {
+        "sources": [
+            {
+                "id": "src_remote",
+                "type": "svn",
+                "pathOrUrl": "https://samosvn/data/project/samo/GameDatas/datas_qa88/remote_quests.xlsx",
+            }
+        ],
+        "variables": [
+            {"tag": "[items-name]", "source_id": "src_remote", "sheet": "items", "column": "Name"}
+        ],
+        "rules": [
+            {
+                "rule_id": "rule_not_null_name",
+                "rule_type": "not_null",
+                "params": {"target_tags": ["[items-name]"]},
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    abnormal_results = body["data"]["abnormal_results"]
+    assert any(item["rule_name"] for item in abnormal_results)
+    # 至少能命中一行空 Name 异常
+    assert len(abnormal_results) >= 1
+    failed_sources = body["meta"]["failed_sources"]
+    assert "src_remote" not in failed_sources

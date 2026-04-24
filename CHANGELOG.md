@@ -21,6 +21,9 @@
 - 组合变量弹窗进一步收口：仅当当前 `Key 列` 存在重复值时才显示 `Key 后追加序号`；编辑历史上已启用该选项的变量时，复选框会继续显示并保持回填。
 - 修复项目校验 `/fixed-rules` 中 `组合分支校验` 的保存链路：前端提交前会正确保留筛选操作符 `contains` 的比较值，不再把 `全局筛选 contains + 分支筛选 contains + 分支校验 not_null` 误保存为“缺少比较值”。
 - 工作台数据源弹窗修复：`POST /api/v1/sources/local-pick` 改为以独立子进程驱动 `tkinter` 文件选择框，避免在 uvicorn 主进程里残留 Tcl 解释器与窗口焦点资源；用户在选完本地配置表后立即修改「数据源标识」时，整页不再被卡住，连续多次选择文件也不会越用越慢。
+- SVN 数据源（HTTP）打通：用户在数据源弹窗里选「SVN（推荐 HTTP 链接）」，输入目录 URL 后弹窗浏览选择 `.xls/.xlsx` 文件即可保存；后端新增 `POST /api/v1/sources/svn-list / svn-credentials / svn-refresh`，凭据按当前登录用户与 host 维度 Fernet 加密落 `<runtime>/svn-credentials.json`，远端 URL 落到 `<runtime>/svn-cache/<host>/<key>/` 后复用统一执行引擎；变量池下拉与 `/api/v1/engine/execute`、`/api/v1/fixed-rules/{execute,svn-update}` 都自动支持 SVN 远端文件，命中默认 60s TTL 时不重复访问 SVN。SVN 业务级鉴权失败用 HTTP 403 表达，避免与登录态过期混淆；远端 host 通过 `settings.svn_url_allowlist`（默认 `samosvn`）做 SSRF 兜底。
+- SVN 凭据弹窗支持可配置“测试目录 URL”，并按当前登录用户 + host 维度持久化记忆；`samosvn` 默认回填 `https://samosvn/data/project/samo/GameDatas/`，测试连接会先保存凭据与测试目录，再对该目录执行一次 `svn list`。后端继续把 `forbidden` 归类为权限/鉴权失败，前端会给出更准确的权限提示。
+- 修复步骤 2 变量弹窗的前端错误拦截：SVN Excel 数据源不再被误判为“仅本地 Excel 可提取字段”，个人校验与项目校验现在都可直接基于 SVN `.xls/.xlsx` 数据源添加单变量和组合变量；CSV 仍继续显示不支持字段映射提取。
 
 ## [0.5.0] - 2026-04-20
 

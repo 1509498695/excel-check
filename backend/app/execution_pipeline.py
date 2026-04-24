@@ -165,7 +165,12 @@ def _load_single_source(
         return {}
 
     if source.type == "svn":
-        sync_svn_source(source=source)
+        # 远端 URL 直接走缓存机制；本地工作副本仍走旧 sync_svn_source 触发 svn update。
+        from backend.app.loaders.svn_cache import is_remote_svn_locator
+
+        locator = (source.pathOrUrl or source.path or source.url or "").strip()
+        if not is_remote_svn_locator(locator):
+            sync_svn_source(source=source)
         return load_variables_by_source(source, variables_for_source)
 
     raise ValueError(f"Unsupported source type: '{source.type}'.")

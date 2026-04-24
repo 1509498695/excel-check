@@ -5,11 +5,31 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from backend.app.api.schemas import DataSource
+from backend.app.loaders.svn_credentials import SvnCredential
 from backend.config import settings
+
+
+# SVN 命令统一注入的「非交互 + 自签证书放行」参数，避免在 uvicorn 子进程里挂死。
+_SVN_NONINTERACTIVE_FLAGS: tuple[str, ...] = (
+    "--non-interactive",
+    "--trust-server-cert-failures",
+    "unknown-ca,cn-mismatch,not-yet-valid,expired,other",
+)
+
+
+class SvnRemoteError(RuntimeError):
+    """带分类信息的 SVN 远端错误。"""
+
+    def __init__(self, category: str, message: str) -> None:
+        super().__init__(message)
+        self.category = category
+        self.message = message
 
 
 def resolve_svn_executable() -> str | None:
@@ -187,3 +207,355 @@ def _expand_windows_install_value(raw_value: str) -> list[Path]:
     if lower_name.endswith(".exe"):
         return [value_path.parent / "svn.exe"]
     return [value_path / "svn.exe", value_path / "bin" / "svn.exe"]
+
+
+def normalize_dir_url(raw_url: str) -> str:
+    """规整远端目录 URL：去首尾空格，强制末尾带 `/`。"""
+    if not raw_url or not raw_url.strip():
+        raise ValueError("SVN 目录 URL 不能为空。")
+    candidate = raw_url.strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("SVN 目录 URL 必须以 http(s):// 开头。")
+    if not parsed.hostname:
+        raise ValueError("SVN 目录 URL 缺少 host。")
+    if not candidate.endswith("/"):
+        candidate = candidate + "/"
+    return candidate
+
+
+def split_remote_url(file_or_dir_url: str) -> tuple[str, str]:
+    """把单文件 URL 拆成 (dir_url, file_name)；目录 URL 返回 (dir_url, '')."""
+    parsed = urlsplit(file_or_dir_url)
+    path_segments = parsed.path.split("/")
+    if file_or_dir_url.endswith("/") or not path_segments[-1]:
+        # 目录 URL（已带斜杠）：file_name = ''
+        normalized_path = parsed.path if parsed.path.endswith("/") else parsed.path + "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, "", "")), ""
+
+    file_name = path_segments[-1]
+    dir_path = "/".join(path_segments[:-1]) + "/"
+    return (
+        urlunsplit((parsed.scheme, parsed.netloc, dir_path, "", "")),
+        file_name,
+    )
+
+
+def enforce_host_allowlist(host: str | None) -> str:
+    """命中 settings.svn_url_allowlist 才允许；返回规整后的 host（lower）。"""
+    if not host:
+        raise ValueError("SVN 目录 URL 缺少 host。")
+    normalized = host.strip().lower()
+    allowlist = tuple(item.lower() for item in settings.svn_url_allowlist if item)
+    if normalized not in allowlist:
+        raise ValueError(
+            f"SVN 主机 '{normalized}' 不在允许列表中。"
+            "如需新增，请在后端 settings.svn_url_allowlist 显式添加。"
+        )
+    return normalized
+
+
+def _translate_svn_stderr(stderr: str) -> tuple[str, str]:
+    """把 SVN CLI 的 stderr 归类为 (category, msg)。"""
+    text = (stderr or "").strip()
+    lower = text.lower()
+    if not text:
+        return "unknown", "SVN 命令返回空错误信息。"
+
+    if (
+        "authorization failed" in lower
+        or "authentication failed" in lower
+        or "forbidden" in lower
+        or "e170001" in lower
+        or "e215004" in lower
+    ):
+        return "auth_failed", "当前账号无权访问测试目录，请检查 SVN 用户权限或重新输入凭据。"
+    if (
+        "non-existent" in lower
+        or "not found" in lower
+        or "e160013" in lower
+        or "e170000" in lower
+    ):
+        return "not_found", "SVN 目录或文件不存在，或当前账号无权访问。"
+    if (
+        "could not connect" in lower
+        or "unable to connect" in lower
+        or "connection refused" in lower
+        or "name or service not known" in lower
+        or "e175002" in lower
+        or "e670002" in lower
+    ):
+        return "network", "无法连接到 SVN 服务器，请检查网络与 URL。"
+    return "unknown", text
+
+
+def _build_credential_args(credentials: SvnCredential | None) -> list[str]:
+    """凭据存在时显式带上 --username/--password，避免与 SVN 自带 auth cache 串扰。"""
+    if credentials is None:
+        return []
+    return [
+        "--username",
+        credentials.username,
+        "--password",
+        credentials.password,
+    ]
+
+
+def _run_svn_subprocess(
+    *,
+    args: list[str],
+    timeout: int,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """统一的 SVN 子进程封装。"""
+    executable = resolve_svn_executable()
+    if executable is None:
+        raise NotImplementedError(
+            "当前环境未检测到 svn 命令，请先安装 SVN CLI，"
+            "或在后端配置中指定 svn 可执行文件路径。"
+        )
+
+    return subprocess.run(
+        [executable, *args],
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+        timeout=timeout,
+    )
+
+
+def list_svn_directory(
+    dir_url: str,
+    *,
+    credentials: SvnCredential | None,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """`svn list <dir_url> --xml`，返回结构化目录条目。
+
+    返回 dict 形如::
+
+        {
+            "dir_url": "https://samosvn/.../datas_qa88/",
+            "entries": [
+                {"kind": "file", "name": "...", "size": ..., "revision": ...,
+                 "last_author": "...", "last_modified_at": "..."},
+                ...
+            ],
+        }
+    """
+    normalized_dir_url = normalize_dir_url(dir_url)
+    parsed_host = urlparse(normalized_dir_url).hostname
+    enforce_host_allowlist(parsed_host)
+
+    effective_timeout = timeout if timeout is not None else settings.svn_list_timeout_seconds
+
+    args: list[str] = [
+        "list",
+        normalized_dir_url,
+        "--xml",
+        *_SVN_NONINTERACTIVE_FLAGS,
+        *_build_credential_args(credentials),
+    ]
+
+    try:
+        completed = _run_svn_subprocess(args=args, timeout=effective_timeout)
+    except subprocess.TimeoutExpired as error:
+        raise SvnRemoteError(
+            "timeout",
+            f"SVN 列表超时（>{effective_timeout}s），请稍后重试或缩小目录。",
+        ) from error
+
+    if completed.returncode != 0:
+        category, message = _translate_svn_stderr(completed.stderr or completed.stdout or "")
+        raise SvnRemoteError(category, message)
+
+    return {
+        "dir_url": normalized_dir_url,
+        "entries": _parse_svn_list_xml(completed.stdout or ""),
+    }
+
+
+def _parse_svn_list_xml(xml_text: str) -> list[dict[str, Any]]:
+    """解析 `svn list --xml` 输出。"""
+    if not xml_text.strip():
+        return []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as error:
+        raise SvnRemoteError(
+            "unknown",
+            f"解析 SVN 列表 XML 失败：{error}",
+        ) from error
+
+    entries: list[dict[str, Any]] = []
+    for entry in root.iter("entry"):
+        kind = entry.get("kind", "")
+        if kind not in {"file", "dir"}:
+            continue
+        name_element = entry.find("name")
+        if name_element is None or not (name_element.text or "").strip():
+            continue
+        name = name_element.text.strip()
+
+        size_element = entry.find("size")
+        try:
+            size_value = int(size_element.text) if size_element is not None and size_element.text else None
+        except ValueError:
+            size_value = None
+
+        commit_element = entry.find("commit")
+        revision_value: int | None = None
+        author_value = ""
+        last_modified_at = ""
+        if commit_element is not None:
+            try:
+                revision_value = int(commit_element.get("revision", "")) if commit_element.get("revision") else None
+            except ValueError:
+                revision_value = None
+            author_node = commit_element.find("author")
+            if author_node is not None and author_node.text:
+                author_value = author_node.text.strip()
+            date_node = commit_element.find("date")
+            if date_node is not None and date_node.text:
+                last_modified_at = date_node.text.strip()
+
+        entries.append(
+            {
+                "kind": kind,
+                "name": name,
+                "size": size_value,
+                "revision": revision_value,
+                "last_author": author_value,
+                "last_modified_at": last_modified_at,
+            }
+        )
+
+    # dir 优先、按 name 升序，方便前端直接渲染。
+    entries.sort(key=lambda item: (0 if item["kind"] == "dir" else 1, item["name"].lower()))
+    return entries
+
+
+def checkout_remote_directory(
+    *,
+    dir_url: str,
+    target_dir: Path,
+    credentials: SvnCredential | None,
+    depth: str = "files",
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """`svn checkout --depth=<depth> <dir_url> <target_dir>`。"""
+    normalized_dir_url = normalize_dir_url(dir_url)
+    enforce_host_allowlist(urlparse(normalized_dir_url).hostname)
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    effective_timeout = (
+        timeout if timeout is not None else settings.svn_subprocess_timeout_seconds
+    )
+
+    args: list[str] = [
+        "checkout",
+        f"--depth={depth}",
+        normalized_dir_url,
+        str(target_dir),
+        *_SVN_NONINTERACTIVE_FLAGS,
+        *_build_credential_args(credentials),
+    ]
+
+    try:
+        completed = _run_svn_subprocess(args=args, timeout=effective_timeout)
+    except subprocess.TimeoutExpired as error:
+        raise SvnRemoteError(
+            "timeout",
+            f"SVN 拉取超时（>{effective_timeout}s）。",
+        ) from error
+
+    if completed.returncode != 0:
+        category, message = _translate_svn_stderr(completed.stderr or "")
+        raise SvnRemoteError(category, message)
+
+    return {"output": (completed.stdout or "").strip()}
+
+
+def update_remote_cache_directory(
+    *,
+    cache_dir: Path,
+    credentials: SvnCredential | None,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """对已存在的 cache 目录执行 `svn update --depth=files`。"""
+    if not cache_dir.is_dir():
+        raise FileNotFoundError(f"SVN 缓存目录不存在：'{cache_dir}'。")
+
+    effective_timeout = (
+        timeout if timeout is not None else settings.svn_subprocess_timeout_seconds
+    )
+
+    args: list[str] = [
+        "update",
+        "--depth=files",
+        *_SVN_NONINTERACTIVE_FLAGS,
+        *_build_credential_args(credentials),
+    ]
+
+    try:
+        completed = _run_svn_subprocess(
+            args=args,
+            timeout=effective_timeout,
+            cwd=cache_dir,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise SvnRemoteError(
+            "timeout",
+            f"SVN 更新超时（>{effective_timeout}s）。",
+        ) from error
+
+    if completed.returncode != 0:
+        category, message = _translate_svn_stderr(completed.stderr or "")
+        raise SvnRemoteError(category, message)
+
+    return {"output": (completed.stdout or "").strip()}
+
+
+def get_remote_revision(
+    cache_dir: Path,
+    *,
+    credentials: SvnCredential | None = None,
+    timeout: int | None = None,
+) -> int | None:
+    """`svn info --show-item revision`，读取 cache_dir 当前 working revision。"""
+    if not cache_dir.is_dir():
+        return None
+
+    effective_timeout = (
+        timeout if timeout is not None else settings.svn_list_timeout_seconds
+    )
+
+    args: list[str] = [
+        "info",
+        "--show-item",
+        "revision",
+        "--no-newline",
+        *_SVN_NONINTERACTIVE_FLAGS,
+        *_build_credential_args(credentials),
+    ]
+
+    try:
+        completed = _run_svn_subprocess(
+            args=args,
+            timeout=effective_timeout,
+            cwd=cache_dir,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+    if completed.returncode != 0:
+        return None
+
+    raw = (completed.stdout or "").strip()
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None

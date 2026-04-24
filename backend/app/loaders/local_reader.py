@@ -56,8 +56,8 @@ def load_local_variables(
 
 def read_source_metadata(source: DataSource) -> dict[str, Any]:
     """读取 Excel 数据源的 Sheet 与列结构，用于变量池下拉构建。"""
-    _ensure_excel_metadata_source(source)
-    source_path = _resolve_local_path(source)
+    _ensure_metadata_supported(source)
+    source_path = _resolve_source_path(source)
 
     try:
         workbook = pd.ExcelFile(
@@ -104,8 +104,8 @@ def preview_source_column(
     limit: int | None = None,
 ) -> dict[str, Any]:
     """返回指定列的预览数据，供变量详情弹窗展示。"""
-    _ensure_excel_metadata_source(source)
-    source_path = _resolve_local_path(source)
+    _ensure_metadata_supported(source)
+    source_path = _resolve_source_path(source)
 
     if not sheet_name.strip():
         raise ValueError("变量详情预览缺少 Sheet 名称。")
@@ -179,8 +179,8 @@ def preview_composite_variable(
     append_index_to_key: bool = False,
 ) -> dict[str, Any]:
     """返回同一数据源同一 Sheet 内多列组合后的 JSON 映射预览。"""
-    _ensure_excel_metadata_source(source)
-    source_path = _resolve_local_path(source)
+    _ensure_metadata_supported(source)
+    source_path = _resolve_source_path(source)
 
     preview_columns = [column for column in columns if column and column.strip()]
     preview_columns = _unique_preserve_order(preview_columns)
@@ -271,6 +271,17 @@ def load_variables_by_source(
         return read_local_excel(source, variables_for_source)
     if source.type == "local_csv":
         return read_local_csv(source, variables_for_source)
+    if source.type == "svn":
+        # 远端 URL → 缓存文件 / 本地工作副本路径 → 按后缀分发到 Excel/CSV 读取。
+        resolved_path = _resolve_source_path(source)
+        suffix = resolved_path.suffix.lower()
+        if suffix in {".xls", ".xlsx"}:
+            return read_local_excel(source, variables_for_source)
+        if suffix == ".csv":
+            return read_local_csv(source, variables_for_source)
+        raise ValueError(
+            f"SVN 数据源 '{source.id}' 文件后缀 '{suffix}' 暂不支持，仅支持 .xls / .xlsx / .csv。"
+        )
     raise ValueError(
         f"Source '{source.id}' has unsupported local loader type '{source.type}'."
     )
@@ -283,7 +294,7 @@ def read_local_excel(
     if not variables_for_source:
         return {}
 
-    source_path = _resolve_local_path(source)
+    source_path = _resolve_source_path(source)
     variables_by_sheet: dict[str, list[VariableTag]] = defaultdict(list)
 
     for variable in variables_for_source:
@@ -348,7 +359,7 @@ def read_local_csv(
     if any(_get_variable_kind(variable) == "composite" for variable in variables_for_source):
         raise ValueError("组合变量当前仅支持本地 Excel 数据源。")
 
-    source_path = _resolve_local_path(source)
+    source_path = _resolve_source_path(source)
     requested_columns = _collect_requested_columns(variables_for_source)
 
     try:
@@ -392,10 +403,18 @@ def read_local_csv(
     return loaded_variables
 
 
+def _ensure_metadata_supported(source: DataSource) -> None:
+    """放行 local_excel 与 svn（HTTP）数据源；其它类型仍拒绝元数据/预览。"""
+    if source.type == "local_excel":
+        return
+    if source.type == "svn":
+        return
+    raise ValueError("变量池下拉提取目前仅支持 Excel 与 SVN（HTTP）数据源。")
+
+
 def _ensure_excel_metadata_source(source: DataSource) -> None:
-    """限制变量池元数据读取仅支持 Excel 数据源。"""
-    if source.type != "local_excel":
-        raise ValueError("变量池下拉提取第一版仅支持 Excel 数据源。")
+    """兼容旧调用名，保留一个薄封装。"""
+    _ensure_metadata_supported(source)
 
 
 def _open_excel_workbook(source_path: Path, source_id: str) -> pd.ExcelFile:
@@ -454,8 +473,27 @@ def _ensure_unique_tags(variables: list[VariableTag]) -> None:
         )
 
 
-def _resolve_local_path(source: DataSource) -> Path:
-    """解析本地文件路径，优先使用 path，其次回退到 pathOrUrl。"""
+def _resolve_source_path(
+    source: DataSource,
+    *,
+    user_scope: str | None = None,
+    force_refresh: bool = False,
+) -> Path:
+    """解析数据源真实文件路径。
+
+    - 本地 Excel/CSV 源：直接展开 path/pathOrUrl。
+    - SVN 源：远端 URL 走 svn_cache 落到本地缓存文件；本地工作副本路径透传。
+    """
+    if source.type == "svn":
+        # 延迟导入以避免与 svn_manager / svn_credentials 形成循环依赖。
+        from backend.app.loaders.svn_cache import prepare_remote_svn_source
+
+        return prepare_remote_svn_source(
+            source,
+            user_scope=user_scope,
+            force_refresh=force_refresh,
+        )
+
     raw_path = source.path or source.pathOrUrl
     if not raw_path:
         raise ValueError(
@@ -472,6 +510,11 @@ def _resolve_local_path(source: DataSource) -> Path:
             f"Local source '{source.id}' path is not a file: '{source_path}'."
         )
     return source_path
+
+
+def _resolve_local_path(source: DataSource) -> Path:
+    """兼容旧调用名，保留一个薄封装。"""
+    return _resolve_source_path(source)
 
 
 def _get_variable_kind(variable: VariableTag) -> str:
