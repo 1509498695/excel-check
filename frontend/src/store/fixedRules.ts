@@ -48,9 +48,12 @@ import {
   extractSourceBasename,
   getSourceLocator,
   isAffectedVariable,
-  isLocalFileSource,
+  isLocalPathManagedSource,
+  isSvnPathManagedSource,
   joinDirectoryAndBasename,
+  joinSvnDirectoryAndBasename,
   normalizeReplacementPreset,
+  type SourcePathReplacementGroup,
 } from '../utils/sourcePathReplacement'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
@@ -85,15 +88,54 @@ interface FixedRulesState {
 
 function createDefaultConfig(): FixedRulesConfig {
   return {
-    version: 5,
+    version: 6,
     configured: false,
     sources: [],
     variables: [],
     groups: [{ ...UNGROUPED_GROUP }],
     rules: [],
-    path_replacement_presets: [],
-    selected_path_replacement_preset: null,
+    local_path_replacement_presets: [],
+    selected_local_path_replacement_preset: null,
+    svn_path_replacement_presets: [],
+    selected_svn_path_replacement_preset: null,
   }
+}
+
+function getPresetListByGroup(
+  config: Pick<
+    FixedRulesConfig,
+    | 'local_path_replacement_presets'
+    | 'svn_path_replacement_presets'
+  >,
+  group: SourcePathReplacementGroup,
+): string[] {
+  return group === 'svn'
+    ? config.svn_path_replacement_presets
+    : config.local_path_replacement_presets
+}
+
+function setPresetListByGroup(
+  config: FixedRulesConfig,
+  group: SourcePathReplacementGroup,
+  presets: string[],
+): void {
+  if (group === 'svn') {
+    config.svn_path_replacement_presets = presets
+    return
+  }
+  config.local_path_replacement_presets = presets
+}
+
+function setSelectedPresetByGroup(
+  config: FixedRulesConfig,
+  group: SourcePathReplacementGroup,
+  selectedPreset: string | null,
+): void {
+  if (group === 'svn') {
+    config.selected_svn_path_replacement_preset = selectedPreset
+    return
+  }
+  config.selected_local_path_replacement_preset = selectedPreset
 }
 
 function isValidSequenceStep(value: string | undefined): boolean {
@@ -200,12 +242,20 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       return state.config.sources
     },
 
-    pathReplacementPresets(state): string[] {
-      return state.config.path_replacement_presets
+    localPathReplacementPresets(state): string[] {
+      return state.config.local_path_replacement_presets
     },
 
-    selectedPathReplacementPreset(state): string | null {
-      return state.config.selected_path_replacement_preset ?? null
+    selectedLocalPathReplacementPreset(state): string | null {
+      return state.config.selected_local_path_replacement_preset ?? null
+    },
+
+    svnPathReplacementPresets(state): string[] {
+      return state.config.svn_path_replacement_presets
+    },
+
+    selectedSvnPathReplacementPreset(state): string | null {
+      return state.config.selected_svn_path_replacement_preset ?? null
     },
 
     variables(state): VariableTag[] {
@@ -513,26 +563,51 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     },
 
     applyConfig(config: FixedRulesConfig): void {
-      const pathReplacementPresetMap = new Map<string, string>()
-      ;(config.path_replacement_presets ?? []).forEach((preset) => {
-        const normalizedPreset = normalizeReplacementPreset(preset)
-        if (normalizedPreset && !pathReplacementPresetMap.has(normalizedPreset.toLowerCase())) {
-          pathReplacementPresetMap.set(normalizedPreset.toLowerCase(), normalizedPreset)
+      const legacyLocalPresets = config.path_replacement_presets ?? []
+      const localPathReplacementPresetMap = new Map<string, string>()
+      ;(config.local_path_replacement_presets ?? legacyLocalPresets).forEach((preset) => {
+        const normalizedPreset = normalizeReplacementPreset(preset, 'local')
+        if (
+          normalizedPreset &&
+          !localPathReplacementPresetMap.has(normalizedPreset.toLowerCase())
+        ) {
+          localPathReplacementPresetMap.set(normalizedPreset.toLowerCase(), normalizedPreset)
         }
       })
-      const normalizedSelectedPreset = config.selected_path_replacement_preset
-        ? normalizeReplacementPreset(config.selected_path_replacement_preset)
+      const svnPathReplacementPresetMap = new Map<string, string>()
+      ;(config.svn_path_replacement_presets ?? []).forEach((preset) => {
+        const normalizedPreset = normalizeReplacementPreset(preset, 'svn')
+        if (
+          normalizedPreset &&
+          !svnPathReplacementPresetMap.has(normalizedPreset.toLowerCase())
+        ) {
+          svnPathReplacementPresetMap.set(normalizedPreset.toLowerCase(), normalizedPreset)
+        }
+      })
+      const localSelectedPresetCandidate =
+        config.selected_local_path_replacement_preset ?? config.selected_path_replacement_preset
+      const normalizedLocalSelectedPreset = localSelectedPresetCandidate
+        ? normalizeReplacementPreset(localSelectedPresetCandidate, 'local')
+        : null
+      const normalizedSvnSelectedPreset = config.selected_svn_path_replacement_preset
+        ? normalizeReplacementPreset(config.selected_svn_path_replacement_preset, 'svn')
         : null
 
       this.config = {
         ...config,
-        version: 5,
+        version: 6,
         groups: ensureDefaultGroup(config.groups),
-        path_replacement_presets: [...pathReplacementPresetMap.values()],
-        selected_path_replacement_preset:
-          normalizedSelectedPreset &&
-          pathReplacementPresetMap.has(normalizedSelectedPreset.toLowerCase())
-            ? pathReplacementPresetMap.get(normalizedSelectedPreset.toLowerCase()) ?? null
+        local_path_replacement_presets: [...localPathReplacementPresetMap.values()],
+        selected_local_path_replacement_preset:
+          normalizedLocalSelectedPreset &&
+          localPathReplacementPresetMap.has(normalizedLocalSelectedPreset.toLowerCase())
+            ? localPathReplacementPresetMap.get(normalizedLocalSelectedPreset.toLowerCase()) ?? null
+            : null,
+        svn_path_replacement_presets: [...svnPathReplacementPresetMap.values()],
+        selected_svn_path_replacement_preset:
+          normalizedSvnSelectedPreset &&
+          svnPathReplacementPresetMap.has(normalizedSvnSelectedPreset.toLowerCase())
+            ? svnPathReplacementPresetMap.get(normalizedSvnSelectedPreset.toLowerCase()) ?? null
             : null,
       }
 
@@ -643,7 +718,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       try {
         const response = await saveFixedRulesConfig({
           ...this.config,
-          version: 5,
+          version: 6,
           groups: ensureDefaultGroup(this.config.groups),
         })
         this.applyConfig(response.data)
@@ -667,7 +742,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
 
       try {
         if (this.hasBlockingConfigIssues) {
-          this.pageError = '当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。'
+          this.pageError = '当前存在读取失败的数据源，请先修复数据源路径管理中的路径问题或重新接入数据源后再执行校验。'
           throw new Error(this.pageError)
         }
         await this.saveConfig()
@@ -988,34 +1063,39 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       }
     },
 
-    setSelectedPathReplacementPreset(path: string | null): void {
-      this.config.selected_path_replacement_preset = path
-        ? normalizeReplacementPreset(path)
-        : null
+    setSelectedPathReplacementPreset(
+      group: SourcePathReplacementGroup,
+      path: string | null,
+    ): void {
+      setSelectedPresetByGroup(
+        this.config,
+        group,
+        path ? normalizeReplacementPreset(path, group) : null,
+      )
     },
 
-    addPathReplacementPreset(path: string): void {
-      const normalizedPath = normalizeReplacementPreset(path)
+    addPathReplacementPreset(group: SourcePathReplacementGroup, path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path, group)
       if (!normalizedPath) {
         return
       }
 
       const presetMap = new Map(
-        this.config.path_replacement_presets.map((preset) => [preset.toLowerCase(), preset] as const),
+        getPresetListByGroup(this.config, group).map((preset) => [preset.toLowerCase(), preset] as const),
       )
       if (!presetMap.has(normalizedPath.toLowerCase())) {
         presetMap.set(normalizedPath.toLowerCase(), normalizedPath)
-        this.config.path_replacement_presets = [...presetMap.values()]
+        setPresetListByGroup(this.config, group, [...presetMap.values()])
       }
     },
 
-    async replaceSourceBasePath(baseDirectory: string): Promise<{
+    async replaceSourceBasePath(group: SourcePathReplacementGroup, baseDirectory: string): Promise<{
       updatedCount: number
       skippedCount: number
       failedCount: number
       affectedSourceIds: string[]
     }> {
-      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory)
+      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory, group)
       const candidateSources: Array<{
         sourceId: string
         source: DataSource
@@ -1027,7 +1107,9 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       let skippedCount = 0
 
       this.sources.slice().forEach((source) => {
-        if (!isLocalFileSource(source)) {
+        const isManagedSource =
+          group === 'svn' ? isSvnPathManagedSource(source) : isLocalPathManagedSource(source)
+        if (!isManagedSource) {
           skippedCount += 1
           return
         }
@@ -1038,13 +1120,17 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           return
         }
 
-        const nextPath = joinDirectoryAndBasename(normalizedBaseDirectory, basename)
+        const nextPath =
+          group === 'svn'
+            ? joinSvnDirectoryAndBasename(normalizedBaseDirectory, basename)
+            : joinDirectoryAndBasename(normalizedBaseDirectory, basename)
         candidateSources.push({
           sourceId: source.id,
           source,
           nextSource: {
             ...source,
-            path: nextPath,
+            path: group === 'svn' ? undefined : nextPath,
+            url: group === 'svn' ? nextPath : source.url,
             pathOrUrl: nextPath,
           },
           nextPath,
@@ -1114,7 +1200,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       if (validationFailures.length) {
         throw new Error(
           [
-            '以下数据源路径替换失败，本次未生效：',
+            `以下${group === 'svn' ? 'SVN 路径' : '本地路径'}替换失败，本次未生效：`,
             ...validationFailures,
           ].join('\n'),
         )
@@ -1126,8 +1212,8 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         updatedCount += 1
       })
 
-      this.addPathReplacementPreset(normalizedBaseDirectory)
-      this.setSelectedPathReplacementPreset(normalizedBaseDirectory)
+      this.addPathReplacementPreset(group, normalizedBaseDirectory)
+      this.setSelectedPathReplacementPreset(group, normalizedBaseDirectory)
       await this.saveConfig()
 
       let failedCount = 0

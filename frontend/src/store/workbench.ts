@@ -42,9 +42,12 @@ import {
   extractSourceBasename,
   getSourceLocator,
   isAffectedVariable,
-  isLocalFileSource,
+  isLocalPathManagedSource,
+  isSvnPathManagedSource,
   joinDirectoryAndBasename,
+  joinSvnDirectoryAndBasename,
   normalizeReplacementPreset,
+  type SourcePathReplacementGroup,
 } from '../utils/sourcePathReplacement'
 import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
@@ -72,8 +75,10 @@ interface WorkbenchState {
   sourceMetadataMap: Record<string, SourceMetadata>
   variablePreviewMap: Record<string, VariablePreviewData>
   sourceIssues: Record<string, string>
-  pathReplacementPresets: string[]
-  selectedPathReplacementPreset: string | null
+  localPathReplacementPresets: string[]
+  selectedLocalPathReplacementPreset: string | null
+  svnPathReplacementPresets: string[]
+  selectedSvnPathReplacementPreset: string | null
 }
 
 function createWorkbenchDemoRules(): FixedRuleDefinition[] {
@@ -112,6 +117,43 @@ function createWorkbenchDemoRules(): FixedRuleDefinition[] {
       expected_value: '0',
     },
   ]
+}
+
+function getPresetListByGroup(
+  state: Pick<
+    WorkbenchState,
+    | 'localPathReplacementPresets'
+    | 'selectedLocalPathReplacementPreset'
+    | 'svnPathReplacementPresets'
+    | 'selectedSvnPathReplacementPreset'
+  >,
+  group: SourcePathReplacementGroup,
+): string[] {
+  return group === 'svn' ? state.svnPathReplacementPresets : state.localPathReplacementPresets
+}
+
+function setPresetListByGroup(
+  state: WorkbenchState,
+  group: SourcePathReplacementGroup,
+  presets: string[],
+): void {
+  if (group === 'svn') {
+    state.svnPathReplacementPresets = presets
+    return
+  }
+  state.localPathReplacementPresets = presets
+}
+
+function setSelectedPresetByGroup(
+  state: WorkbenchState,
+  group: SourcePathReplacementGroup,
+  selectedPreset: string | null,
+): void {
+  if (group === 'svn') {
+    state.selectedSvnPathReplacementPreset = selectedPreset
+    return
+  }
+  state.selectedLocalPathReplacementPreset = selectedPreset
 }
 
 function isValidSequenceStep(value: string | undefined): boolean {
@@ -209,8 +251,10 @@ export const useWorkbenchStore = defineStore('workbench', {
     sourceMetadataMap: {},
     variablePreviewMap: {},
     sourceIssues: {},
-    pathReplacementPresets: [],
-    selectedPathReplacementPreset: null,
+    localPathReplacementPresets: [],
+    selectedLocalPathReplacementPreset: null,
+    svnPathReplacementPresets: [],
+    selectedSvnPathReplacementPreset: null,
   }),
 
   getters: {
@@ -442,22 +486,29 @@ export const useWorkbenchStore = defineStore('workbench', {
       delete this.variablePreviewMap[tag]
     },
 
-    setSelectedPathReplacementPreset(path: string | null): void {
-      this.selectedPathReplacementPreset = path ? normalizeReplacementPreset(path) : null
+    setSelectedPathReplacementPreset(
+      group: SourcePathReplacementGroup,
+      path: string | null,
+    ): void {
+      setSelectedPresetByGroup(
+        this,
+        group,
+        path ? normalizeReplacementPreset(path, group) : null,
+      )
     },
 
-    addPathReplacementPreset(path: string): void {
-      const normalizedPath = normalizeReplacementPreset(path)
+    addPathReplacementPreset(group: SourcePathReplacementGroup, path: string): void {
+      const normalizedPath = normalizeReplacementPreset(path, group)
       if (!normalizedPath) {
         return
       }
 
       const presetMap = new Map(
-        this.pathReplacementPresets.map((preset) => [preset.toLowerCase(), preset] as const),
+        getPresetListByGroup(this, group).map((preset) => [preset.toLowerCase(), preset] as const),
       )
       if (!presetMap.has(normalizedPath.toLowerCase())) {
         presetMap.set(normalizedPath.toLowerCase(), normalizedPath)
-        this.pathReplacementPresets = [...presetMap.values()]
+        setPresetListByGroup(this, group, [...presetMap.values()])
       }
     },
 
@@ -917,7 +968,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         return
       }
       if (this.hasBlockingSourceIssues) {
-        this.pageError = '当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。'
+        this.pageError = '当前存在读取失败的数据源，请先修复数据源路径管理中的路径问题或重新接入数据源后再执行校验。'
         throw new Error(this.pageError)
       }
       if (this.invalidOrchestrationRuleIds.length) {
@@ -983,13 +1034,13 @@ export const useWorkbenchStore = defineStore('workbench', {
       await saveWorkbenchConfig(this._getAutoSavePayload())
     },
 
-    async replaceSourceBasePath(baseDirectory: string): Promise<{
+    async replaceSourceBasePath(group: SourcePathReplacementGroup, baseDirectory: string): Promise<{
       updatedCount: number
       skippedCount: number
       failedCount: number
       affectedSourceIds: string[]
     }> {
-      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory)
+      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory, group)
       const candidateSources: Array<{
         sourceId: string
         source: DataSource
@@ -1001,7 +1052,9 @@ export const useWorkbenchStore = defineStore('workbench', {
       let skippedCount = 0
 
       this.sources.slice().forEach((source) => {
-        if (!isLocalFileSource(source)) {
+        const isManagedSource =
+          group === 'svn' ? isSvnPathManagedSource(source) : isLocalPathManagedSource(source)
+        if (!isManagedSource) {
           skippedCount += 1
           return
         }
@@ -1013,13 +1066,17 @@ export const useWorkbenchStore = defineStore('workbench', {
           return
         }
 
-        const nextPath = joinDirectoryAndBasename(normalizedBaseDirectory, basename)
+        const nextPath =
+          group === 'svn'
+            ? joinSvnDirectoryAndBasename(normalizedBaseDirectory, basename)
+            : joinDirectoryAndBasename(normalizedBaseDirectory, basename)
         candidateSources.push({
           sourceId: source.id,
           source,
           nextSource: {
             ...source,
-            path: nextPath,
+            path: group === 'svn' ? undefined : nextPath,
+            url: group === 'svn' ? nextPath : source.url,
             pathOrUrl: nextPath,
           },
           nextPath,
@@ -1089,7 +1146,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       if (validationFailures.length) {
         throw new Error(
           [
-            '以下数据源路径替换失败，本次未生效：',
+            `以下${group === 'svn' ? 'SVN 路径' : '本地路径'}替换失败，本次未生效：`,
             ...validationFailures,
           ].join('\n'),
         )
@@ -1102,8 +1159,8 @@ export const useWorkbenchStore = defineStore('workbench', {
         updatedCount += 1
       })
 
-      this.addPathReplacementPreset(normalizedBaseDirectory)
-      this.setSelectedPathReplacementPreset(normalizedBaseDirectory)
+      this.addPathReplacementPreset(group, normalizedBaseDirectory)
+      this.setSelectedPathReplacementPreset(group, normalizedBaseDirectory)
       await this.saveConfigNow()
 
       let failedCount = 0
@@ -1144,8 +1201,10 @@ export const useWorkbenchStore = defineStore('workbench', {
         variables: this.variables,
         ruleGroups: this.ruleGroups,
         orchestrationRules: this.orchestrationRules,
-        path_replacement_presets: this.pathReplacementPresets,
-        selected_path_replacement_preset: this.selectedPathReplacementPreset,
+        local_path_replacement_presets: this.localPathReplacementPresets,
+        selected_local_path_replacement_preset: this.selectedLocalPathReplacementPreset,
+        svn_path_replacement_presets: this.svnPathReplacementPresets,
+        selected_svn_path_replacement_preset: this.selectedSvnPathReplacementPreset,
       }
     },
 
@@ -1184,8 +1243,10 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.sourceIssues = {}
         this.activeTag = null
         this.preferredSourceId = null
-        this.pathReplacementPresets = []
-        this.selectedPathReplacementPreset = null
+        this.localPathReplacementPresets = []
+        this.selectedLocalPathReplacementPreset = null
+        this.svnPathReplacementPresets = []
+        this.selectedSvnPathReplacementPreset = null
 
         if (data && typeof data === 'object') {
           if (Array.isArray(data.sources)) this.sources = data.sources as DataSource[]
@@ -1194,20 +1255,38 @@ export const useWorkbenchStore = defineStore('workbench', {
             this.ruleGroups = data.ruleGroups as FixedRuleGroup[]
           if (Array.isArray(data.orchestrationRules))
             this.orchestrationRules = data.orchestrationRules as FixedRuleDefinition[]
-          const presetPayload =
+          const legacyPresetPayload =
             (data as Record<string, unknown>).path_replacement_presets ??
             (data as Record<string, unknown>).pathReplacementPresets
-          if (Array.isArray(presetPayload)) {
-            this.pathReplacementPresets = (presetPayload as unknown[])
-              .map((preset) => normalizeReplacementPreset(String(preset ?? '')))
+          const localPresetPayload =
+            (data as Record<string, unknown>).local_path_replacement_presets ?? legacyPresetPayload
+          const svnPresetPayload =
+            (data as Record<string, unknown>).svn_path_replacement_presets
+          if (Array.isArray(localPresetPayload)) {
+            this.localPathReplacementPresets = (localPresetPayload as unknown[])
+              .map((preset) => normalizeReplacementPreset(String(preset ?? ''), 'local'))
               .filter(Boolean)
           }
-          const selectedPreset =
+          if (Array.isArray(svnPresetPayload)) {
+            this.svnPathReplacementPresets = (svnPresetPayload as unknown[])
+              .map((preset) => normalizeReplacementPreset(String(preset ?? ''), 'svn'))
+              .filter(Boolean)
+          }
+          const legacySelectedPreset =
             (data as Record<string, unknown>).selected_path_replacement_preset ??
             (data as Record<string, unknown>).selectedPathReplacementPreset
-          this.selectedPathReplacementPreset =
-            typeof selectedPreset === 'string'
-              ? normalizeReplacementPreset(selectedPreset)
+          const localSelectedPreset =
+            (data as Record<string, unknown>).selected_local_path_replacement_preset ??
+            legacySelectedPreset
+          const svnSelectedPreset =
+            (data as Record<string, unknown>).selected_svn_path_replacement_preset
+          this.selectedLocalPathReplacementPreset =
+            typeof localSelectedPreset === 'string'
+              ? normalizeReplacementPreset(localSelectedPreset, 'local')
+              : null
+          this.selectedSvnPathReplacementPreset =
+            typeof svnSelectedPreset === 'string'
+              ? normalizeReplacementPreset(svnSelectedPreset, 'svn')
               : null
         }
       } catch {

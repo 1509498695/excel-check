@@ -5,6 +5,7 @@ import type {
   VariablePreviewData,
   VariableTag,
 } from './workbench'
+import type { SourcePathReplacementGroup } from '../utils/sourcePathReplacement'
 
 export interface SourceManagementStoreLike {
   sources: DataSource[]
@@ -41,10 +42,15 @@ export interface SourcePathReplacementResult {
 export interface SourcePathReplacementStoreLike extends SourceManagementStoreLike {
   variables: VariableTag[]
   activeTag: string | null
-  pathReplacementPresets: string[]
-  selectedPathReplacementPreset: string | null
+  localPathReplacementPresets: string[]
+  selectedLocalPathReplacementPreset: string | null
+  svnPathReplacementPresets: string[]
+  selectedSvnPathReplacementPreset: string | null
   saveConfigNow(): Promise<void>
-  setSelectedPathReplacementPreset(path: string | null): void
-  addPathReplacementPreset(path: string): void
-  replaceSourceBasePath(baseDirectory: string): Promise<SourcePathReplacementResult>
+  setSelectedPathReplacementPreset(group: SourcePathReplacementGroup, path: string | null): void
+  addPathReplacementPreset(group: SourcePathReplacementGroup, path: string): void
+  replaceSourceBasePath(
+    group: SourcePathReplacementGroup,
+    baseDirectory: string,
+  ): Promise<SourcePathReplacementResult>
 }

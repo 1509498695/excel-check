@@ -2138,7 +2138,7 @@ async function handleSaveConfig(): Promise<void> {
 
 async function runRuleExecution(ruleIds: string[]): Promise<void> {
   if (store.hasBlockingConfigIssues) {
-    ElMessage.warning('当前存在读取失败的数据源，请先修复路径替换或重新接入数据源后再执行校验。')
+    ElMessage.warning('当前存在读取失败的数据源，请先修复数据源路径管理中的路径问题或重新接入数据源后再执行校验。')
     await ensureStepExpanded(1)
     await scrollToStep(1)
     return
@@ -2367,7 +2367,7 @@ async function handleSvnUpdate(): Promise<void> {
               class="ec-btn-outline-compact"
               @click="openSourcePathReplacementDialog"
             >
-              路径替换
+              数据源路径管理
             </button>
             <button
               type="button"

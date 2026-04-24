@@ -363,14 +363,14 @@ def _build_v4_payload(
 async def test_get_fixed_rules_config_returns_default_when_missing(
     auth_headers: dict[str, str],
 ) -> None:
-    """验证未保存配置时会返回 v5 默认空结构。"""
+    """验证未保存配置时会返回 v6 默认空结构。"""
     async with _auth_client_ctx(auth_headers) as client:
         response = await client.get("/api/v1/fixed-rules/config")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["code"] == 200
-    assert payload["data"]["version"] == 5
+    assert payload["data"]["version"] == 6
     assert payload["data"]["configured"] is False
     assert payload["data"]["sources"] == []
     assert payload["data"]["variables"] == []
@@ -382,6 +382,10 @@ async def test_get_fixed_rules_config_returns_default_when_missing(
         }
     ]
     assert payload["data"]["rules"] == []
+    assert payload["data"]["local_path_replacement_presets"] == []
+    assert payload["data"].get("selected_local_path_replacement_preset") is None
+    assert payload["data"]["svn_path_replacement_presets"] == []
+    assert payload["data"].get("selected_svn_path_replacement_preset") is None
 
 
 @pytest.mark.anyio
@@ -491,7 +495,7 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
     assert save_response.status_code == 200
 
     get_payload = get_response.json()["data"]
-    assert get_payload["version"] == 5
+    assert get_payload["version"] == 6
     assert get_payload["configured"] is True
     assert get_payload["sources"][0]["id"] == "items-source"
     assert get_payload["variables"][0]["tag"] == "[items-source-items-INT_ID]"
@@ -642,7 +646,7 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
     auth_headers: dict[str, str],
     test_project_id: int,
 ) -> None:
-    """验证旧版全局单文件配置读取时会自动迁移到 v4。"""
+    """验证旧版全局单文件配置读取时会自动迁移到 v6。"""
     workbook_path = _create_fixed_rules_workbook(
         tmp_path / "legacy.xlsx",
         {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
@@ -673,12 +677,14 @@ async def test_get_fixed_rules_config_migrates_legacy_payload(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["version"] == 5
+    assert payload["version"] == 6
     assert len(payload["sources"]) == 1
     assert payload["sources"][0]["path"] == str(workbook_path.resolve())
     assert len(payload["variables"]) == 1
     assert payload["rules"][0]["rule_type"] == "fixed_value_compare"
     assert payload["rules"][0]["target_variable_tag"] == payload["variables"][0]["tag"]
+    assert payload["local_path_replacement_presets"] == []
+    assert payload["svn_path_replacement_presets"] == []
 
 
 @pytest.mark.anyio
@@ -719,7 +725,7 @@ async def test_get_fixed_rules_config_migrates_v3_binding_rules(
 
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert payload["version"] == 5
+    assert payload["version"] == 6
     assert payload["sources"][0]["id"] == "v3"
     assert payload["variables"][0]["column"] == "INT_ID"
     assert payload["rules"][0]["target_variable_tag"] == "[v3-items-INT_ID]"

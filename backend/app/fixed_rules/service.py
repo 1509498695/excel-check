@@ -33,7 +33,7 @@ from backend.app.utils.formatter import build_execution_response
 from backend.config import settings
 
 
-FIXED_RULES_CONFIG_VERSION = 5
+FIXED_RULES_CONFIG_VERSION = 6
 COMPOSITE_KEY_FIELD = "__key__"
 SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
@@ -121,8 +121,10 @@ def build_default_fixed_rules_config() -> FixedRulesConfig:
         variables=[],
         groups=[_build_default_group()],
         rules=[],
-        path_replacement_presets=[],
-        selected_path_replacement_preset=None,
+        local_path_replacement_presets=[],
+        selected_local_path_replacement_preset=None,
+        svn_path_replacement_presets=[],
+        selected_svn_path_replacement_preset=None,
     )
 
 
@@ -417,12 +419,22 @@ def _validate_and_normalize_fixed_rules_config(
             variables=variables,
             groups=groups,
             rules=rules,
-            path_replacement_presets=_normalize_path_replacement_presets(
-                migrated_config.path_replacement_presets
+            local_path_replacement_presets=_normalize_local_path_replacement_presets(
+                migrated_config.local_path_replacement_presets
+                or migrated_config.path_replacement_presets
             ),
-            selected_path_replacement_preset=_normalize_selected_path_replacement_preset(
-                migrated_config.selected_path_replacement_preset,
-                migrated_config.path_replacement_presets,
+            selected_local_path_replacement_preset=_normalize_selected_local_path_replacement_preset(
+                migrated_config.selected_local_path_replacement_preset
+                or migrated_config.selected_path_replacement_preset,
+                migrated_config.local_path_replacement_presets
+                or migrated_config.path_replacement_presets,
+            ),
+            svn_path_replacement_presets=_normalize_svn_path_replacement_presets(
+                migrated_config.svn_path_replacement_presets
+            ),
+            selected_svn_path_replacement_preset=_normalize_selected_svn_path_replacement_preset(
+                migrated_config.selected_svn_path_replacement_preset,
+                migrated_config.svn_path_replacement_presets,
             ),
         ),
         config_issues,
@@ -645,12 +657,20 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
         variables=migrated_variables,
         groups=config.groups,
         rules=migrated_rules,
-        path_replacement_presets=_normalize_path_replacement_presets(
-            config.path_replacement_presets
+        local_path_replacement_presets=_normalize_local_path_replacement_presets(
+            config.local_path_replacement_presets or config.path_replacement_presets
         ),
-        selected_path_replacement_preset=_normalize_selected_path_replacement_preset(
-            config.selected_path_replacement_preset,
-            config.path_replacement_presets,
+        selected_local_path_replacement_preset=_normalize_selected_local_path_replacement_preset(
+            config.selected_local_path_replacement_preset
+            or config.selected_path_replacement_preset,
+            config.local_path_replacement_presets or config.path_replacement_presets,
+        ),
+        svn_path_replacement_presets=_normalize_svn_path_replacement_presets(
+            config.svn_path_replacement_presets
+        ),
+        selected_svn_path_replacement_preset=_normalize_selected_svn_path_replacement_preset(
+            config.selected_svn_path_replacement_preset,
+            config.svn_path_replacement_presets,
         ),
     )
 
@@ -1596,8 +1616,8 @@ def _normalize_local_source_path(
     return normalized_path
 
 
-def _normalize_path_replacement_presets(presets: list[str] | None) -> list[str]:
-    """规范化并去重路径替换目录列表。"""
+def _normalize_local_path_replacement_presets(presets: list[str] | None) -> list[str]:
+    """规范化并去重本地路径管理目录列表。"""
     normalized_presets: list[str] = []
     seen_presets: set[str] = set()
     for preset in presets or []:
@@ -1613,19 +1633,54 @@ def _normalize_path_replacement_presets(presets: list[str] | None) -> list[str]:
     return normalized_presets
 
 
-def _normalize_selected_path_replacement_preset(
+def _normalize_selected_local_path_replacement_preset(
     selected_preset: str | None,
     presets: list[str] | None,
 ) -> str | None:
-    """规范化当前选中的路径替换目录。"""
+    """规范化当前选中的本地路径管理目录。"""
     normalized_selected = str(selected_preset or "").strip()
     if not normalized_selected:
         return None
 
     resolved_selected = str(Path(normalized_selected).expanduser().resolve(strict=False))
-    normalized_presets = _normalize_path_replacement_presets(presets)
+    normalized_presets = _normalize_local_path_replacement_presets(presets)
     if any(preset.lower() == resolved_selected.lower() for preset in normalized_presets):
         return resolved_selected
+    return None
+
+
+def _normalize_svn_path_replacement_presets(presets: list[str] | None) -> list[str]:
+    """规范化并去重 SVN 路径管理目录列表。"""
+    normalized_presets: list[str] = []
+    seen_presets: set[str] = set()
+    for preset in presets or []:
+        normalized_preset = str(preset or "").strip()
+        if not normalized_preset:
+            continue
+        if not normalized_preset.endswith("/"):
+            normalized_preset = f"{normalized_preset}/"
+        dedupe_key = normalized_preset.lower()
+        if dedupe_key in seen_presets:
+            continue
+        seen_presets.add(dedupe_key)
+        normalized_presets.append(normalized_preset)
+    return normalized_presets
+
+
+def _normalize_selected_svn_path_replacement_preset(
+    selected_preset: str | None,
+    presets: list[str] | None,
+) -> str | None:
+    """规范化当前选中的 SVN 路径管理目录。"""
+    normalized_selected = str(selected_preset or "").strip()
+    if not normalized_selected:
+        return None
+
+    if not normalized_selected.endswith("/"):
+        normalized_selected = f"{normalized_selected}/"
+    normalized_presets = _normalize_svn_path_replacement_presets(presets)
+    if any(preset.lower() == normalized_selected.lower() for preset in normalized_presets):
+        return normalized_selected
     return None
 
 

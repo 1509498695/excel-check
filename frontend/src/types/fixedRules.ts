@@ -114,7 +114,11 @@ export interface FixedRulesConfig {
   variables: VariableTag[]
   groups: FixedRuleGroup[]
   rules: FixedRuleDefinition[]
-  path_replacement_presets: string[]
+  local_path_replacement_presets: string[]
+  selected_local_path_replacement_preset?: string | null
+  svn_path_replacement_presets: string[]
+  selected_svn_path_replacement_preset?: string | null
+  path_replacement_presets?: string[]
   selected_path_replacement_preset?: string | null
 }
 

@@ -175,12 +175,16 @@ class FixedRulesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int = 5
+    version: int = 6
     configured: bool = False
     sources: list[DataSource] = Field(default_factory=list)
     variables: list[VariableTag] = Field(default_factory=list)
     groups: list[FixedRuleGroup] = Field(default_factory=list)
     rules: list[FixedRuleDefinition] = Field(default_factory=list)
+    local_path_replacement_presets: list[str] = Field(default_factory=list)
+    selected_local_path_replacement_preset: str | None = None
+    svn_path_replacement_presets: list[str] = Field(default_factory=list)
+    selected_svn_path_replacement_preset: str | None = None
     path_replacement_presets: list[str] = Field(default_factory=list)
     selected_path_replacement_preset: str | None = None
 
