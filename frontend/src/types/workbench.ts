@@ -1,3 +1,12 @@
+import type { ApiResponse, ExecutionResponse } from './api'
+export type {
+  AbnormalResult,
+  ApiResponse,
+  ApiStatusResponse,
+  ExecutionMeta,
+  ExecutionResponse,
+} from './api'
+
 export type SourceType = 'local_excel' | 'local_csv' | 'feishu' | 'svn'
 
 export type ExpectedType = 'int' | 'str' | 'json'
@@ -48,74 +57,31 @@ export interface TaskTree {
   size?: number
 }
 
-export interface ExecutionMeta {
-  execution_time_ms: number
-  total_rows_scanned: number
-  failed_sources: string[]
-  result_id?: number
-}
+export type ExecuteResponse = ExecutionResponse
 
-export interface AbnormalResult {
-  level: 'error' | 'warning' | 'success' | string
-  rule_name: string
-  location: string
-  row_index: number
-  raw_value: unknown
-  message: string
-}
+export type SourceCapabilitiesResponse = ApiResponse<{
+  source_types: SourceType[]
+  implemented: boolean
+}>
 
-export interface ExecuteResponse {
-  code: number
-  msg: string
-  meta: ExecutionMeta
-  data: {
-    total?: number
-    list?: AbnormalResult[]
-    page?: number
-    size?: number
-    abnormal_results: AbnormalResult[]
-  }
-}
+export type LocalPickResponse = ApiResponse<{
+  selected_path: string
+  source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
+}>
 
-export interface SourceCapabilitiesResponse {
-  code: number
-  msg: string
-  data: {
-    source_types: SourceType[]
-    implemented: boolean
-  }
-}
+export type SourceUploadResponse = ApiResponse<{
+  source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
+  original_filename: string
+  stored_filename: string
+  selected_path: string
+  size: number
+  project_id: number
+  user_id: number
+}>
 
-export interface LocalPickResponse {
-  code: number
-  msg: string
-  data: {
-    selected_path: string
-    source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
-  }
-}
-
-export interface SourceUploadResponse {
-  code: number
-  msg: string
-  data: {
-    source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
-    original_filename: string
-    stored_filename: string
-    selected_path: string
-    size: number
-    project_id: number
-    user_id: number
-  }
-}
-
-export interface LocalDirectoryValidateResponse {
-  code: number
-  msg: string
-  data: {
-    directory_path: string
-  }
-}
+export type LocalDirectoryValidateResponse = ApiResponse<{
+  directory_path: string
+}>
 
 export interface SourceSheetMetadata {
   name: string
@@ -128,11 +94,7 @@ export interface SourceMetadata {
   sheets: SourceSheetMetadata[]
 }
 
-export interface SourceMetadataResponse {
-  code: number
-  msg: string
-  data: SourceMetadata
-}
+export type SourceMetadataResponse = ApiResponse<SourceMetadata>
 
 export interface ColumnPreviewRow {
   row_index: number
@@ -186,14 +148,6 @@ export interface CompositePreviewRequest {
   append_index_to_key?: boolean
 }
 
-export interface ColumnPreviewResponse {
-  code: number
-  msg: string
-  data: SingleVariablePreviewData
-}
+export type ColumnPreviewResponse = ApiResponse<SingleVariablePreviewData>
 
-export interface CompositePreviewResponse {
-  code: number
-  msg: string
-  data: CompositeVariablePreviewData
-}
+export type CompositePreviewResponse = ApiResponse<CompositeVariablePreviewData>

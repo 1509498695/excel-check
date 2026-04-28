@@ -1,4 +1,6 @@
 import type {
+  ApiResponse,
+  ApiStatusResponse,
   ColumnPreviewRequest,
   ColumnPreviewResponse,
   CompositePreviewRequest,
@@ -92,13 +94,13 @@ export async function exportExecutionResults(resultId: number): Promise<ApiFileR
   )
 }
 
-export async function fetchWorkbenchConfig(): Promise<{ code: number; msg: string; data: Record<string, unknown> }> {
+export async function fetchWorkbenchConfig(): Promise<ApiResponse<Record<string, unknown>>> {
   return apiFetch('/api/v1/workbench/config')
 }
 
 export async function saveWorkbenchConfig(
   config: Record<string, unknown>,
-): Promise<{ code: number; msg: string }> {
+): Promise<ApiStatusResponse> {
   return apiFetch('/api/v1/workbench/config', {
     method: 'PUT',
     body: JSON.stringify(config),

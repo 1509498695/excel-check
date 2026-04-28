@@ -6,13 +6,10 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
 
 from backend.app.api.fixed_rules_schemas import (
-    CompositeAssertionOperator,
     CompositeBranch,
     CompositeCondition,
-    CompositeFilterOperator,
     CompositeRuleConfig,
     DualCompositeComparison,
     DualCompositeKeyCheckMode,
@@ -1774,7 +1771,7 @@ def _load_sheet_columns(
                 source_id=source.id,
                 variable_tag=variable_tag,
                 message=(
-                    f"数据源“{source.id}”的本地路径已失效：{source.pathOrUrl or source.path or ""}。"
+                    f"数据源“{source.id}”的本地路径已失效：{source.pathOrUrl or source.path or ''}。"
                     "请到“数据源接入管理”中修复路径后再保存或执行。"
                 ),
             )

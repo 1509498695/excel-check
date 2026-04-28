@@ -23,7 +23,6 @@ from urllib.parse import urlparse
 
 from backend.app.api.schemas import DataSource
 from backend.app.loaders.svn_credentials import (
-    SvnCredential,
     load_credentials,
 )
 from backend.app.loaders.svn_manager import (

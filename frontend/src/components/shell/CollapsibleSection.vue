@@ -4,7 +4,7 @@ import AppCard from './AppCard.vue'
 
 type SectionHeaderTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     step: string
     title: string
@@ -33,7 +33,12 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <AppCard as="section" padding="none" class="ui-collapsible-section" :class="{ 'is-active': active }">
+  <AppCard
+    as="section"
+    padding="none"
+    class="ui-collapsible-section"
+    :class="{ 'is-active': active }"
+  >
     <div class="ui-collapsible-section__inner">
       <div :class="collapsed ? '' : headerClass">
         <SectionHeader
@@ -54,7 +59,13 @@ const emit = defineEmits<{
                 @click="emit('toggle')"
               >
                 {{ collapsed ? '展开' : '收起' }}
-                <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                  class="ec-btn-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <path v-if="collapsed" d="m6 9 6 6 6-6" />
                   <path v-else d="m18 15-6-6-6 6" />
                 </svg>

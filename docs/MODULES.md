@@ -7,7 +7,7 @@
 | 入口 | 视图 | 作用 |
 |:---|:---|:---|
 | `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
-| `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 项目校验：独立 `version=4` 配置（`sources / variables / groups / rules`），支持 SVN 更新与 `POST /api/v1/fixed-rules/execute`。 |
+| `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 项目校验：独立 `version=6` 配置（`sources / variables / groups / rules`），支持 SVN 更新、执行结果分页与 Excel 导出。 |
 | `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，保存后前端会自动切到新的当前项目；项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
 | `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
 | `/login` `/register` | [LoginView.vue](../frontend/src/views/LoginView.vue)、[RegisterView.vue](../frontend/src/views/RegisterView.vue) | 认证入口；默认管理员 `admin / 123456`。 |
@@ -20,9 +20,11 @@
 |:---|:---|
 | [PageHeader.vue](../frontend/src/components/shell/PageHeader.vue) | 顶栏：面包屑 + h1 标题 + 右侧 actions 槽。 |
 | [SectionHeader.vue](../frontend/src/components/shell/SectionHeader.vue) | 模块头：默认极简标题 + 描述；`variant="workbench"` 时切到「序号方块 + 标题 + 状态胶囊 + 副说明」个人校验样式。 |
-| [StatPill.vue](../frontend/src/components/shell/StatPill.vue) | KPI 卡：caption + 等宽大数字 + StatusDot。 |
-| [StatusDot.vue](../frontend/src/components/shell/StatusDot.vue) | 5 色状态胶囊：`pending / active / done / warn / error`。 |
-| [EmptyState.vue](../frontend/src/components/shell/EmptyState.vue) | 空态：圆底 icon + 标题 + 副文案 + 可选 CTA。 |
+| [AppCard.vue](../frontend/src/components/shell/AppCard.vue) / [MetricCard.vue](../frontend/src/components/shell/MetricCard.vue) | 新版 SaaS 卡片与指标卡。 |
+| [StatusBadge.vue](../frontend/src/components/shell/StatusBadge.vue) / [StatusDot.vue](../frontend/src/components/shell/StatusDot.vue) | 状态胶囊与兼容状态点。 |
+| [PrimaryButton.vue](../frontend/src/components/shell/PrimaryButton.vue) / [SecondaryButton.vue](../frontend/src/components/shell/SecondaryButton.vue) / [GhostButton.vue](../frontend/src/components/shell/GhostButton.vue) | 三类共享按钮。 |
+| [StatPill.vue](../frontend/src/components/shell/StatPill.vue) | 旧 KPI 卡兼容包装，新页面优先使用 `MetricCard`。 |
+| [EmptyState.vue](../frontend/src/components/shell/EmptyState.vue) | 空态：图标语义 + 标题 + 副文案 + 可选 CTA。 |
 | [DataTable.vue](../frontend/src/components/shell/DataTable.vue) | 数据表壳：极简表头 + 行 hover；空态调用方自填。 |
 
 ### 2.2 个人校验业务组件 `components/workbench/`
@@ -31,8 +33,8 @@
 |:---|:---|
 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源 CRUD、本地文件选择、`source_id`-级 `config_issues` 注入。 |
 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量 / 组合变量、Sheet/列下拉、详情弹窗、JSON 预览。 |
-| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗（单变量支持 `fixed_value_compare / not_null / unique / 包含(in)`，其中 `in` 保存时复用 `cross_table_mapping`；组合变量支持 `composite_condition_check`）。 |
-| [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
+| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗，支持单一变量、组合分支、跨组变量、多组串行 4 类入口。 |
+| [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表 + Excel 导出，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
 
 ### 2.3 已废弃 / 未使用组件
 
@@ -95,7 +97,7 @@
 
 | 模块 | 作用 |
 |:---|:---|
-| [app/fixed_rules/service.py](../backend/app/fixed_rules/service.py) | 配置读写、`version 2/3 → 4` 自动迁移、`config_issues` 非阻断加载、临时 `TaskTree` 聚合并复用主引擎。 |
+| [app/fixed_rules/service.py](../backend/app/fixed_rules/service.py) | 配置读写、`version 2/3/4/5 → 6` 自动迁移、`config_issues` 非阻断加载、临时 `TaskTree` 聚合并复用主引擎。 |
 | [app/fixed_rules/schemas.py](../backend/app/fixed_rules/schemas.py) | 项目校验域内数据结构。 |
 
 ### 3.5 数据加载
@@ -113,7 +115,7 @@
 | [app/rules/engine_core.py](../backend/app/rules/engine_core.py) | `RuleSpec` 注册中心、调度、执行；`register_rule(rule_type, *, dependent_tags=...)` 唯一签名。 |
 | [app/rules/domain/](../backend/app/rules/domain/) | 值规范化（`value.py`）、统一异常结果（`result.py`）、operator 判定（`operators.py`）。 |
 | [app/rules/infrastructure/](../backend/app/rules/infrastructure/) | 依赖 tag 提取器（`tag_extractor.py`）。 |
-| [app/rules/handlers/](../backend/app/rules/handlers/) | 5 个 `rule_type` handler：`basics.py`、`cross.py`、`fixed.py`；`__init__.py` 副作用 import 触发 `@register_rule` 注册。 |
+| [app/rules/handlers/](../backend/app/rules/handlers/) | 当前规则 handler：`basics.py`、`cross.py`、`fixed.py`；`__init__.py` 副作用 import 触发 `@register_rule` 注册。 |
 
 `backend/app/rules/_*.py` 与 `rule_*.py` 是旧路径薄壳 shim，仅 `from <new path> import *` 转发，对外行为零变更。
 
@@ -191,5 +193,6 @@ flowchart TB
 | [../README.md](../README.md) | 项目简介、快速开始、API 速览。 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 当前稳定 SDD（数据模型 / 协议 / 架构 / 边界）。 |
 | [MODULES.md](MODULES.md) | 本文档：模块速查。 |
+| [STANDARDS.md](STANDARDS.md) | 前后端命名、接口、文档与检查命令规范。 |
 | [../CHANGELOG.md](../CHANGELOG.md) | 版本日志。 |
 | [archive/](archive/) | 历史快照（`PROJECT_RECORD.md` 与早期 `需求文档.md`），不再追加。 |

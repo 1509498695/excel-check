@@ -1,11 +1,8 @@
-import type { AbnormalResult, DataSource, ExecutionMeta, VariableTag } from './workbench'
+import type { ApiResponse, ExecutionResponse } from './api'
+import type { DataSource, VariableTag } from './workbench'
 
 export type FixedRuleOperator = 'eq' | 'ne' | 'gt' | 'lt'
-export type CompositeFilterOperator =
-  | FixedRuleOperator
-  | 'not_null'
-  | 'contains'
-  | 'not_contains'
+export type CompositeFilterOperator = FixedRuleOperator | 'not_null' | 'contains' | 'not_contains'
 export type CompositeAssertionOperator =
   | FixedRuleOperator
   | 'not_null'
@@ -130,27 +127,14 @@ export interface FixedRulesConfigIssue {
   message: string
 }
 
-export interface FixedRulesConfigResponse {
-  code: number
-  msg: string
-  data: FixedRulesConfig
-  meta?: {
+export type FixedRulesConfigResponse = ApiResponse<
+  FixedRulesConfig,
+  {
     config_issues?: FixedRulesConfigIssue[]
   }
-}
+>
 
-export interface FixedRulesExecuteResponse {
-  code: number
-  msg: string
-  meta: ExecutionMeta
-  data: {
-    total?: number
-    list?: AbnormalResult[]
-    page?: number
-    size?: number
-    abnormal_results: AbnormalResult[]
-  }
-}
+export type FixedRulesExecuteResponse = ExecutionResponse
 
 export interface FixedRulesSvnUpdateItem {
   working_copy: string
@@ -160,12 +144,8 @@ export interface FixedRulesSvnUpdateItem {
   error?: string
 }
 
-export interface FixedRulesSvnUpdateResponse {
-  code: number
-  msg: string
-  data: {
-    total_paths: number
-    updated_paths: number
-    results: FixedRulesSvnUpdateItem[]
-  }
-}
+export type FixedRulesSvnUpdateResponse = ApiResponse<{
+  total_paths: number
+  updated_paths: number
+  results: FixedRulesSvnUpdateItem[]
+}>

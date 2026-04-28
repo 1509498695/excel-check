@@ -13,3 +13,4 @@ alembic
 python-jose[cryptography]
 bcrypt
 python-multipart
+ruff

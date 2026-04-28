@@ -9,7 +9,7 @@
 - JWT 认证 + 三级角色（超级管理员 / 项目管理员 / 普通用户），默认超级管理员 `admin / 123456`。
 - 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
 - 个人校验 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。
-- 项目校验 `/fixed-rules`：独立 `version=4` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
+- 项目校验 `/fixed-rules`：独立 `version=6` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
 - 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，保存后前端会自动切换当前项目到新的归属项目。
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
 - 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`regex_check`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`、`dual_composite_compare`、`multi_composite_pipeline_check`；其中个人校验与项目校验的规则弹窗现支持 4 类入口：单一变量校验、组合分支校验、跨组变量校验、多组串行校验。弹窗会先选规则类型，再按类型过滤目标变量；单一变量校验新增 `正则校验`，组合分支校验的分支校验条件也支持 `正则校验`，两者都按完整匹配校验整格内容。`composite_condition_check` 的全局筛选和分支筛选已支持字符串 `包含 / 不包含`，`dual_composite_compare` 会先按两个组合变量的外层 Key 关联，再按多条字段比对规则执行 AND 校验。`multi_composite_pipeline_check` 支持 1..N 个组合变量节点：单节点时退化为“前置过滤 + 最终判定”，多节点时按顺序执行，首个失败节点会输出全部异常并短路后续节点。添加组合变量时还可按原始行序生成 `原值_序号` 的唯一键；只有当前 Key 列存在重复值，才会显示“Key 后追加序号”。
@@ -115,7 +115,7 @@ npm run build
 |---|---|
 | 健康检查 | `GET /health` |
 | 认证 | `POST /api/v1/auth/{register,login,change-password}`、`GET /api/v1/auth/me`、`POST /api/v1/auth/switch-project/{project_id}` |
-| 数据源 | `GET /api/v1/sources/capabilities`、`POST /api/v1/sources/{local-pick,metadata,column-preview,composite-preview}` |
+| 数据源 | `GET /api/v1/sources/capabilities`、`POST /api/v1/sources/{local-pick,upload,metadata,column-preview,composite-preview}` |
 | 个人校验 | `POST /api/v1/engine/execute`、`GET /api/v1/engine/results/{result_id}`、`GET /api/v1/engine/results/{result_id}/export`、`GET/PUT /api/v1/workbench/config` |
 | 项目校验 | `GET/PUT /api/v1/fixed-rules/config`、`POST /api/v1/fixed-rules/{svn-update,execute}`、`GET /api/v1/fixed-rules/results/{result_id}`、`GET /api/v1/fixed-rules/results/{result_id}/export` |
 | 管理后台 | `/api/v1/admin/projects*`、`/api/v1/admin/projects/{id}/members*`、`POST /api/v1/admin/users/{id}/reset-password` |
@@ -124,6 +124,7 @@ npm run build
 
 - 架构与协议：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 模块速查：[docs/MODULES.md](docs/MODULES.md)
+- 开发规范：[docs/STANDARDS.md](docs/STANDARDS.md)
 - 版本日志：[CHANGELOG.md](CHANGELOG.md)
 - 前端子项目：[frontend/README.md](frontend/README.md)
 - 历史快照：[docs/archive/](docs/archive/)

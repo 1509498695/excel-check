@@ -3,6 +3,10 @@
  * 所有业务 API 统一通过此函数发起请求。
  */
 
+import type { ApiFileResponse } from '../types/api'
+
+export type { ApiFileResponse } from '../types/api'
+
 const TOKEN_KEY = 'ec_token'
 
 export function getToken(): string | null {
@@ -61,10 +65,7 @@ function extractApiErrorMessage(detail: unknown): string | null {
   return firstMessage?.msg?.trim() || null
 }
 
-export async function apiFetch<T = unknown>(
-  url: string,
-  options: RequestInit = {},
-): Promise<T> {
+export async function apiFetch<T = unknown>(url: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers = new Headers(options.headers)
 
@@ -112,11 +113,6 @@ export async function apiFetch<T = unknown>(
   }
 
   return JSON.parse(rawText) as T
-}
-
-export interface ApiFileResponse {
-  blob: Blob
-  filename: string
 }
 
 export async function apiDownloadFile(

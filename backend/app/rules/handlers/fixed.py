@@ -13,7 +13,6 @@ from backend.app.api.fixed_rules_schemas import (
     CompositeRuleConfig,
     DualCompositeComparison,
     MultiCompositePipelineConfig,
-    MultiCompositePipelineNode,
 )
 from backend.app.api.schemas import ValidationRule, VariableTag
 from backend.app.rules.domain.operators import (

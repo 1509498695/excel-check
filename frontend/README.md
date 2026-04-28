@@ -23,6 +23,16 @@ npm run build
 
 构建产物输出到 `frontend/dist/`，构建过程同时执行 `vue-tsc` 类型检查。
 
+## 规范检查
+
+```powershell
+cd frontend
+npm run lint
+npm run format:check
+```
+
+前端命名、接口类型和组件分层规范以 [../docs/STANDARDS.md](../docs/STANDARDS.md) 为准。
+
 ## 本机共享部署
 
 本机部署给其他同网段用户访问时，不需要单独启动 Vite。回到项目根目录执行：
@@ -45,7 +55,7 @@ frontend/src
 │   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
 ├── router/             # vue-router：/login /register / /fixed-rules /admin /profile
 ├── store/              # Pinia：auth / workbench / fixedRules
-├── types/              # TypeScript 类型：workbench / fixedRules / auth
+├── types/              # TypeScript 类型：api / workbench / fixedRules / auth
 ├── utils/              # ruleOrchestrationModel / taskTree / workbenchMeta / apiFetch
 ├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / LoginView / RegisterView
 ├── App.vue             # 应用壳：ec-* 左侧固定边栏 + 右侧独立滚动工作区

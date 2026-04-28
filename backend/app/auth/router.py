@@ -12,7 +12,6 @@ from backend.app.auth.schemas import (
     ChangePasswordRequest,
     LoginRequest,
     RegisterRequest,
-    TokenResponse,
     UserInfo,
     UserProjectInfo,
 )
