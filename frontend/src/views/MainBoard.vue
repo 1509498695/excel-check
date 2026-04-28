@@ -3,14 +3,18 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
+import AppCard from '../components/shell/AppCard.vue'
 import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
+import MetricCard from '../components/shell/MetricCard.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import SourcePathReplacementDialog from '../components/workbench/SourcePathReplacementDialog.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
-import StatPill from '../components/shell/StatPill.vue'
+import PrimaryButton from '../components/shell/PrimaryButton.vue'
+import SecondaryButton from '../components/shell/SecondaryButton.vue'
+import type { StatusBadgeType } from '../components/shell'
 import { useWorkbenchStore } from '../store/workbench'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
@@ -120,6 +124,19 @@ const overviewItems = computed<
     readyTone: 'warn',
   },
 ])
+
+const metricIconTones = ['primary', 'success', 'primary', 'warning'] as const
+
+function getStatusBadgeType(tone: StatTone): StatusBadgeType {
+  if (tone === 'done' || tone === 'active') return 'success'
+  if (tone === 'warn') return 'warning'
+  if (tone === 'error') return 'danger'
+  return 'neutral'
+}
+
+function getMetricIconTone(index: number): (typeof metricIconTones)[number] {
+  return metricIconTones[index] ?? 'primary'
+}
 
 const stepStatuses = computed<{
   source: SectionStatus
@@ -371,83 +388,93 @@ function handleToggleVisibleRuleSelection(payload: {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
+  <div class="personal-check-page flex h-full flex-col bg-canvas font-sans text-ink-700">
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
-    <PageHeader breadcrumb="主菜单 / 个人校验" title="配置表个人校验">
+    <PageHeader breadcrumb="主页 / 个人校验" title="配置表个人校验">
       <template #actions>
-        <button
+        <SecondaryButton
           v-if="store.pageError"
-          type="button"
-          class="ec-btn ec-btn-secondary"
           @click="store.clearPageError()"
         >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 13l4 4L19 7" />
-          </svg>
+          <template #icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          </template>
           清除错误
-        </button>
+        </SecondaryButton>
       </template>
     </PageHeader>
 
     <!-- 主滚动区 -->
-    <div class="flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
+    <div class="personal-check-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
       <!-- Stepper -->
-      <section aria-label="进度" class="rounded-card border border-line bg-card px-6 py-5 shadow-card-1">
-        <div class="flex items-center gap-4">
+      <AppCard as="section" aria-label="进度" padding="none" class="personal-stepper-card">
+        <div class="personal-stepper">
           <!-- 保留原有业务逻辑：步骤进度仍基于 stepperItems 计算结果遍历渲染 -->
           <template v-for="(item, index) in stepperItems" :key="item.step">
             <button
               type="button"
-              class="flex appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left shadow-none transition"
+              class="personal-stepper__item"
+              :class="[
+                item.status === 'done' ? 'personal-stepper__item--done' : '',
+                item.step === activeGuideStep ? 'personal-stepper__item--active' : '',
+                item.status === 'pending' ? 'personal-stepper__item--pending' : '',
+              ]"
               @click="handleStepperClick(item.step)"
             >
-              <span
-                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-[12px] font-semibold transition"
-                :class="
-                  item.step === activeGuideStep
-                    ? 'bg-accent text-white'
-                    : item.status === 'done'
-                      ? 'bg-success text-white'
-                      : 'bg-canvas text-ink-500 ring-1 ring-line'
-                "
-              >
+              <span class="personal-stepper__badge">
                 {{ item.step }}
               </span>
-              <div class="min-w-0">
-                <div
-                  class="text-[14px] font-semibold transition"
-                  :class="item.step === activeGuideStep ? 'text-ink-900' : 'text-ink-700'"
-                >
-                  {{ item.label }}
-                </div>
-                <div
-                  class="text-[12px] truncate max-w-[220px] transition"
-                  :class="item.step === activeGuideStep ? 'text-accent-ink' : 'text-ink-500'"
-                >
-                  {{ item.description }}
-                </div>
+              <div class="personal-stepper__copy">
+                <div class="personal-stepper__title">{{ item.label }}</div>
+                <div class="personal-stepper__description">{{ item.description }}</div>
               </div>
             </button>
             <div
               v-if="index < stepperItems.length - 1"
-              class="h-px flex-1 transition"
-              :class="item.status === 'done' ? 'bg-accent' : 'bg-line'"
+              class="personal-stepper__line"
+              :class="item.status === 'done' ? 'personal-stepper__line--done' : ''"
             ></div>
           </template>
         </div>
-      </section>
+      </AppCard>
 
       <!-- KPI 4 列：StatPill；不浮起 -->
       <section aria-label="概览" class="grid grid-cols-4 gap-4">
         <!-- 保留原有业务逻辑：概览卡仍基于 overviewItems 计算结果遍历渲染 -->
-        <StatPill
-          v-for="item in overviewItems"
+        <MetricCard
+          v-for="(item, index) in overviewItems"
           :key="item.label"
           :label="item.label"
           :value="item.value"
           :status-label="item.value > 0 ? item.readyHint : item.pendingHint"
-          :status-tone="item.value > 0 ? item.readyTone : item.pendingTone"
-        />
+          :status-type="getStatusBadgeType(item.value > 0 ? item.readyTone : item.pendingTone)"
+          :icon-tone="getMetricIconTone(index)"
+        >
+          <template #icon>
+            <svg v-if="item.label === '数据源'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <ellipse cx="12" cy="5" rx="7" ry="3" />
+              <path d="M5 5v6c0 1.66 3.13 3 7 3s7-1.34 7-3V5" />
+              <path d="M5 11v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
+            </svg>
+            <svg v-else-if="item.label === '变量'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m8 8-4 4 4 4" />
+              <path d="m16 8 4 4-4 4" />
+            </svg>
+            <svg v-else-if="item.label === '规则'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 4v5" />
+              <path d="M6 20v-4a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4" />
+              <rect x="9" y="9" width="6" height="5" rx="1" />
+              <path d="M6 20h0M18 20h0" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v6" />
+              <path d="M12 17h.01" />
+            </svg>
+          </template>
+        </MetricCard>
       </section>
 
       <!-- 4 个步骤工作区 -->
@@ -464,21 +491,19 @@ function handleToggleVisibleRuleSelection(payload: {
           @toggle="toggleSection(1)"
         >
           <template #actions>
-            <button
-              type="button"
-              class="ec-btn-outline-compact"
+            <SecondaryButton
+              size="sm"
               @click="openSourcePathReplacementDialog"
             >
               数据源路径管理
-            </button>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            </SecondaryButton>
+            <PrimaryButton
+              size="sm"
               @click="openDataSourceCreate"
             >
-              <Plus class="h-3.5 w-3.5" />
+              <template #icon><Plus /></template>
               新增数据源
-            </button>
+            </PrimaryButton>
           </template>
 
           <DataSourcePanel
@@ -503,24 +528,22 @@ function handleToggleVisibleRuleSelection(payload: {
           @toggle="toggleSection(2)"
         >
           <template #actions>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            <PrimaryButton
+              size="sm"
               :disabled="!store.sources.length"
               @click="openSingleVariableCreate"
             >
-              <Plus class="h-3.5 w-3.5" />
+              <template #icon><Plus /></template>
               添加单个变量
-            </button>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            </PrimaryButton>
+            <PrimaryButton
+              size="sm"
               :disabled="!store.sources.length"
               @click="openCompositeVariableCreate"
             >
-              <Plus class="h-3.5 w-3.5" />
+              <template #icon><Plus /></template>
               添加组合变量
-            </button>
+            </PrimaryButton>
           </template>
 
           <VariablePoolPanel ref="variablePoolPanelRef" toolbar-mode="hidden" @saved="handleVariableSaved" />
@@ -544,18 +567,18 @@ function handleToggleVisibleRuleSelection(payload: {
             @toggle-rule-selection="handleToggleRuleSelection"
             @toggle-visible-rule-selection="handleToggleVisibleRuleSelection"
           />
-          <div class="mt-6 flex justify-end">
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary"
+          <div class="personal-rule-actions">
+            <PrimaryButton
               :disabled="store.isExecuting"
               @click="runExecution"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              执行校验
-            </button>
+              <template #icon>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </template>
+              {{ store.isExecuting ? '执行中...' : '执行校验' }}
+            </PrimaryButton>
           </div>
         </CollapsibleSection>
       </div>
@@ -573,7 +596,7 @@ function handleToggleVisibleRuleSelection(payload: {
           content-class="pt-4"
           @toggle="toggleSection(4)"
         >
-          <ResultBoardPanel :rule-count="store.orchestrationRuleCount" />
+          <ResultBoardPanel :rule-count="store.orchestrationRuleCount" variant="personal" />
         </CollapsibleSection>
       </div>
 

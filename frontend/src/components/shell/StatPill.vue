@@ -1,7 +1,6 @@
 <script setup lang="ts">
-// 共享 KPI 卡：caption + 等宽大数字 + StatusDot
-// 不是交互单元，禁止 hover 浮起
-import StatusDot from './StatusDot.vue'
+import MetricCard from './MetricCard.vue'
+import type { StatusBadgeType } from './types'
 
 type Tone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 
@@ -16,16 +15,21 @@ withDefaults(
     statusTone: 'pending',
   },
 )
+
+const toneMap: Record<Tone, StatusBadgeType> = {
+  pending: 'neutral',
+  active: 'success',
+  done: 'success',
+  warn: 'warning',
+  error: 'danger',
+}
 </script>
 
 <template>
-  <article class="rounded-card border border-line bg-card p-5 shadow-card-1">
-    <div class="text-[12px] font-medium text-ink-500">{{ label }}</div>
-    <div class="font-mono mt-3 text-[32px] font-bold leading-none text-ink-900">
-      {{ value }}
-    </div>
-    <div class="mt-3">
-      <StatusDot :tone="statusTone" :label="statusLabel" />
-    </div>
-  </article>
+  <MetricCard
+    :label="label"
+    :value="value"
+    :status-label="statusLabel"
+    :status-type="toneMap[statusTone]"
+  />
 </template>

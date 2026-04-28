@@ -33,7 +33,7 @@ npm run build
 
 脚本会先执行前端构建，再由 FastAPI 托管 `frontend/dist/`，访问地址为 `http://<本机局域网IP>:8000`。前端所有 API 继续使用相对路径 `/api/v1/...`。
 
-远程用户添加本地 Excel / CSV 数据源时，请使用数据源弹窗里的「上传文件」。弹窗里的「服务器选择」只会在服务所在机器弹出文件框，手动输入路径也必须是服务所在机器或共享盘可访问的路径。
+远程用户添加本地 Excel 数据源时，请使用数据源弹窗里的「上传文件」。CSV 与飞书当前仍为占位入口，新增数据源下拉中会显示“占位”并禁用选择；弹窗里的「服务器选择」只会在服务所在机器弹出文件框，手动输入路径也必须是服务所在机器或共享盘可访问的路径。
 
 ## 目录速查
 
@@ -41,14 +41,14 @@ npm run build
 frontend/src
 ├── api/                # HTTP 封装：apiFetch、auth、admin、workbench、fixedRules
 ├── components
-│   ├── shell/          # 共享展示组件：PageHeader / SectionHeader / StatPill / StatusDot / EmptyState / DataTable
+│   ├── shell/          # 共享 UI 组件：PageHeader / AppCard / SectionHeader / StatusBadge / Button / MetricCard / DataTable / EmptyState
 │   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
 ├── router/             # vue-router：/login /register / /fixed-rules /admin /profile
 ├── store/              # Pinia：auth / workbench / fixedRules
 ├── types/              # TypeScript 类型：workbench / fixedRules / auth
 ├── utils/              # ruleOrchestrationModel / taskTree / workbenchMeta / apiFetch
 ├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / LoginView / RegisterView
-├── App.vue             # 应用壳：左侧固定边栏 + 右侧独立滚动工作区
+├── App.vue             # 应用壳：ec-* 左侧固定边栏 + 右侧独立滚动工作区
 ├── main.ts             # 入口
 └── style.css           # 全局 token 与共享 utility（统一收口在此）
 ```
@@ -57,11 +57,24 @@ frontend/src
 
 ## 设计 token
 
-- 色板：`bg-canvas / bg-card / bg-subtle / ink-{900,700,500,300} / border-line / accent / accent-soft / accent-ink / success / warning / danger`。
+- 色板：`bg-canvas=#F6F8FC / bg-card=#FFFFFF / bg-subtle=#F3F7FF / ink-{900,700,500,300} / border-line=#E5EAF3 / accent=#0F62FE / accent-soft=#EAF2FF / accent-ink=#004EEB / success=#12B76A / warning=#FF7A1A / danger=#EF4444`。
 - 边框层级：模块外框 `border-gray-200`，单元格 / 表格内部 `border-gray-100`，强调态 `border-blue-500`。
-- 圆角：`rounded-field=6px`、`rounded-card=12px`。
+- 圆角：`rounded-field=8px`、`rounded-card=18px`，大面板使用 `--radius-xl=24px`。
+- 阴影：卡片默认 `--shadow-card`，悬停 `--shadow-card-hover`，主按钮 `--shadow-button`。
 - 字体：`Inter + Noto Sans SC + JetBrains Mono`（KPI 大数字使用等宽）。
 - `corePlugins.preflight = false`：避免与 Element Plus 冲突；浏览器默认样式（如 `dd { margin-left: 40px }`）需要在组件内显式覆盖。
+
+## 通用 UI 组件
+
+- `components/shell` 承载新版 SaaS 视觉组件：页面头、白色卡片、分段标题、状态胶囊、三类按钮、指标卡、表格与空态。
+- 旧组件 `StatusDot / StatPill` 保留为兼容包装，新页面优先使用 `StatusBadge / MetricCard`。
+- `EmptyState` 支持 `table / panel / result` 三种空态场景和 `source / variable / rule / result` 图标语义，表格空数据应优先使用它而不是单行纯文本。
+- 页面级视觉替换应优先复用这些组件，不直接复制卡片、按钮、状态标签和表格样式。
+- `style.css` 末尾保留 `Global UI Final Polish` 最终覆盖层，用于统一 Element Plus、旧 `ec-*` 类和新版 `ui-*` 组件的按钮、输入框、表格、标签、卡片、空态与链接细节。
+- 个人校验 `/` 使用 `personal-check-*` 专用类、项目校验 `/fixed-rules` 使用 `project-check-*` 专用类，对步骤条、统计卡、工作区表格、规则区和结果空态做参考稿级视觉精修；两者共享同一套 SaaS 工作台视觉基线。
+- 个人校验 `/` 与项目校验 `/fixed-rules` 共享 `ResultBoardPanel`：执行后可导出 Excel，文件包含 `统计摘要` 与 `异常明细` 两个页签，导出的是当前 `result_id` 的全量结果而不是当前分页。
+- 管理后台 `/admin` 使用 `admin-dashboard-*` 专用类，对页面头操作区、统计卡、项目列表卡片、详情表格和成员表格做新版后台视觉精修。
+- 个人设置 `/profile` 使用 `profile-settings-*` 专用类，对账号信息、横向密码表单、我的项目表格和状态标签做新版设置页视觉精修。
 
 ## 联调流程
 
@@ -93,8 +106,8 @@ SVN 数据源接入：
 
 - 在「新增数据源」弹窗里把类型切到 `SVN（推荐 HTTP 链接）`，默认进入「远端 URL」子模式；输入目录 URL（例如 `https://samosvn/data/project/samo/GameDatas/datas_qa88/`）后点「浏览此目录」即可在弹窗里挑选 `.xls/.xlsx` 文件。
 - 本地 Excel 与 SVN Excel 现在都支持“先选文件，再自动回填数据源标识”；若当时标识为空，会按文件名自动生成一个只含字母、数字与下划线的标识。若自动生成值与现有数据源重复，页面会提示你手动修改后再保存。
-- 步骤 2 的字段映射与变量添加现同时支持本地 Excel 和 SVN Excel；CSV 仍不支持字段映射提取。
-- 步骤 1 头部的 `数据源路径管理` 现只管理远端 SVN 目录 URL；本地 Excel / CSV 推荐通过上传文件重新接入，不再提供本地路径替换管理。
+- 步骤 2 的字段映射与变量添加现同时支持本地 Excel 和 SVN Excel；CSV 与飞书入口当前显示为“占位”并禁用新增。
+- 步骤 1 头部的 `数据源路径管理` 现只管理远端 SVN 目录 URL；本地 Excel 推荐通过上传文件重新接入，不再提供本地路径替换管理。
 - SVN 路径替换会先做整批预校验：数据源元数据和受影响变量预览只要有一项失败，就整批回滚，不会把坏路径保存进配置。
 - 首次访问某 host 时会弹出「配置 SVN 凭据」弹窗：用户名 / 密码会按当前登录用户与 host 维度加密落到 `<runtime>/svn-credentials.json`，凭据保存后会自动重新触发一次浏览。
 - 再次打开同一 host 的「配置 SVN 凭据」弹窗时，会回填上次保存的用户名、密码与测试目录 URL；host 列表接口仍不返回密码，密码仅在按 host 读取详情时回填到当前用户自己的弹窗表单。

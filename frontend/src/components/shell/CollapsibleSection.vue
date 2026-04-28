@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SectionHeader from './SectionHeader.vue'
+import AppCard from './AppCard.vue'
 
 type SectionHeaderTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 
@@ -32,8 +33,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="rounded-card border border-line bg-card shadow-card-1">
-    <div class="border-t-2 px-5 py-4" :class="active ? 'border-accent' : 'border-transparent'">
+  <AppCard as="section" padding="none" class="ui-collapsible-section" :class="{ 'is-active': active }">
+    <div class="ui-collapsible-section__inner">
       <div :class="collapsed ? '' : headerClass">
         <SectionHeader
           variant="workbench"
@@ -67,5 +68,5 @@ const emit = defineEmits<{
         <slot />
       </div>
     </div>
-  </section>
+  </AppCard>
 </template>

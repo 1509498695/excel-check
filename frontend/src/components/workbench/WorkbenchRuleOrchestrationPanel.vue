@@ -3,6 +3,10 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 
+import DataTable from '../shell/DataTable.vue'
+import EmptyState from '../shell/EmptyState.vue'
+import PrimaryButton from '../shell/PrimaryButton.vue'
+import SecondaryButton from '../shell/SecondaryButton.vue'
 import { useWorkbenchStore } from '../../store/workbench'
 import type {
   CompositeAssertionOperator,
@@ -1897,14 +1901,14 @@ function handleToggleSingleSelection(ruleId: string): void {
               clearable
               size="default"
             />
-            <button
-              type="button"
-              class="ec-btn ec-btn-secondary ec-btn-sm shrink-0"
+            <SecondaryButton
+              size="sm"
+              class="shrink-0"
               @click="openCreateGroupDialog"
             >
-              <Plus class="h-3 w-3" />
+              <template #icon><Plus /></template>
               新建
-            </button>
+            </SecondaryButton>
           </div>
 
           <nav class="workbench-rule-menu">
@@ -1948,66 +1952,52 @@ function handleToggleSingleSelection(ruleId: string): void {
               </div>
             </div>
             <div class="workbench-rule-header__actions">
-              <button
-                type="button"
-                class="ec-btn ec-btn-secondary ec-btn-sm"
+              <SecondaryButton
+                size="sm"
                 :disabled="store.selectedRuleGroup.builtin"
                 @click="openRenameGroupDialog"
               >
                 重命名
-              </button>
-              <button
-                type="button"
-                class="ec-btn ec-btn-secondary ec-btn-sm"
+              </SecondaryButton>
+              <SecondaryButton
+                size="sm"
                 :disabled="store.selectedRuleGroup.builtin"
                 @click="handleRemoveGroup"
               >
                 删除组
-              </button>
-              <button
-                type="button"
-                class="ec-btn ec-btn-primary ec-btn-sm"
+              </SecondaryButton>
+              <PrimaryButton
+                size="sm"
                 :disabled="!canCreateRule"
                 @click="openCreateRuleDialog"
               >
-                <Plus class="h-3.5 w-3.5" />
+                <template #icon><Plus /></template>
                 新增规则
-              </button>
+              </PrimaryButton>
             </div>
           </div>
 
           <div
             v-if="!canCreateRule"
-            class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[13px] text-ink-500"
+            class="workbench-rule-empty"
           >
-            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-canvas">
-              <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 12h6 M12 9v6 M5 5h14v14H5z" />
-              </svg>
-            </div>
-            <div>请先在上方变量池保存变量</div>
+            <EmptyState
+              variant="panel"
+              icon-tone="rule"
+              title="暂无规则"
+              description="请先在上方变量池保存变量，随后新建校验规则"
+              :min-height="260"
+            />
           </div>
 
-          <div
-            v-else-if="!store.currentOrchestrationGroupRules.length"
-            class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[13px] text-ink-500"
-          >
-            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-canvas">
-              <Plus class="h-4 w-4 text-ink-500" />
-            </div>
-            <div>当前还没有规则</div>
-            <div class="text-[12px] text-ink-500">点击“新增规则”开始</div>
-          </div>
-
-          <div v-else class="overflow-hidden rounded-field border border-line">
-            <table class="w-full table-fixed text-[13px]">
-              <thead class="bg-canvas text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
+          <DataTable v-else aria-label="个人校验规则列表">
+            <template #head>
                 <tr>
-                  <th class="px-4 py-3 w-[28%] text-left align-middle">规则名称</th>
-                  <th class="px-4 py-3 text-left align-middle">目标变量</th>
-                  <th class="px-4 py-3 w-[20%] text-left align-middle">规则选择</th>
-                  <th class="px-4 py-3 w-[20%] text-left align-middle">操作</th>
-                  <th class="px-4 py-3 w-[72px] text-left align-middle">
+                  <th class="w-[28%]">规则名称</th>
+                  <th>目标变量</th>
+                  <th class="w-[20%]">规则选择</th>
+                  <th class="w-[20%]">操作</th>
+                  <th class="w-[72px]">
                     <el-checkbox
                       :model-value="allVisibleRulesSelected"
                       :indeterminate="partiallySelectedVisibleRules"
@@ -2016,15 +2006,27 @@ function handleToggleSingleSelection(ruleId: string): void {
                     />
                   </th>
                 </tr>
-              </thead>
-              <tbody>
+            </template>
+            <template #body>
+              <tr v-if="!store.currentOrchestrationGroupRules.length">
+                <td colspan="5" class="bg-card">
+                  <EmptyState
+                    variant="table"
+                    icon-tone="rule"
+                    title="暂无规则"
+                    description="请先在上方变量池保存变量，随后新建校验规则"
+                    :min-height="260"
+                  />
+                </td>
+              </tr>
+              <template v-else>
                 <!-- 保留原有业务逻辑：规则表格仍消费 pagedCurrentOrchestrationGroupRules -->
                 <tr
                   v-for="row in store.pagedCurrentOrchestrationGroupRules"
                   :key="row.rule_id"
-                  class="border-t border-line transition hover:bg-canvas"
+                  class="bg-card text-ink-700"
                 >
-                  <td class="px-4 py-3 align-top">
+                  <td class="align-top">
                     <div
                       class="font-medium truncate"
                       :class="invalidRuleIdSet.has(row.rule_id) ? 'text-danger' : 'text-ink-900'"
@@ -2033,18 +2035,18 @@ function handleToggleSingleSelection(ruleId: string): void {
                     </div>
                     <div class="mt-1 text-[12px] text-ink-500 line-clamp-2">{{ buildRuleCondition(row) }}</div>
                   </td>
-                  <td class="px-4 py-3 align-top">
+                  <td class="align-top">
                     <div class="font-mono text-[12px] text-ink-900 truncate">{{ row.target_variable_tag }}</div>
                     <div class="mt-1 text-[12px] text-ink-500 truncate">{{ buildRuleVariableSummary(row) }}</div>
                     <div class="text-[11px] text-ink-500 truncate">{{ buildRuleSourcePathSummary(row) }}</div>
                   </td>
-                  <td class="px-4 py-3 align-top">
+                  <td class="align-top">
                     <div class="text-ink-700">{{ buildRuleSelectionSummary(row) }}</div>
                       <div class="mt-1 font-mono text-[12px] text-ink-500">
                         {{ buildRuleCompareValueSummary(row) }}
                       </div>
                   </td>
-                  <td class="px-4 py-3 text-left align-top text-[12px]">
+                  <td class="text-left align-top text-[12px]">
                     <div class="table-actions">
                       <button
                         type="button"
@@ -2062,7 +2064,7 @@ function handleToggleSingleSelection(ruleId: string): void {
                       </button>
                     </div>
                   </td>
-                  <td class="px-4 py-3 text-left align-top">
+                  <td class="text-left align-top">
                     <el-checkbox
                       :model-value="selectedRuleIdSet.has(row.rule_id)"
                       @change="handleToggleSingleSelection(row.rule_id)"
@@ -2070,9 +2072,9 @@ function handleToggleSingleSelection(ruleId: string): void {
                     />
                   </td>
                 </tr>
-              </tbody>
-            </table>
-          </div>
+              </template>
+            </template>
+          </DataTable>
 
           <div
             v-if="store.currentOrchestrationGroupRuleTotal > 20"

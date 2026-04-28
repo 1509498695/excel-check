@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import StatusBadge from './StatusBadge.vue'
+import type { StatusBadgeType } from './types'
 
 type SectionHeaderTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 
@@ -11,6 +13,7 @@ const props = withDefaults(
     step?: string
     statusLabel?: string
     statusTone?: SectionHeaderTone
+    statusType?: StatusBadgeType
   }>(),
   {
     description: '',
@@ -18,35 +21,27 @@ const props = withDefaults(
     step: '',
     statusLabel: '',
     statusTone: 'done',
+    statusType: undefined,
   },
 )
 
-const statusClass = computed(() => {
-  if (props.statusTone === 'pending') {
-    return 'bg-slate-100 text-slate-600'
-  }
-  if (props.statusTone === 'active') {
-    return 'bg-accent-soft text-accent-ink'
-  }
-  if (props.statusTone === 'warn') {
-    return 'bg-warning-soft/70 text-amber-700'
-  }
-  if (props.statusTone === 'error') {
-    return 'bg-danger-soft/70 text-danger'
-  }
-  return 'bg-green-50 text-green-600'
+const normalizedStatusType = computed<StatusBadgeType>(() => {
+  if (props.statusType) return props.statusType
+  if (props.statusTone === 'done') return 'success'
+  if (props.statusTone === 'active') return 'success'
+  if (props.statusTone === 'warn') return 'warning'
+  if (props.statusTone === 'error') return 'danger'
+  return 'pending'
 })
 </script>
 
 <template>
-  <div v-if="variant === 'workbench'" class="workbench-section-head">
+  <div v-if="variant === 'workbench'" class="ui-section-header workbench-section-head">
     <span class="workbench-section-head__index">{{ step }}</span>
     <div class="workbench-section-head__content">
       <div class="workbench-section-head__title-row">
         <h2 class="workbench-section-head__title">{{ title }}</h2>
-        <span v-if="statusLabel" class="workbench-section-head__status" :class="statusClass">
-          ● {{ statusLabel }}
-        </span>
+        <StatusBadge v-if="statusLabel" :type="normalizedStatusType" :label="statusLabel" />
       </div>
       <p v-if="description" class="workbench-section-head__description">{{ description }}</p>
     </div>
@@ -55,12 +50,15 @@ const statusClass = computed(() => {
     </div>
   </div>
 
-  <div v-else class="flex items-end justify-between gap-4">
-    <div class="min-w-0">
-      <h2 class="text-[15px] font-semibold tracking-tight text-ink-900">{{ title }}</h2>
-      <p v-if="description" class="mt-1 text-[12px] text-ink-500">{{ description }}</p>
+  <div v-else class="ui-section-header ui-section-header--simple">
+    <div class="ui-section-header__copy">
+      <div class="ui-section-header__title-row">
+        <h2 class="ui-section-header__title">{{ title }}</h2>
+        <StatusBadge v-if="statusLabel" :type="normalizedStatusType" :label="statusLabel" />
+      </div>
+      <p v-if="description" class="ui-section-header__description">{{ description }}</p>
     </div>
-    <div class="flex items-center gap-2 shrink-0">
+    <div v-if="$slots.actions" class="ui-section-header__actions">
       <slot name="actions" />
     </div>
   </div>

@@ -12,7 +12,7 @@ import type {
   SourceUploadResponse,
   TaskTree,
 } from '../types/workbench'
-import { apiFetch } from '../utils/apiFetch'
+import { apiDownloadFile, apiFetch, type ApiFileResponse } from '../utils/apiFetch'
 
 export async function fetchSourceCapabilities(): Promise<SourceCapabilitiesResponse> {
   return apiFetch<SourceCapabilitiesResponse>('/api/v1/sources/capabilities')
@@ -83,6 +83,13 @@ export async function fetchExecutionResults(
   size: number,
 ): Promise<ExecuteResponse> {
   return apiFetch<ExecuteResponse>(`/api/v1/engine/results/${resultId}?page=${page}&size=${size}`)
+}
+
+export async function exportExecutionResults(resultId: number): Promise<ApiFileResponse> {
+  return apiDownloadFile(
+    `/api/v1/engine/results/${resultId}/export`,
+    `personal-check-results-${resultId}.xlsx`,
+  )
 }
 
 export async function fetchWorkbenchConfig(): Promise<{ code: number; msg: string; data: Record<string, unknown> }> {

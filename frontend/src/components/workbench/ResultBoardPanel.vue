@@ -3,6 +3,8 @@ import { computed } from 'vue'
 
 import DataTable from '../shell/DataTable.vue'
 import EmptyState from '../shell/EmptyState.vue'
+import MetricCard from '../shell/MetricCard.vue'
+import SecondaryButton from '../shell/SecondaryButton.vue'
 import { useWorkbenchStore } from '../../store/workbench'
 import type { AbnormalResult, ExecutionMeta } from '../../types/workbench'
 import { getRuleTitle } from '../../utils/workbenchMeta'
@@ -14,16 +16,25 @@ type ResultBoardStoreLike = {
   executionMeta: ExecutionMeta | null
   abnormalResults: AbnormalResult[]
   abnormalResultTotal: number
+  resultId: number | null
   resultCurrentPage: number
   resultPageSize: number
   resultPageCount: number
+  isResultExporting: boolean
   loadResultPage: (page: number) => Promise<void>
+  exportResults: () => Promise<void>
 }
 
-const props = defineProps<{
-  store?: ResultBoardStoreLike
-  ruleCount: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    store?: ResultBoardStoreLike
+    ruleCount: number
+    variant?: 'default' | 'personal'
+  }>(),
+  {
+    variant: 'default',
+  },
+)
 
 const defaultStore = useWorkbenchStore()
 const store = computed<ResultBoardStoreLike>(() => props.store ?? defaultStore)
@@ -46,11 +57,19 @@ const shouldShowPagination = computed(
   () => !!store.value.executionMeta && store.value.abnormalResultTotal > store.value.resultPageSize,
 )
 
+const canExportResults = computed(
+  () => !!store.value.executionMeta?.result_id && !store.value.isExecuting && !store.value.isResultExporting,
+)
+
+const shouldShowPersonalReadyState = computed(
+  () => props.variant === 'personal' && !store.value.executionMeta && !store.value.isExecuting,
+)
+
 const summaryCards = computed(() => [
-  { label: '扫描总行数', value: resultStats.value.scanned },
-  { label: '失败数据源', value: resultStats.value.failedSources },
-  { label: '异常结果', value: resultStats.value.total },
-  { label: '执行耗时', value: `${resultStats.value.durationMs}ms` },
+  { label: '扫描总行数', value: resultStats.value.scanned, statusLabel: '已统计', statusType: 'success' as const, iconTone: 'primary' as const },
+  { label: '失败数据源', value: resultStats.value.failedSources, statusLabel: resultStats.value.failedSources ? '需关注' : '正常', statusType: resultStats.value.failedSources ? 'warning' as const : 'success' as const, iconTone: 'warning' as const },
+  { label: '异常结果', value: resultStats.value.total, statusLabel: resultStats.value.total ? '需处理' : '正常', statusType: resultStats.value.total ? 'warning' as const : 'success' as const, iconTone: 'danger' as const },
+  { label: '执行耗时', value: `${resultStats.value.durationMs}ms`, statusLabel: '已完成', statusType: 'neutral' as const, iconTone: 'purple' as const },
 ])
 
 function getLevelType(level: string): 'danger' | 'warning' | 'success' | 'info' {
@@ -81,10 +100,14 @@ function displayRawValue(value: unknown): string {
 function handlePageChange(page: number): void {
   void store.value.loadResultPage(page)
 }
+
+function handleExportResults(): void {
+  void store.value.exportResults()
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-5">
+  <div class="result-board-panel flex flex-col gap-5" :class="variant === 'personal' ? 'result-board-panel--personal' : ''">
     <div
       v-if="store.pageError"
       role="alert"
@@ -102,28 +125,66 @@ function handlePageChange(page: number): void {
     </div>
 
     <div
-      v-if="!ruleCount"
-      class="rounded-card border border-dashed border-line bg-subtle/60 px-6 py-10 text-center"
+      v-if="shouldShowPersonalReadyState"
+      class="personal-result-empty"
     >
-      <div class="text-[15px] font-semibold text-ink-900">结果面板已就绪</div>
-      <p class="mt-2 text-[13px] text-ink-500">先完成数据源、变量池和规则配置，再执行一次校验。</p>
+      <EmptyState
+        variant="result"
+        icon-tone="result"
+        title="结果面板已就绪"
+        description="先完成数据源、变量池和规则配置，再执行一次校验"
+        :min-height="180"
+      />
     </div>
 
-    <template v-else>
+    <div
+      v-if="!ruleCount"
+      v-show="!shouldShowPersonalReadyState"
+      class="personal-result-empty"
+    >
+      <EmptyState
+        variant="result"
+        icon-tone="result"
+        title="结果面板已就绪"
+        description="先完成数据源、变量池和规则配置，再执行一次校验"
+        :min-height="180"
+      />
+    </div>
+
+    <template v-else-if="!shouldShowPersonalReadyState">
       <div class="grid grid-cols-4 gap-4">
-        <article
+        <MetricCard
           v-for="card in summaryCards"
           :key="card.label"
-          class="rounded-field bg-subtle px-5 py-4"
-        >
-          <div class="text-[12px] font-medium text-ink-500">{{ card.label }}</div>
-          <div class="mt-3 font-mono text-[16px] font-semibold leading-none text-ink-900">
-            {{ card.value }}
-          </div>
-        </article>
+          :label="card.label"
+          :value="card.value"
+          :status-label="card.statusLabel"
+          :status-type="card.statusType"
+          :icon-tone="card.iconTone"
+        />
       </div>
 
       <slot name="extra" />
+
+      <div
+        v-if="store.executionMeta"
+        class="flex items-center justify-between gap-4 rounded-card border border-line bg-card px-4 py-3"
+      >
+        <div>
+          <div class="text-[14px] font-semibold text-ink-900">结果导出</div>
+          <div class="mt-1 text-[12px] text-ink-500">
+            导出当前执行结果的统计摘要与全部异常明细，不受分页影响。
+          </div>
+        </div>
+        <SecondaryButton
+          size="sm"
+          :disabled="!canExportResults"
+          :loading="store.isResultExporting"
+          @click="handleExportResults"
+        >
+          导出 Excel
+        </SecondaryButton>
+      </div>
 
       <div
         v-loading="store.isResultPageLoading"
@@ -144,7 +205,13 @@ function handlePageChange(page: number): void {
         <template #body>
           <tr v-if="store.isExecuting">
             <td colspan="6" class="bg-card">
-              <EmptyState title="正在执行校验" description="结果刷新中，请稍候。">
+              <EmptyState
+                variant="table"
+                icon-tone="result"
+                title="正在执行校验"
+                description="结果刷新中，请稍候。"
+                :min-height="160"
+              >
                 <template #icon>
                   <svg class="h-4 w-4 animate-spin text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 4a8 8 0 1 1-8 8" />
@@ -155,18 +222,24 @@ function handlePageChange(page: number): void {
           </tr>
           <tr v-else-if="!store.executionMeta">
             <td colspan="6" class="bg-card">
-              <EmptyState title="等待执行结果" description="执行完成后，异常结果会在这里展示。" />
+              <EmptyState
+                variant="table"
+                icon-tone="result"
+                title="结果面板已就绪"
+                description="先完成数据源、变量池和规则配置，再执行一次校验"
+                :min-height="180"
+              />
             </td>
           </tr>
           <tr v-else-if="!store.abnormalResultTotal">
             <td colspan="6" class="bg-card">
-              <EmptyState title="本轮未发现异常结果" description="扫描统计已完成，当前没有命中异常数据。">
-                <template #icon>
-                  <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 13l4 4L19 7" />
-                  </svg>
-                </template>
-              </EmptyState>
+              <EmptyState
+                variant="table"
+                icon-tone="result"
+                title="本轮未发现异常结果"
+                description="扫描统计已完成，当前没有命中异常数据。"
+                :min-height="180"
+              />
             </td>
           </tr>
           <template v-else>

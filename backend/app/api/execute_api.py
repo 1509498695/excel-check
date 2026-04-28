@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.schemas import TaskTree
@@ -17,10 +18,15 @@ from backend.app.auth.dependencies import (
 from backend.app.database import get_db
 from backend.app.execution_pipeline import run_execution_pipeline
 from backend.app.result_store import (
+    fetch_execution_result_export,
+    fetch_execution_result_page,
     normalize_result_page,
     paginate_abnormal_results,
     persist_execution_result,
-    fetch_execution_result_page,
+)
+from backend.app.result_exporter import (
+    RESULT_EXPORT_MIME_TYPE,
+    build_execution_result_workbook,
 )
 from backend.app.utils.formatter import build_execution_response
 
@@ -120,4 +126,31 @@ async def get_execution_result_page(
         size=payload["size"],
         total=payload["total"],
         result_list=payload["list"],
+    )
+
+
+@router.get("/results/{result_id}/export")
+async def export_execution_result(
+    result_id: int,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """导出个人校验最近一次执行结果为 Excel。"""
+    project_id = ctx.require_project_member()
+    payload = await fetch_execution_result_export(
+        db,
+        scope_type="workbench",
+        result_id=result_id,
+        project_id=project_id,
+        user_id=ctx.user_id,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="未找到对应的执行结果")
+
+    workbook = build_execution_result_workbook(payload, scope_label="个人校验")
+    filename = f"personal-check-results-{result_id}.xlsx"
+    return StreamingResponse(
+        workbook,
+        media_type=RESULT_EXPORT_MIME_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

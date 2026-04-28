@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 
+import AppCard from '../components/shell/AppCard.vue'
 import {
   apiCreateProject,
   apiDeleteProject,
@@ -16,9 +17,14 @@ import {
 } from '../api/admin'
 import { useAuthStore } from '../store/auth'
 import type { ProjectDetail, ProjectMember } from '../types/auth'
+import DataTable from '../components/shell/DataTable.vue'
+import EmptyState from '../components/shell/EmptyState.vue'
+import MetricCard from '../components/shell/MetricCard.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
+import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
-import StatPill from '../components/shell/StatPill.vue'
+import SecondaryButton from '../components/shell/SecondaryButton.vue'
+import StatusBadge from '../components/shell/StatusBadge.vue'
 
 const DEFAULT_PROJECT_NAME = '默认项目'
 
@@ -111,10 +117,10 @@ const overviewItems = computed<
     isReady: superAdminCount.value > 0,
   },
   {
-    label: '我的归属项目',
+    label: '我的项目范围',
     value: auth.currentProjectName || '未设置',
-    pendingHint: '未设置',
-    readyHint: '系统保留',
+    pendingHint: '已就绪',
+    readyHint: '已就绪',
     pendingTone: 'pending',
     readyTone: 'done',
     isReady: Boolean(auth.currentProjectName),
@@ -123,16 +129,22 @@ const overviewItems = computed<
 
 function getSectionStatusLabel(step: StepIndex): string {
   if (step === 1) {
-    return projects.value.length ? '已完成' : '待配置'
+    return projects.value.length ? '已就绪' : '待配置'
   }
   if (step === 2) {
-    return selectedProject.value ? '已完成' : '待配置'
+    return selectedProject.value ? '已就绪' : '待配置'
   }
-  return members.value.length ? '已完成' : '待配置'
+  return selectedProject.value ? '已就绪' : '待配置'
 }
 
 function getSectionStatusTone(step: StepIndex): 'pending' | 'done' {
-  return getSectionStatusLabel(step) === '已完成' ? 'done' : 'pending'
+  return getSectionStatusLabel(step) === '已就绪' ? 'done' : 'pending'
+}
+
+const metricIconTones = ['primary', 'success', 'purple', 'warning'] as const
+
+function getMetricIconTone(index: number): (typeof metricIconTones)[number] {
+  return metricIconTones[index] ?? 'primary'
 }
 
 async function loadProjects(): Promise<void> {
@@ -399,16 +411,6 @@ function isDefaultProject(project: ProjectDetail): boolean {
   return project.name === DEFAULT_PROJECT_NAME
 }
 
-function getMemberRoleClass(member: ProjectMember): string {
-  if (member.is_super_admin) {
-    return 'bg-danger-soft text-danger'
-  }
-  if (member.role === 'admin') {
-    return 'bg-warning-soft text-warning'
-  }
-  return 'bg-accent-soft text-accent-ink'
-}
-
 function getMemberRoleLabel(member: ProjectMember): string {
   if (member.is_super_admin) {
     return '超级管理员'
@@ -418,31 +420,72 @@ function getMemberRoleLabel(member: ProjectMember): string {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
-    <PageHeader breadcrumb="主菜单 / 管理后台" title="管理后台" />
+  <div class="admin-dashboard-page flex h-full flex-col bg-canvas font-sans text-ink-700">
+    <PageHeader breadcrumb="主页 / 管理后台" title="管理后台">
+      <template #actions>
+        <el-input
+          v-model="projectKeyword"
+          placeholder="搜索项目"
+          :prefix-icon="Search"
+          clearable
+          size="default"
+          class="admin-dashboard-search"
+        />
+        <PrimaryButton
+          v-if="canCreateProject"
+          @click="openCreateProjectDialog"
+        >
+          <template #icon><Plus /></template>
+          新建项目
+        </PrimaryButton>
+      </template>
+    </PageHeader>
 
-    <div class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6">
+    <div class="admin-dashboard-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
       <!-- KPI -->
       <section aria-label="概览" class="grid grid-cols-4 gap-4">
         <!-- 保留原有业务逻辑：概览卡仍基于 overviewItems 计算结果遍历渲染 -->
-        <StatPill
-          v-for="item in overviewItems"
+        <MetricCard
+          v-for="(item, index) in overviewItems"
           :key="item.label"
           :label="item.label"
           :value="item.value"
-          :status-label="item.isReady ? item.readyHint : item.pendingHint"
-          :status-tone="item.isReady ? item.readyTone : item.pendingTone"
-        />
+          status-label="已就绪"
+          status-type="success"
+          :icon-tone="getMetricIconTone(index)"
+        >
+          <template #icon>
+            <svg v-if="item.label === '项目总数'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" />
+            </svg>
+            <svg v-else-if="item.label === '当前项目成员'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+              <path d="M5 20a7 7 0 0 1 14 0" />
+              <path d="M4 11.5a2.5 2.5 0 1 0 0-5" />
+              <path d="M20 6.5a2.5 2.5 0 1 0 0 5" />
+            </svg>
+            <svg v-else-if="item.label === '超级管理员'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z" />
+              <path d="M4 21a8 8 0 0 1 16 0" />
+              <path d="M19 4v4M21 6h-4" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 3 14.7 8.7 21 9.6 16.5 14 17.6 20.2 12 17.2 6.4 20.2 7.5 14 3 9.6 9.3 8.7z" />
+            </svg>
+          </template>
+        </MetricCard>
       </section>
 
       <!-- 单列全宽通栏：01 项目列表 / 02 项目详情 / 03 项目成员 依次堆叠 -->
       <!-- 01 项目列表 -->
-      <article
+      <AppCard
         v-loading="isLoadingProjects"
-        class="rounded-card border border-gray-200 bg-card shadow-card-1"
+        as="article"
+        padding="none"
+        class="admin-dashboard-card"
       >
-        <div class="border-t-2 border-transparent px-5 py-4">
-          <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+        <div class="admin-dashboard-card__inner">
+          <div class="admin-dashboard-card__header">
             <SectionHeader
               variant="workbench"
               step="01"
@@ -451,83 +494,56 @@ function getMemberRoleLabel(member: ProjectMember): string {
               :status-label="getSectionStatusLabel(1)"
               :status-tone="getSectionStatusTone(1)"
             />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <el-input
-                v-model="projectKeyword"
-                placeholder="搜索项目"
-                :prefix-icon="Search"
-                clearable
-                size="default"
-                class="w-[260px]"
-              />
-              <button
-                v-if="canCreateProject"
-                type="button"
-                class="ec-btn ec-btn-primary ec-btn-sm"
-                @click="openCreateProjectDialog"
-              >
-                <Plus class="h-3.5 w-3.5" />
-                新建项目
-              </button>
-            </div>
           </div>
 
-          <div class="pt-4">
+          <div class="admin-dashboard-card__body">
             <div
               v-if="!projects.length"
-              class="rounded-lg border border-dashed border-gray-200 bg-canvas px-4 py-10 text-center text-[13px] text-ink-500"
+              class="admin-empty-panel"
             >
-              暂无可管理项目
+              <EmptyState title="暂无可管理项目" />
             </div>
 
             <div
               v-else-if="!filteredProjects.length"
-              class="rounded-lg border border-dashed border-gray-200 bg-canvas px-4 py-10 text-center text-[13px] text-ink-500"
+              class="admin-empty-panel"
             >
-              没有匹配「{{ projectKeyword }}」的项目
+              <EmptyState title="没有匹配的项目" :description="`没有匹配「${projectKeyword}」的项目`" />
             </div>
 
-            <nav v-else class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <nav v-else class="admin-project-grid">
               <!-- 保留原有业务逻辑：项目列表仍基于 filteredProjects 遍历，点击继续走原有选中与加载成员逻辑 -->
               <article
                 v-for="project in filteredProjects"
                 :key="project.id"
-                class="group relative flex min-h-[112px] cursor-pointer flex-col justify-between rounded-lg border bg-white p-4 transition"
-                :class="
-                  selectedProject?.id === project.id
-                    ? 'border-blue-500 shadow-sm'
-                    : 'border-gray-300 hover:border-gray-400'
-                "
+                class="admin-project-card"
+                :class="selectedProject?.id === project.id ? 'is-active' : ''"
                 @click="selectProject(project)"
               >
                 <div>
                   <div class="flex items-start justify-between gap-2">
-                    <div
-                      class="truncate text-[14px] font-semibold"
-                      :class="selectedProject?.id === project.id ? 'text-ink-900' : 'text-ink-900'"
-                    >
+                    <div class="admin-project-card__name">
                       {{ project.name }}
                     </div>
                     <div class="flex shrink-0 items-center gap-1">
                       <span
                         v-if="selectedProject?.id === project.id"
-                        class="rounded-md bg-blue-100 px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink"
+                        class="admin-current-badge"
                       >
                         当前
                       </span>
-                      <span
+                      <StatusBadge
                         v-if="isDefaultProject(project)"
-                        class="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-ink-700"
-                      >
-                        默认
-                      </span>
+                        type="neutral"
+                        label="默认"
+                      />
                     </div>
                   </div>
-                  <div class="mt-1 text-[12px] text-ink-500">
+                  <div class="admin-project-card__meta">
                     成员 {{ project.member_count ?? 0 }} · {{ formatDate(project.created_at) }}
                   </div>
                 </div>
-                <div class="mt-3 flex items-center justify-end gap-3">
+                <div class="admin-project-card__actions">
                   <button
                     type="button"
                     class="ec-action-link"
@@ -548,12 +564,12 @@ function getMemberRoleLabel(member: ProjectMember): string {
             </nav>
           </div>
         </div>
-      </article>
+      </AppCard>
 
       <!-- 02 项目详情 -->
-      <article class="rounded-card border border-gray-200 bg-card shadow-card-1">
-        <div class="border-t-2 border-transparent px-5 py-4">
-          <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+      <AppCard as="article" padding="none" class="admin-dashboard-card">
+        <div class="admin-dashboard-card__inner">
+          <div class="admin-dashboard-card__header">
             <SectionHeader
               variant="workbench"
               step="02"
@@ -562,103 +578,94 @@ function getMemberRoleLabel(member: ProjectMember): string {
               :status-label="getSectionStatusLabel(2)"
               :status-tone="getSectionStatusTone(2)"
             />
-            <div class="workbench-section-toolbar__actions shrink-0">
-              <button
+            <div class="admin-dashboard-card__actions">
+              <SecondaryButton
                 v-if="selectedProject && auth.isSuperAdmin && !isDefaultProject(selectedProject)"
-                type="button"
-                class="ec-btn ec-btn-secondary ec-btn-sm"
+                size="sm"
                 @click="handleDeleteProject(selectedProject)"
               >
                 删除项目
-              </button>
-              <button
+              </SecondaryButton>
+              <PrimaryButton
                 v-if="selectedProject"
-                type="button"
-                class="ec-btn ec-btn-primary ec-btn-sm"
+                size="sm"
                 @click="openEditProjectDialog(selectedProject)"
               >
                 编辑项目
-              </button>
+              </PrimaryButton>
             </div>
           </div>
 
-          <div class="pt-4">
+          <div class="admin-dashboard-card__body">
             <div
               v-if="!selectedProject"
-              class="flex flex-col items-center justify-center gap-2 py-10 text-center text-[13px] text-ink-500"
+              class="admin-empty-panel"
             >
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50">
-                <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 4h16v16H4z M4 9h16" />
-                </svg>
-              </div>
-              <div>当前没有可管理项目</div>
+              <EmptyState title="当前没有可管理项目">
+                <template #icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 4h16v16H4z M4 9h16" />
+                  </svg>
+                </template>
+              </EmptyState>
             </div>
 
             <div
               v-else-if="selectedProject"
-              class="overflow-hidden rounded-lg border border-gray-200 bg-white"
+              class="min-w-0"
             >
-              <table class="w-full table-fixed border-collapse text-[13px]">
-                <thead class="bg-gray-50">
+              <DataTable aria-label="项目详情">
+                <template #head>
                   <tr>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      项目名称
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      归属类型
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      成员数
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      创建时间
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      项目描述
-                    </th>
+                    <th class="w-1/5">项目名称</th>
+                    <th class="w-1/5">归属类型</th>
+                    <th class="w-1/5">成员数</th>
+                    <th class="w-1/5">创建时间</th>
+                    <th class="w-1/5">项目描述</th>
                   </tr>
-                </thead>
-                <tbody>
+                </template>
+                <template #body>
                   <tr class="bg-white transition hover:bg-gray-50">
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="text-[14px] font-semibold text-ink-900">
                         {{ selectedProject.name }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle text-[13px] text-ink-900">
+                    <td class="text-[13px] text-ink-900">
                       {{ isDefaultProject(selectedProject) ? '系统保留' : '自定义项目' }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="font-mono text-[14px] text-ink-900">
                         {{ selectedProject.member_count ?? members.length }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="font-mono text-[13px] text-ink-700">
                         {{ formatDate(selectedProject.created_at) }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <div class="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-700">
                         {{ selectedProject.description || '无项目描述' }}
                       </div>
                     </td>
                   </tr>
-                </tbody>
-              </table>
+                </template>
+              </DataTable>
             </div>
           </div>
         </div>
-      </article>
+      </AppCard>
 
       <!-- 03 项目成员 -->
-      <article
+      <AppCard
         v-loading="isLoadingMembers"
-        class="rounded-card border border-gray-200 bg-card shadow-card-1"
+        as="article"
+        padding="none"
+        class="admin-dashboard-card"
       >
-        <div class="border-t-2 border-transparent px-5 py-4">
-          <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+        <div class="admin-dashboard-card__inner">
+          <div class="admin-dashboard-card__header">
             <SectionHeader
               variant="workbench"
               step="03"
@@ -669,70 +676,58 @@ function getMemberRoleLabel(member: ProjectMember): string {
             />
           </div>
 
-          <div class="pt-4">
+          <div class="admin-dashboard-card__body">
             <!-- 未选择项目 -->
             <div
               v-if="!selectedProject"
-              class="rounded-md border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-[13px] text-ink-500"
+              class="admin-empty-panel"
             >
-              请在上方项目列表中选择一个项目，即可查看成员。
+              <EmptyState title="请选择项目" description="请在上方项目列表中选择一个项目，即可查看成员。" />
             </div>
 
             <!-- 已选项目但成员为空 -->
             <div
               v-else-if="!members.length"
-              class="rounded-md border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-[13px] text-ink-500"
+              class="admin-empty-panel"
             >
-              该项目尚未邀请任何成员加入。
+              <EmptyState title="暂无项目成员" description="该项目尚未邀请任何成员加入。" />
             </div>
 
             <!-- 成员表（极浅完整网格线） -->
-            <div v-else class="overflow-hidden rounded-md border border-gray-200">
-              <table class="admin-member-table w-full table-fixed border-collapse text-[13px]">
-                <thead class="bg-gray-50">
+            <div v-else>
+              <DataTable aria-label="项目成员">
+                <template #head>
                   <tr>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      用户名
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      角色
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      归属项目
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      加入时间
-                    </th>
-                    <th class="w-1/5 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      操作
-                    </th>
+                    <th class="w-1/5">用户名</th>
+                    <th class="w-1/5">角色</th>
+                    <th class="w-1/5">归属项目</th>
+                    <th class="w-1/5">加入时间</th>
+                    <th class="w-1/5">操作</th>
                   </tr>
-                </thead>
-                <tbody>
+                </template>
+                <template #body>
                   <!-- 保留原有业务逻辑：成员表行级操作仍走原有链路 -->
                   <tr
                     v-for="row in members"
                     :key="row.user_id"
                     class="bg-white transition hover:bg-gray-50"
                   >
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle truncate font-medium text-ink-900">
+                    <td class="truncate font-medium text-ink-900">
                       {{ row.username }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
-                      <span
-                        class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium"
-                        :class="getMemberRoleClass(row)"
-                      >
-                        {{ getMemberRoleLabel(row) }}
-                      </span>
+                    <td>
+                      <StatusBadge
+                        :type="row.is_super_admin ? 'danger' : row.role === 'admin' ? 'warning' : 'neutral'"
+                        :label="getMemberRoleLabel(row)"
+                      />
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle truncate text-ink-700">
+                    <td class="truncate text-ink-700">
                       {{ row.primary_project_name ?? '-' }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle font-mono text-[12px] text-ink-500">
+                    <td class="font-mono text-[12px] text-ink-500">
                       {{ formatDate(row.joined_at) }}
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
+                    <td>
                       <div class="table-actions">
                         <button
                           v-if="auth.isSuperAdmin && row.user_id !== auth.user?.id"
@@ -797,12 +792,12 @@ function getMemberRoleLabel(member: ProjectMember): string {
                       </div>
                     </td>
                   </tr>
-                </tbody>
-              </table>
+                </template>
+              </DataTable>
             </div>
           </div>
         </div>
-      </article>
+      </AppCard>
     </div>
 
     <!-- 项目编辑弹窗 -->
@@ -836,21 +831,17 @@ function getMemberRoleLabel(member: ProjectMember): string {
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <button
-            type="button"
-            class="ec-btn ec-btn-secondary"
+          <SecondaryButton
             @click="closeProjectDialog"
           >
             取消
-          </button>
-          <button
-            type="button"
-            class="ec-btn ec-btn-primary"
+          </SecondaryButton>
+          <PrimaryButton
             :disabled="!canSubmitProject || isSavingProject"
             @click="handleSubmitProject"
           >
             {{ isSavingProject ? '保存中…' : projectDialogMode === 'create' ? '创建项目' : '保存修改' }}
-          </button>
+          </PrimaryButton>
         </div>
       </template>
     </el-dialog>
@@ -885,21 +876,17 @@ function getMemberRoleLabel(member: ProjectMember): string {
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <button
-            type="button"
-            class="ec-btn ec-btn-secondary"
+          <SecondaryButton
             @click="closeMoveProjectDialog"
           >
             取消
-          </button>
-          <button
-            type="button"
-            class="ec-btn ec-btn-primary"
+          </SecondaryButton>
+          <PrimaryButton
             :disabled="!canSubmitMoveProject || isMovingMemberProject"
             @click="handleSubmitMoveProject"
           >
             {{ isMovingMemberProject ? '保存中…' : '保存' }}
-          </button>
+          </PrimaryButton>
         </div>
       </template>
     </el-dialog>

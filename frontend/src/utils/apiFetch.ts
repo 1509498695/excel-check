@@ -113,3 +113,65 @@ export async function apiFetch<T = unknown>(
 
   return JSON.parse(rawText) as T
 }
+
+export interface ApiFileResponse {
+  blob: Blob
+  filename: string
+}
+
+export async function apiDownloadFile(
+  url: string,
+  fallbackFilename: string,
+  options: RequestInit = {},
+): Promise<ApiFileResponse> {
+  const token = getToken()
+  const headers = new Headers(options.headers)
+
+  if (token && !isAuthLoginOrRegisterUrl(url)) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(url, { ...options, headers })
+
+  if (!response.ok) {
+    let message = '下载失败，请稍后重试。'
+    try {
+      const payload = (await response.json()) as { detail?: unknown }
+      const extractedMessage = extractApiErrorMessage(payload.detail)
+      if (extractedMessage) {
+        message = extractedMessage
+      }
+    } catch {
+      message = `${response.status} ${response.statusText}`
+    }
+
+    if (response.status === 401) {
+      clearToken()
+      if (!isAuthLoginOrRegisterUrl(url)) {
+        window.location.href = '/login'
+      }
+    }
+
+    throw new Error(message)
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: extractDownloadFilename(response.headers) ?? fallbackFilename,
+  }
+}
+
+function extractDownloadFilename(headers: Headers): string | null {
+  const disposition = headers.get('Content-Disposition')
+  if (!disposition) {
+    return null
+  }
+
+  const filenameStarMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (filenameStarMatch?.[1]) {
+    return decodeURIComponent(filenameStarMatch[1].trim())
+  }
+
+  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return filenameMatch?.[1]?.trim() || null
+}

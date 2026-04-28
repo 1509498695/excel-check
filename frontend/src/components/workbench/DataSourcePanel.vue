@@ -14,6 +14,7 @@ import {
 } from '../../api/svn'
 import SvnPickerDialog from './SvnPickerDialog.vue'
 import SvnCredentialDialog from './SvnCredentialDialog.vue'
+import EmptyState from '../shell/EmptyState.vue'
 import { useWorkbenchStore } from '../../store/workbench'
 import type { SourceManagementStoreLike } from '../../types/panelStores'
 import type { DataSource, SourceType } from '../../types/workbench'
@@ -557,7 +558,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <el-table :data="store.sources" class="workbench-table" :empty-text="panelCopy.emptyText">
+    <el-table :data="store.sources" class="workbench-table">
       <el-table-column label="标识" min-width="160">
         <template #default="{ row }">
           <div class="mono-chip">{{ row.id }}</div>
@@ -596,6 +597,15 @@ onMounted(() => {
           </div>
         </template>
       </el-table-column>
+      <template #empty>
+        <EmptyState
+          variant="table"
+          icon-tone="source"
+          title="暂无数据源"
+          description="请先添加数据源以供校验使用"
+          :min-height="144"
+        />
+      </template>
     </el-table>
 
     <el-dialog
@@ -635,6 +645,7 @@ onMounted(() => {
               :key="option.value"
               :label="option.label"
               :value="option.value"
+              :disabled="option.disabled"
             />
           </el-select>
         </div>

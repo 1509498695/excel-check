@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import {
   executeTaskTree,
+  exportExecutionResults,
   fetchColumnPreview,
   fetchCompositePreview,
   fetchExecutionResults,
@@ -49,6 +50,7 @@ import {
   normalizeReplacementPreset,
   type SourcePathReplacementGroup,
 } from '../utils/sourcePathReplacement'
+import { saveApiFile } from '../utils/download'
 import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
@@ -63,6 +65,7 @@ interface WorkbenchState {
   capabilities: SourceType[]
   isExecuting: boolean
   isResultPageLoading: boolean
+  isResultExporting: boolean
   pageError: string
   abnormalResults: AbnormalResult[]
   abnormalResultTotal: number
@@ -252,6 +255,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     capabilities: [],
     isExecuting: false,
     isResultPageLoading: false,
+    isResultExporting: false,
     pageError: '',
     abnormalResults: [],
     abnormalResultTotal: 0,
@@ -485,6 +489,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.resultId = null
       this.resultCurrentPage = 1
       this.isResultPageLoading = false
+      this.isResultExporting = false
     },
 
     setActiveTag(tag: string | null): void {
@@ -1090,6 +1095,24 @@ export const useWorkbenchStore = defineStore('workbench', {
       }
     },
 
+    async exportResults(): Promise<void> {
+      if (!this.resultId || !this.executionMeta) {
+        return
+      }
+
+      this.isResultExporting = true
+      this.pageError = ''
+      try {
+        const file = await exportExecutionResults(this.resultId)
+        saveApiFile(file)
+      } catch (error) {
+        this.pageError = error instanceof Error ? error.message : '导出结果失败。'
+        throw error
+      } finally {
+        this.isResultExporting = false
+      }
+    },
+
     async saveConfigNow(): Promise<void> {
       await saveWorkbenchConfig(this._getAutoSavePayload())
     },
@@ -1298,6 +1321,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.resultId = null
         this.resultCurrentPage = 1
         this.isResultPageLoading = false
+        this.isResultExporting = false
         this.sourceMetadataMap = {}
         this.variablePreviewMap = {}
         this.sourceIssues = {}

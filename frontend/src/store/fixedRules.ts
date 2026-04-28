@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import {
   executeFixedRules,
+  exportFixedRulesResults,
   fetchFixedRulesResults,
   fetchFixedRulesConfig,
   saveFixedRulesConfig,
@@ -55,6 +56,7 @@ import {
   normalizeReplacementPreset,
   type SourcePathReplacementGroup,
 } from '../utils/sourcePathReplacement'
+import { saveApiFile } from '../utils/download'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
 const FIXED_RULES_PAGE_SIZE = RULE_ORCHESTRATION_PAGE_SIZE
@@ -73,6 +75,7 @@ interface FixedRulesState {
   isSaving: boolean
   isExecuting: boolean
   isResultPageLoading: boolean
+  isResultExporting: boolean
   isUpdatingSvn: boolean
   pageError: string
   configIssues: FixedRulesConfigIssue[]
@@ -224,6 +227,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
     isSaving: false,
     isExecuting: false,
     isResultPageLoading: false,
+    isResultExporting: false,
     isUpdatingSvn: false,
     pageError: '',
     configIssues: [],
@@ -477,6 +481,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       this.isSaving = false
       this.isExecuting = false
       this.isResultPageLoading = false
+      this.isResultExporting = false
       this.isUpdatingSvn = false
       this.pageError = ''
       this.configIssues = []
@@ -500,6 +505,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
       this.resultId = null
       this.resultCurrentPage = 1
       this.isResultPageLoading = false
+      this.isResultExporting = false
     },
 
     setSelectedGroup(groupId: string): void {
@@ -795,6 +801,24 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         throw error
       } finally {
         this.isResultPageLoading = false
+      }
+    },
+
+    async exportResults(): Promise<void> {
+      if (!this.resultId || !this.executionMeta) {
+        return
+      }
+
+      this.isResultExporting = true
+      this.pageError = ''
+      try {
+        const file = await exportFixedRulesResults(this.resultId)
+        saveApiFile(file)
+      } catch (error) {
+        this.pageError = error instanceof Error ? error.message : '导出结果失败。'
+        throw error
+      } finally {
+        this.isResultExporting = false
       }
     },
 

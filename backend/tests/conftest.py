@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+
+
+TEST_DB_PATH = Path(__file__).resolve().parents[1] / ".runtime" / "test_excel_check.db"
+os.environ.setdefault("DB_URL", f"sqlite+aiosqlite:///{TEST_DB_PATH}")
 
 import pytest
 from httpx import ASGITransport, AsyncClient

@@ -97,42 +97,35 @@ async function handleSwitchProject(projectId: number): Promise<void> {
 <template>
   <div
     v-if="showShell"
-    class="grid h-screen w-screen grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-canvas font-sans text-ink-700"
+    class="ec-app-shell"
   >
     <!-- ============= 左侧固定边栏 ============= -->
-    <aside class="flex h-full flex-col border-r border-line bg-card">
+    <aside class="ec-sidebar">
       <!-- 品牌：主色方块 + 表格 SVG -->
-      <div class="flex items-center gap-3 px-6 py-5">
-        <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-white">
-          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+      <div class="ec-sidebar-brand">
+        <div class="ec-sidebar-brand__mark">
+          <svg viewBox="0 0 24 24" class="ec-sidebar-brand__icon" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 5h16v14H4z M4 10h16 M9 5v14" />
           </svg>
         </div>
-        <div class="leading-tight">
-          <div class="text-[15px] font-semibold text-ink-900">Excel Check</div>
-          <div class="text-[12px] text-ink-500">配置表个人校验</div>
+        <div class="ec-sidebar-brand__copy">
+          <div class="ec-sidebar-brand__title">Excel Check</div>
+          <div class="ec-sidebar-brand__subtitle">配置表个人校验</div>
         </div>
       </div>
 
       <!-- 主导航 -->
-      <nav class="flex-1 overflow-y-auto px-3 pb-4" aria-label="主导航">
-        <div class="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-500">
-          主菜单
-        </div>
+      <nav class="ec-sidebar-nav" aria-label="主导航">
+        <div class="ec-sidebar-nav__label">主菜单</div>
         <RouterLink
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="mb-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition"
-          :class="
-            isActive(item.routeName)
-              ? 'bg-accent-soft font-medium text-accent-ink'
-              : 'text-ink-700 hover:bg-canvas'
-          "
+          class="ec-nav-link"
+          :class="{ 'ec-nav-link--active': isActive(item.routeName) }"
         >
           <svg
-            class="h-4 w-4 shrink-0 transition"
-            :class="isActive(item.routeName) ? 'text-accent-ink' : 'text-ink-500'"
+            class="ec-nav-link__icon"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -142,35 +135,44 @@ async function handleSwitchProject(projectId: number): Promise<void> {
           >
             <path :d="item.icon" />
           </svg>
-          {{ item.label }}
+          <span class="ec-nav-link__label">{{ item.label }}</span>
         </RouterLink>
       </nav>
 
       <!-- 底部项目卡 + 用户菜单 -->
-      <div class="border-t border-line p-4">
-        <div class="rounded-md bg-canvas p-3">
-          <div class="text-[11px] font-medium uppercase tracking-wider text-ink-500">当前项目</div>
-          <div class="mt-1 text-[14px] font-semibold text-ink-900 truncate">
+      <div class="ec-sidebar-footer">
+        <div class="ec-project-card">
+          <div class="ec-project-card__label">当前项目</div>
+          <div class="ec-project-card__name">
             {{ auth.currentProjectName || '未选择项目' }}
           </div>
-          <div class="text-[12px] text-ink-500">{{ currentRoleLabel }}</div>
+          <div class="ec-project-card__role">{{ currentRoleLabel }}</div>
         </div>
 
-        <div class="mt-3">
+        <div class="ec-user-menu">
           <el-dropdown trigger="click" placement="top-start">
             <button
               type="button"
-              class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-canvas"
+              class="ec-user-trigger"
             >
-              <span
-                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-semibold text-white"
-              >
+              <span class="ec-user-trigger__avatar">
                 {{ auth.user?.username?.charAt(0)?.toUpperCase() ?? 'U' }}
               </span>
-              <span class="flex-1 truncate text-[13px] text-ink-700">
+              <span class="ec-user-trigger__name">
                 {{ auth.user?.username ?? '' }}
               </span>
-              <span class="text-[12px] text-ink-500">···</span>
+              <svg
+                class="ec-user-trigger__arrow"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
             </button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -194,7 +196,7 @@ async function handleSwitchProject(projectId: number): Promise<void> {
     </aside>
 
     <!-- ============= 右侧主区：纯 router-view，TopBar 由各页面自己提供 ============= -->
-    <main class="flex h-full flex-col overflow-hidden bg-canvas">
+    <main class="ec-app-main">
       <router-view />
     </main>
   </div>

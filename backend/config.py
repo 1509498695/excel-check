@@ -48,6 +48,7 @@ class Settings:
         default_factory=lambda: Path(__file__).resolve().parent.parent
         / "backend"
         / ".runtime_uploads"
+        / "local_excel"
     )
     frontend_dist_dir: Path = field(
         default_factory=lambda: Path(

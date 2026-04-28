@@ -5,9 +5,20 @@
 
 ## [Unreleased]
 
+- 个人校验 `/` 与项目校验 `/fixed-rules` 的结果区新增 Excel 导出：按当前 `result_id` 导出全量结果，工作簿包含 `统计摘要` 与 `异常明细` 两个页签，并继续按用户 / 项目隔离权限。
+- 数据源类型入口收口：CSV 与飞书仍未完整接入，新增数据源下拉中统一显示为“占位”并禁用选择，历史配置仍可展示和删除。
+- 修复项目校验 `/fixed-rules` 添加 SVN Excel 变量后保存配置报错的问题：后端配置规范化现允许本地 Excel 与 SVN Excel 变量来源保持一致。
+- 空数据状态视觉优化：增强共享 `EmptyState`，统一数据源、变量池、规则和结果模块的居中图标、主文案与辅助说明展示。
+- 全局基础 UI 细节统一：按钮、输入框、表格、状态标签、卡片、空态和操作链接增加最终覆盖层，收口到新版 SaaS 设计系统。
+- 个人设置 `/profile` 页面新版 UI 对齐：账号信息、修改密码、我的项目三段模块切到新版 SaaS 设置页风格，密码修改与项目切换逻辑保持不变。
+- 管理后台 `/admin` 页面新版 UI 对齐：页面头右侧搜索与新建项目入口、统计卡、项目列表、项目详情和项目成员三段模块切到新版 SaaS 后台风格，项目与成员管理逻辑保持不变。
+- 项目校验 `/fixed-rules` 页面新版 UI 对齐：复用个人校验页的页面头、步骤条、统计卡、分段模块、规则区、表格与结果空态样式，修正规则模块序号为 `03`，业务事件与接口保持不变。
+- 个人校验 `/` 页面新版 UI 精修：页面头、步骤条、统计卡、四个主模块、规则空态与结果执行区进一步贴近新版 SaaS 参考稿，业务数据流与执行事件保持不变。
+- 前端通用 UI 组件体系整理：新增 `AppCard / StatusBadge / PrimaryButton / SecondaryButton / GhostButton / MetricCard`，并将个人校验、项目校验、管理后台、个人设置的页面骨架统一到新版 SaaS 卡片、按钮、表格、状态胶囊与空态风格。
+- 浏览器上传 Excel / CSV 的默认落盘目录调整为 `backend/.runtime_uploads/local_excel/<project_id>/<user_id>/`，继续保留项目与用户隔离。
 - 个人校验 `/` 与项目校验 `/fixed-rules` 的 `数据源路径管理` 收口为仅管理远端 SVN 目录 URL；本地 Excel / CSV 不再提供本地路径替换管理，历史本地路径配置字段继续保留兼容。
 - 本机共享部署升级：新增 `scripts/start-local-deploy.ps1`，支持前端构建后由 FastAPI 单服务托管；后端监听、端口、前端产物目录、CORS、上传大小、JWT 密钥与默认管理员密码均可通过环境变量配置。
-- 数据源新增浏览器上传链路：`POST /api/v1/sources/upload` 支持 `.xlsx/.xls/.csv`，按当前项目与用户隔离保存到 `backend/.runtime_uploads/`，远程访问用户无需依赖服务器本机 `tkinter` 文件选择框。
+- 数据源新增浏览器上传链路：`POST /api/v1/sources/upload` 支持 `.xlsx/.xls/.csv`，按当前项目与用户隔离保存到 `backend/.runtime_uploads/local_excel/`，远程访问用户无需依赖服务器本机 `tkinter` 文件选择框。
 - 默认管理员播种策略收口：启动时继续确保唯一默认超级管理员存在，但已有 `admin` 不再被每次启动强制重置密码；首次共享部署建议设置 `DEFAULT_SUPER_ADMIN_PASSWORD`。
 - 用户可见命名统一：侧边栏、页面头部、结果面板与稳定文档中的“工作台 / 固定规则”统一更名为“个人校验 / 项目校验”；路由路径与内部实现名保持不变。
 - 文档重整：根 `README.md` 收口为 6 节骨架；新建 `docs/ARCHITECTURE.md`、`docs/MODULES.md` 集中沉淀稳定文档；`PROJECT_RECORD.md` 与 `需求文档.md` 归档到 `docs/archive/`。

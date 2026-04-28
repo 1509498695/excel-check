@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,10 +11,14 @@ from typing import Any
 import pandas as pd
 import pytest
 from httpx import ASGITransport, AsyncClient
+from openpyxl import load_workbook
 
 from backend.app.api import source_api
 from backend.app.api.schemas import DataSource, VariableTag
+from backend.app.auth.service import create_access_token, hash_password
+from backend.app.database import async_session_factory
 from backend.app.loaders.local_reader import load_local_variables
+from backend.app.models import User, UserProjectRole
 from backend.run import app
 
 
@@ -1100,6 +1105,7 @@ async def test_execute_engine_uses_appended_composite_keys_during_runtime(tmp_pa
 async def test_execute_engine_persists_latest_result_and_supports_server_side_pagination(
     tmp_path: Path,
     auth_headers: dict[str, str],
+    test_project_id: int,
 ) -> None:
     """验证个人校验执行后会返回第一页结果，并支持按 result_id 翻页。"""
     workbook_path = _create_paginated_test_workbook(tmp_path / "paged_execute.xlsx")
@@ -1162,6 +1168,7 @@ async def test_execute_engine_persists_latest_result_and_supports_server_side_pa
             f"/api/v1/engine/results/{result_id}",
             params={"page": 2, "size": 20},
         )
+        export_response = await client.get(f"/api/v1/engine/results/{result_id}/export")
 
     assert page_two_response.status_code == 200
     page_two_payload = page_two_response.json()
@@ -1171,6 +1178,45 @@ async def test_execute_engine_persists_latest_result_and_supports_server_side_pa
     assert page_two_payload["data"]["total"] == 35
     assert len(page_two_payload["data"]["list"]) == 15
     assert page_two_payload["data"]["list"][0]["raw_value"] == 31
+
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    workbook = load_workbook(BytesIO(export_response.content))
+    assert workbook.sheetnames == ["统计摘要", "异常明细"]
+    assert workbook["统计摘要"]["B2"].value == "个人校验"
+    assert workbook["异常明细"].max_row == 36
+    assert workbook["异常明细"]["A1"].value == "级别"
+
+    async with async_session_factory() as session:
+        other_user = User(
+            username="other-workbench-user",
+            hashed_password=hash_password("testpass"),
+            primary_project_id=test_project_id,
+        )
+        session.add(other_user)
+        await session.flush()
+        session.add(
+            UserProjectRole(
+                user_id=other_user.id,
+                project_id=test_project_id,
+                role="user",
+            )
+        )
+        await session.commit()
+        other_token = create_access_token(other_user.id, project_id=test_project_id)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {other_token}"},
+    ) as client:
+        forbidden_export_response = await client.get(
+            f"/api/v1/engine/results/{result_id}/export"
+        )
+
+    assert forbidden_export_response.status_code == 404
 
 
 @pytest.mark.anyio

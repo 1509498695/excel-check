@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.fixed_rules_schemas import FixedRulesConfig, FixedRulesExecuteRequest
@@ -25,10 +26,15 @@ from backend.app.fixed_rules.service import (
     validate_and_normalize_fixed_rules_config,
 )
 from backend.app.result_store import (
+    fetch_execution_result_export,
     fetch_execution_result_page,
     normalize_result_page,
     paginate_abnormal_results,
     persist_execution_result,
+)
+from backend.app.result_exporter import (
+    RESULT_EXPORT_MIME_TYPE,
+    build_execution_result_workbook,
 )
 from backend.app.utils.formatter import build_execution_response
 
@@ -233,4 +239,31 @@ async def get_fixed_rules_result_page(
         size=payload["size"],
         total=payload["total"],
         result_list=payload["list"],
+    )
+
+
+@router.get("/results/{result_id}/export")
+async def export_fixed_rules_result(
+    result_id: int,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """导出当前项目的项目校验执行结果为 Excel。"""
+    project_id = ctx.require_project_member()
+    payload = await fetch_execution_result_export(
+        db,
+        scope_type="fixed_rules",
+        result_id=result_id,
+        project_id=project_id,
+        user_id=None,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="未找到对应的执行结果")
+
+    workbook = build_execution_result_workbook(payload, scope_label="项目校验")
+    filename = f"project-check-results-{result_id}.xlsx"
+    return StreamingResponse(
+        workbook,
+        media_type=RESULT_EXPORT_MIME_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

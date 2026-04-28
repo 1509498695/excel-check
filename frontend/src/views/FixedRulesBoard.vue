@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 
+import AppCard from '../components/shell/AppCard.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import SourcePathReplacementDialog from '../components/workbench/SourcePathReplacementDialog.vue'
@@ -10,9 +11,12 @@ import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import CollapsibleSection from '../components/shell/CollapsibleSection.vue'
 import DataTable from '../components/shell/DataTable.vue'
 import EmptyState from '../components/shell/EmptyState.vue'
+import MetricCard from '../components/shell/MetricCard.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
+import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
-import StatPill from '../components/shell/StatPill.vue'
+import SecondaryButton from '../components/shell/SecondaryButton.vue'
+import type { StatusBadgeType } from '../components/shell'
 import { useFixedRulesStore } from '../store/fixedRules'
 import type {
   CompositeAssertionOperator,
@@ -362,6 +366,19 @@ const overviewItems = computed<
     readyTone: 'warn',
   },
 ])
+
+const metricIconTones = ['primary', 'success', 'primary', 'warning'] as const
+
+function getStatusBadgeType(tone: StatTone): StatusBadgeType {
+  if (tone === 'done' || tone === 'active') return 'success'
+  if (tone === 'warn') return 'warning'
+  if (tone === 'error') return 'danger'
+  return 'neutral'
+}
+
+function getMetricIconTone(index: number): (typeof metricIconTones)[number] {
+  return metricIconTones[index] ?? 'primary'
+}
 
 const stepStatuses = computed<{
   source: SectionStatus
@@ -2224,101 +2241,107 @@ async function handleSvnUpdate(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
+  <div class="project-check-page flex h-full flex-col bg-canvas font-sans text-ink-700">
     <!-- TopBar -->
-    <PageHeader breadcrumb="主菜单 / 项目校验" title="项目校验">
+    <PageHeader breadcrumb="主页 / 项目校验" title="项目校验">
       <template #actions>
-        <button
-          type="button"
-          class="ec-btn ec-btn-secondary"
+        <SecondaryButton
           :disabled="store.isSaving"
           @click="handleSaveConfig"
         >
           {{ store.isSaving ? '保存中…' : '保存配置' }}
-        </button>
-        <button
-          type="button"
-          class="ec-btn ec-btn-secondary"
+        </SecondaryButton>
+        <SecondaryButton
           :disabled="store.isUpdatingSvn || !store.canRunSvnUpdate"
           @click="handleSvnUpdate"
         >
           {{ store.isUpdatingSvn ? 'SVN 更新中…' : 'SVN 更新' }}
-        </button>
-        <button
-          type="button"
-          class="ec-btn ec-btn-primary"
+        </SecondaryButton>
+        <PrimaryButton
           :disabled="store.isExecuting || (store.rules.length > 0 && !store.canExecute)"
           @click="handleExecuteAll"
         >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z" />
-          </svg>
+          <template #icon>
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </template>
           {{ store.isExecuting ? '执行中…' : '执行全部校验' }}
-        </button>
+        </PrimaryButton>
       </template>
     </PageHeader>
 
     <!-- 主滚动区 -->
     <div
       v-loading="isBootstrapping || store.isLoading"
-      class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6"
+      class="project-check-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8"
     >
       <!-- Stepper -->
-      <section aria-label="进度" class="rounded-card border border-line bg-card px-6 py-5 shadow-card-1">
-        <div class="flex items-center gap-4">
+      <AppCard as="section" aria-label="进度" padding="none" class="project-stepper-card">
+        <div class="project-stepper">
           <template v-for="(item, index) in stepperItems" :key="item.step">
             <button
               type="button"
-              class="flex appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left shadow-none transition"
+              class="project-stepper__item"
+              :class="[
+                item.status === 'done' ? 'project-stepper__item--done' : '',
+                item.step === activeGuideStep ? 'project-stepper__item--active' : '',
+                item.status === 'pending' ? 'project-stepper__item--pending' : '',
+              ]"
               @click="handleStepperClick(item.step)"
             >
-              <span
-                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-[12px] font-semibold transition"
-                :class="
-                  item.step === activeGuideStep
-                    ? 'bg-accent text-white'
-                    : item.status === 'done'
-                      ? 'bg-success text-white'
-                      : 'bg-canvas text-ink-500 ring-1 ring-line'
-                "
-              >
+              <span class="project-stepper__badge">
                 {{ item.step }}
               </span>
-              <div class="min-w-0">
-                <div
-                  class="text-[14px] font-semibold transition"
-                  :class="item.step === activeGuideStep ? 'text-ink-900' : 'text-ink-700'"
-                >
-                  {{ item.label }}
-                </div>
-                <div
-                  class="max-w-[220px] truncate text-[12px] transition"
-                  :class="item.step === activeGuideStep ? 'text-accent-ink' : 'text-ink-500'"
-                >
-                  {{ item.description }}
-                </div>
+              <div class="project-stepper__copy">
+                <div class="project-stepper__title">{{ item.label }}</div>
+                <div class="project-stepper__description">{{ item.description }}</div>
               </div>
             </button>
             <div
               v-if="index < stepperItems.length - 1"
-              class="h-px flex-1 transition"
-              :class="item.status === 'done' ? 'bg-accent' : 'bg-line'"
+              class="project-stepper__line"
+              :class="item.status === 'done' ? 'project-stepper__line--done' : ''"
             ></div>
           </template>
         </div>
-      </section>
+      </AppCard>
 
       <!-- KPI -->
       <section aria-label="概览" class="grid grid-cols-4 gap-4">
         <!-- 保留原有业务逻辑：固定规则概览仍基于 overviewItems 计算结果遍历 -->
-        <StatPill
-          v-for="item in overviewItems"
+        <MetricCard
+          v-for="(item, index) in overviewItems"
           :key="item.label"
           :label="item.label"
           :value="item.value"
           :status-label="item.value > 0 ? item.readyHint : item.pendingHint"
-          :status-tone="item.value > 0 ? item.readyTone : item.pendingTone"
-        />
+          :status-type="getStatusBadgeType(item.value > 0 ? item.readyTone : item.pendingTone)"
+          :icon-tone="getMetricIconTone(index)"
+        >
+          <template #icon>
+            <svg v-if="item.label === '数据源'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <ellipse cx="12" cy="5" rx="7" ry="3" />
+              <path d="M5 5v6c0 1.66 3.13 3 7 3s7-1.34 7-3V5" />
+              <path d="M5 11v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
+            </svg>
+            <svg v-else-if="item.label === '变量'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m8 8-4 4 4 4" />
+              <path d="m16 8 4 4-4 4" />
+            </svg>
+            <svg v-else-if="item.label === '规则'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 4v5" />
+              <path d="M6 20v-4a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4" />
+              <rect x="9" y="9" width="6" height="5" rx="1" />
+              <path d="M6 20h0M18 20h0" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v6" />
+              <path d="M12 17h.01" />
+            </svg>
+          </template>
+        </MetricCard>
       </section>
 
       <!-- Banners：极简告警条（border + 4px 左色带 + 浅底） -->
@@ -2362,23 +2385,23 @@ async function handleSvnUpdate(): Promise<void> {
           @toggle="toggleSection(1)"
         >
           <template #actions>
-            <button
-              type="button"
-              class="ec-btn-outline-compact"
+            <SecondaryButton
+              size="sm"
               @click="openSourcePathReplacementDialog"
             >
               数据源路径管理
-            </button>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            </SecondaryButton>
+            <PrimaryButton
+              size="sm"
               @click="openDataSourceCreate"
             >
-              <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+              <template #icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </template>
               新增数据源
-            </button>
+            </PrimaryButton>
           </template>
 
           <DataSourcePanel
@@ -2406,24 +2429,22 @@ async function handleSvnUpdate(): Promise<void> {
           @toggle="toggleSection(2)"
         >
           <template #actions>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            <PrimaryButton
+              size="sm"
               :disabled="!store.sources.length"
               @click="openSingleVariableCreate"
             >
-              <Plus class="h-3.5 w-3.5" />
+              <template #icon><Plus /></template>
               添加单个变量
-            </button>
-            <button
-              type="button"
-              class="ec-btn ec-btn-primary ec-btn-sm"
+            </PrimaryButton>
+            <PrimaryButton
+              size="sm"
               :disabled="!store.sources.length"
               @click="openCompositeVariableCreate"
             >
-              <Plus class="h-3.5 w-3.5" />
+              <template #icon><Plus /></template>
               添加组合变量
-            </button>
+            </PrimaryButton>
           </template>
 
           <VariablePoolPanel
@@ -2461,14 +2482,14 @@ async function handleSvnUpdate(): Promise<void> {
                     clearable
                     size="default"
                   />
-                  <button
-                    type="button"
-                    class="ec-btn ec-btn-secondary ec-btn-sm shrink-0"
+                  <SecondaryButton
+                    size="sm"
+                    class="shrink-0"
                     @click="handleCreateGroup"
                   >
-                    <Plus class="h-3 w-3" />
+                    <template #icon><Plus /></template>
                     新建
-                  </button>
+                  </SecondaryButton>
                 </div>
 
                 <nav class="workbench-rule-menu">
@@ -2506,31 +2527,28 @@ async function handleSvnUpdate(): Promise<void> {
                     </div>
                   </div>
                   <div class="workbench-rule-header__actions">
-                    <button
-                      type="button"
-                      class="ec-btn ec-btn-secondary ec-btn-sm"
+                    <SecondaryButton
+                      size="sm"
                       :disabled="store.selectedGroup.builtin"
                       @click="handleRenameGroup"
                     >
                       重命名
-                    </button>
-                    <button
-                      type="button"
-                      class="ec-btn ec-btn-secondary ec-btn-sm"
+                    </SecondaryButton>
+                    <SecondaryButton
+                      size="sm"
                       :disabled="store.selectedGroup.builtin"
                       @click="handleRemoveGroup"
                     >
                       删除组
-                    </button>
-                    <button
-                      type="button"
-                      class="ec-btn ec-btn-primary ec-btn-sm"
+                    </SecondaryButton>
+                    <PrimaryButton
+                      size="sm"
                       :disabled="!canCreateRule"
                       @click="openCreateRuleDialog"
                     >
-                      <Plus class="h-3.5 w-3.5" />
+                      <template #icon><Plus /></template>
                       新增规则
-                    </button>
+                    </PrimaryButton>
                   </div>
                 </div>
 
@@ -2554,22 +2572,24 @@ async function handleSvnUpdate(): Promise<void> {
                   <template #body>
                     <tr v-if="!canCreateRule">
                       <td colspan="5" class="bg-card">
-                        <EmptyState title="请先在上方变量池添加变量" description="至少需要一个变量后才能开始新增规则。">
-                          <template #icon>
-                            <svg class="h-4 w-4 text-ink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                              <path d="M9 12h6 M12 9v6 M5 5h14v14H5z" />
-                            </svg>
-                          </template>
-                        </EmptyState>
+                        <EmptyState
+                          variant="table"
+                          icon-tone="rule"
+                          title="暂无规则"
+                          description="请先在上方变量池保存变量，随后新建校验规则"
+                          :min-height="260"
+                        />
                       </td>
                     </tr>
                     <tr v-else-if="!store.currentGroupRules.length">
                       <td colspan="5" class="bg-card">
-                        <EmptyState title="当前组还没有规则" description="点击右上角“新增规则”开始编排。">
-                          <template #icon>
-                            <Plus class="h-4 w-4 text-ink-500" />
-                          </template>
-                        </EmptyState>
+                        <EmptyState
+                          variant="table"
+                          icon-tone="rule"
+                          title="暂无规则"
+                          description="请先在上方变量池保存变量，随后新建校验规则"
+                          :min-height="260"
+                        />
                       </td>
                     </tr>
                     <template v-else>
@@ -2656,17 +2676,17 @@ async function handleSvnUpdate(): Promise<void> {
                 </div>
 
                 <div class="mt-6 flex justify-end">
-                  <button
-                    type="button"
-                    class="ec-btn ec-btn-primary"
+                  <PrimaryButton
                     :disabled="store.isExecuting || !store.canExecute"
                     @click="handleExecute"
                   >
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
+                    <template #icon>
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </template>
                     {{ store.isExecuting ? '执行中…' : '执行校验' }}
-                  </button>
+                  </PrimaryButton>
                 </div>
               </div>
             </div>
@@ -2688,7 +2708,7 @@ async function handleSvnUpdate(): Promise<void> {
           content-class="pt-4"
           @toggle="toggleSection(4)"
         >
-          <ResultBoardPanel :store="store" :rule-count="store.totalRuleCount">
+          <ResultBoardPanel :store="store" :rule-count="store.totalRuleCount" variant="personal">
             <template #extra>
               <div
                 v-if="store.svnUpdateSummary"

@@ -384,7 +384,7 @@ async def upload_source_file(
     file: UploadFile = File(...),
     ctx: CurrentUserContext = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """接收浏览器上传的 Excel/CSV，并保存到当前项目/用户隔离目录。"""
+    """接收浏览器上传的 Excel/CSV，并保存到 local_excel 下的项目/用户隔离目录。"""
     project_id = ctx.require_project_member()
     saved_file = await _save_upload_file(
         file,

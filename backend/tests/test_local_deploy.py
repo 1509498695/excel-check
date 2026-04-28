@@ -18,11 +18,12 @@ TEST_DATA_PATH = Path(__file__).resolve().parent / "data" / "minimal_rules.xlsx"
 
 
 def _patch_upload_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, max_bytes: int) -> None:
+    upload_root = tmp_path / "local_excel"
     monkeypatch.setattr(
         source_api,
         "settings",
         SimpleNamespace(
-            runtime_upload_dir=tmp_path,
+            runtime_upload_dir=upload_root,
             max_upload_bytes=max_bytes,
             max_upload_mb=max(1, max_bytes // 1024 // 1024),
             supported_source_types=("local_excel", "local_csv", "feishu", "svn"),
@@ -57,7 +58,7 @@ async def test_upload_source_file_returns_reusable_server_path(
     assert payload["data"]["source_type"] == "local_excel"
     assert payload["data"]["original_filename"] == "minimal_rules.xlsx"
     assert selected_path.is_file()
-    assert tmp_path in selected_path.parents
+    assert tmp_path / "local_excel" in selected_path.parents
 
     metadata_response = await auth_client.post(
         "/api/v1/sources/metadata",

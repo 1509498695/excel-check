@@ -150,6 +150,57 @@ async def fetch_execution_result_page(
     }
 
 
+async def fetch_execution_result_export(
+    db: AsyncSession,
+    *,
+    scope_type: ExecutionScope,
+    result_id: int,
+    project_id: int,
+    user_id: int | None,
+) -> dict[str, Any] | None:
+    """按作用域读取一次执行结果的完整导出数据。"""
+    stmt = select(ExecutionRunRecord).where(
+        ExecutionRunRecord.id == result_id,
+        ExecutionRunRecord.scope_type == scope_type,
+        ExecutionRunRecord.project_id == project_id,
+    )
+    if scope_type == "workbench":
+        stmt = stmt.where(ExecutionRunRecord.user_id == user_id)
+    else:
+        stmt = stmt.where(ExecutionRunRecord.user_id.is_(None))
+
+    run = (await db.execute(stmt)).scalar_one_or_none()
+    if run is None:
+        return None
+
+    item_stmt = (
+        select(ExecutionResultItemRecord)
+        .where(ExecutionResultItemRecord.run_id == run.id)
+        .order_by(ExecutionResultItemRecord.sort_index.asc())
+    )
+    rows = (await db.execute(item_stmt)).scalars().all()
+
+    return {
+        "result_id": run.id,
+        "total": run.total_results,
+        "created_at": run.created_at,
+        "execution_time_ms": run.execution_time_ms,
+        "total_rows_scanned": run.total_rows_scanned,
+        "failed_sources": _deserialize_failed_sources(run.failed_sources_json),
+        "list": [
+            {
+                "level": row.level,
+                "rule_name": row.rule_name,
+                "location": row.location,
+                "row_index": row.row_index,
+                "raw_value": _deserialize_raw_value(row.raw_value_json),
+                "message": row.message,
+            }
+            for row in rows
+        ],
+    }
+
+
 async def _load_scope_run_ids(
     db: AsyncSession,
     *,

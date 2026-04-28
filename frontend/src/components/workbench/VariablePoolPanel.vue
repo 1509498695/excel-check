@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
 import { fetchCompositePreview } from '../../api/workbench'
+import EmptyState from '../shell/EmptyState.vue'
 import { useWorkbenchStore } from '../../store/workbench'
 import type { VariablePoolStoreLike } from '../../types/panelStores'
 import type {
@@ -708,7 +709,6 @@ defineExpose({
         <el-table
           :data="store.variables"
           class="workbench-table"
-          :empty-text="panelCopy.emptyText"
         >
           <el-table-column label="变量标签" min-width="180">
             <template #default="{ row }">
@@ -734,6 +734,15 @@ defineExpose({
               </div>
             </template>
           </el-table-column>
+          <template #empty>
+            <EmptyState
+              variant="table"
+              icon-tone="variable"
+              title="暂无变量"
+              description="请先添加单个变量或组合变量，用于规则编排与校验计算"
+              :min-height="136"
+            />
+          </template>
         </el-table>
       </div>
     </div>

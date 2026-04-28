@@ -7,8 +7,13 @@ import { apiChangePassword } from '../api/auth'
 import { useAuthStore } from '../store/auth'
 import { useFixedRulesStore } from '../store/fixedRules'
 import { useWorkbenchStore } from '../store/workbench'
+import AppCard from '../components/shell/AppCard.vue'
+import DataTable from '../components/shell/DataTable.vue'
+import EmptyState from '../components/shell/EmptyState.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
+import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
+import StatusBadge from '../components/shell/StatusBadge.vue'
 
 type StepIndex = 1 | 2 | 3
 
@@ -30,23 +35,6 @@ const roleLabel = computed(() => {
   }
   return '普通用户'
 })
-
-const roleTagClass = computed(() => {
-  if (auth.isSuperAdmin) {
-    return 'bg-danger-soft text-danger'
-  }
-  if (auth.currentRole === 'admin') {
-    return 'bg-warning-soft text-warning'
-  }
-  return 'bg-accent-soft text-accent-ink'
-})
-
-function getProjectRoleClass(role: string): string {
-  if (role === 'admin') {
-    return 'bg-warning-soft text-warning'
-  }
-  return 'bg-accent-soft text-accent-ink'
-}
 
 function getProjectRoleLabel(role: string): string {
   return role === 'admin' ? '项目管理员' : '普通用户'
@@ -121,147 +109,133 @@ async function handleSwitchProject(projectId: number): Promise<void> {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-canvas font-sans text-ink-700">
-    <PageHeader breadcrumb="主菜单 / 个人设置" title="个人设置" />
+  <div class="profile-settings-page flex h-full flex-col bg-canvas font-sans text-ink-700">
+    <PageHeader breadcrumb="主页 / 个人设置" title="个人设置" />
 
-    <div class="flex-1 overflow-y-auto px-8 py-8">
-      <!-- 全宽通栏：01 / 02 / 03 三块撑满整页 -->
-      <div class="flex w-full flex-col gap-6">
-        <!-- 01 账号信息 -->
-        <section class="rounded-card border border-gray-200 bg-card shadow-card-1">
-          <div class="border-t-2 border-transparent px-5 py-4">
-            <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+    <div class="profile-settings-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
+      <div class="profile-settings-stack flex w-full flex-col gap-6">
+        <AppCard as="section" padding="none" class="profile-settings-card">
+          <div class="profile-settings-card__inner">
+            <div class="profile-settings-card__header">
               <SectionHeader
                 variant="workbench"
                 step="01"
                 title="账号信息"
-                description="账户基础属性与当前登录态"
+                description="账户基础信息与当前登录态"
                 :status-label="getSectionStatusLabel(1)"
                 :status-tone="getSectionStatusTone(1)"
               />
             </div>
 
-            <div class="mt-4 overflow-hidden rounded-md border border-gray-200">
-              <table class="w-full table-fixed border-collapse text-[13px]">
-                <thead class="bg-gray-50">
+            <div class="profile-settings-card__body">
+              <DataTable aria-label="账号信息">
+                <template #head>
                   <tr>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      用户名
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      角色
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      当前项目
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      可访问项目
-                    </th>
+                    <th class="w-1/4">用户名</th>
+                    <th class="w-1/4">角色</th>
+                    <th class="w-1/4">当前项目</th>
+                    <th class="w-1/4">可访问项目</th>
                   </tr>
-                </thead>
-                <tbody>
+                </template>
+                <template #body>
                   <tr class="bg-white transition hover:bg-gray-50">
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="text-[14px] font-semibold text-ink-900">
                         {{ auth.user?.username ?? '—' }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
-                      <span
-                        class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-medium"
-                        :class="roleTagClass"
-                      >
-                        {{ roleLabel }}
-                      </span>
+                    <td>
+                      <StatusBadge
+                        :type="auth.isSuperAdmin ? 'danger' : auth.currentRole === 'admin' ? 'warning' : 'neutral'"
+                        :label="roleLabel"
+                      />
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="text-[14px] font-semibold text-ink-900">
                         {{ auth.currentProjectName || '未选择' }}
                       </span>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <span class="text-[14px] text-ink-900">
                         <span class="font-mono font-semibold">{{ auth.userProjects.length }}</span>
                         <span class="ml-1 text-[13px] font-normal text-ink-500">个</span>
                       </span>
                     </td>
                   </tr>
-                </tbody>
-              </table>
+                </template>
+              </DataTable>
             </div>
           </div>
-        </section>
+        </AppCard>
 
-        <!-- 02 修改密码 -->
-        <section class="rounded-card border border-gray-200 bg-card shadow-card-1">
-          <div class="border-t-2 border-transparent px-5 py-4">
-            <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+        <AppCard as="section" padding="none" class="profile-settings-card">
+          <div class="profile-settings-card__inner">
+            <div class="profile-settings-card__header">
               <SectionHeader
                 variant="workbench"
                 step="02"
                 title="修改密码"
-                description="新密码至少 4 个字符；保存后立即生效，下一次登录请使用新密码"
+                description="新密码需为 4 个字符；保存后立即生效，下一次登录将使用新密码"
                 :status-label="getSectionStatusLabel(2)"
                 :status-tone="getSectionStatusTone(2)"
               />
             </div>
 
-            <!-- 表单整体左对齐 + max-w-md 约束 -->
             <form
-              class="profile-password-form mt-5 flex w-full max-w-md flex-col gap-4"
+              class="profile-password-form profile-settings-card__body"
               @submit.prevent="handleChangePassword"
             >
-              <div>
-                <label class="mb-1.5 block text-[12px] font-medium text-ink-500">原密码</label>
-                <el-input
-                  v-model="oldPassword"
-                  type="password"
-                  placeholder="原密码"
-                  show-password
-                />
-              </div>
-              <div>
-                <label class="mb-1.5 block text-[12px] font-medium text-ink-500">新密码</label>
-                <el-input
-                  v-model="newPassword"
-                  type="password"
-                  placeholder="新密码（至少 4 个字符）"
-                  show-password
-                />
-              </div>
-              <div>
-                <label class="mb-1.5 block text-[12px] font-medium text-ink-500">确认新密码</label>
-                <el-input
-                  v-model="confirmPassword"
-                  type="password"
-                  placeholder="确认新密码"
-                  show-password
-                />
+              <div class="profile-password-grid">
+                <div class="profile-form-field">
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">原密码</label>
+                  <el-input
+                    v-model="oldPassword"
+                    type="password"
+                    placeholder="请输入原密码"
+                    show-password
+                  />
+                </div>
+                <div class="profile-form-field">
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">新密码</label>
+                  <el-input
+                    v-model="newPassword"
+                    type="password"
+                    placeholder="请输入新密码（至少 4 个字符）"
+                    show-password
+                  />
+                </div>
+                <div class="profile-form-field">
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">确认新密码</label>
+                  <el-input
+                    v-model="confirmPassword"
+                    type="password"
+                    placeholder="请再次输入新密码"
+                    show-password
+                  />
+                </div>
               </div>
 
-              <div class="mt-2 flex justify-start">
-                <button
-                  type="submit"
-                  class="ec-btn ec-btn-primary"
+              <div class="profile-password-actions">
+                <PrimaryButton
+                  native-type="submit"
                   :disabled="isChanging"
                 >
                   {{ isChanging ? '保存中…' : '保存新密码' }}
-                </button>
+                </PrimaryButton>
               </div>
             </form>
           </div>
-        </section>
+        </AppCard>
 
-        <!-- 03 我的项目 -->
-        <section class="rounded-card border border-gray-200 bg-card shadow-card-1">
-          <div class="border-t-2 border-transparent px-5 py-4">
-            <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-3">
+        <AppCard as="section" padding="none" class="profile-settings-card">
+          <div class="profile-settings-card__inner">
+            <div class="profile-settings-card__header">
               <SectionHeader
                 variant="workbench"
                 step="03"
                 title="我的项目"
                 :description="auth.userProjects.length
-                  ? `共 ${auth.userProjects.length} 个项目；点击右侧可切换当前项目`
+                  ? `共 ${auth.userProjects.length} 个项目；点击项目可切换当前项目`
                   : '当前账号未加入任何项目'"
                 :status-label="getSectionStatusLabel(3)"
                 :status-tone="getSectionStatusTone(3)"
@@ -270,37 +244,29 @@ async function handleSwitchProject(projectId: number): Promise<void> {
 
             <div
               v-if="!auth.userProjects.length"
-              class="mt-4 rounded-md border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-[13px] text-ink-500"
+              class="profile-empty-panel profile-settings-card__body"
             >
-              暂未加入任何项目
+              <EmptyState title="暂未加入任何项目" />
             </div>
 
-            <div v-else class="mt-4 overflow-hidden rounded-md border border-gray-200">
-              <table class="w-full table-fixed border-collapse text-[13px]">
-                <thead class="bg-gray-50">
+            <div v-else class="profile-settings-card__body">
+              <DataTable aria-label="我的项目">
+                <template #head>
                   <tr>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      项目名称
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      角色
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      状态
-                    </th>
-                    <th class="w-1/4 border border-gray-100 px-4 py-2.5 text-left align-middle text-[12px] font-medium uppercase tracking-wider text-ink-500">
-                      操作
-                    </th>
+                    <th class="w-1/4">项目名称</th>
+                    <th class="w-1/4">角色</th>
+                    <th class="w-1/4">状态</th>
+                    <th class="w-1/4">操作</th>
                   </tr>
-                </thead>
-                <tbody>
+                </template>
+                <template #body>
                   <!-- 保留原有业务逻辑：项目列表仍基于 auth.userProjects 遍历并继续调用原切换逻辑 -->
                   <tr
                     v-for="project in auth.userProjects"
                     :key="project.project_id"
                     class="bg-white transition hover:bg-gray-50"
                   >
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
+                    <td>
                       <div class="flex items-center gap-2">
                         <span
                           class="truncate text-[14px] font-semibold"
@@ -314,31 +280,27 @@ async function handleSwitchProject(projectId: number): Promise<void> {
                         </span>
                         <span
                           v-if="project.project_id === auth.currentProjectId"
-                          class="rounded-md bg-blue-100 px-1.5 py-0.5 text-[11px] font-semibold text-accent-ink"
+                          class="profile-current-badge"
                         >
                           当前
                         </span>
                       </div>
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
-                      <span
-                        class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-medium"
-                        :class="getProjectRoleClass(project.role)"
-                      >
-                        {{ getProjectRoleLabel(project.role) }}
-                      </span>
+                    <td>
+                      <StatusBadge
+                        :type="project.role === 'admin' ? 'warning' : 'neutral'"
+                        :label="getProjectRoleLabel(project.role)"
+                      />
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 align-middle">
-                      <span
+                    <td>
+                      <StatusBadge
                         v-if="project.project_id === auth.currentProjectId"
-                        class="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[12px] font-medium text-success"
-                      >
-                        <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
-                        当前使用
-                      </span>
-                      <span v-else class="text-[12px] text-ink-500">未启用</span>
+                        type="success"
+                        label="当前使用"
+                      />
+                      <StatusBadge v-else type="neutral" label="未启用" />
                     </td>
-                    <td class="border border-gray-100 px-4 py-3 text-left align-middle">
+                    <td>
                       <button
                         v-if="project.project_id !== auth.currentProjectId"
                         type="button"
@@ -355,48 +317,12 @@ async function handleSwitchProject(projectId: number): Promise<void> {
                       </span>
                     </td>
                   </tr>
-                </tbody>
-              </table>
+                </template>
+              </DataTable>
             </div>
           </div>
-        </section>
+        </AppCard>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.profile-password-form :deep(.el-input__wrapper) {
-  min-height: 42px;
-  border: 1px solid #d1d5db !important;
-  border-radius: 6px !important;
-  background: #ffffff !important;
-  box-shadow: none !important;
-  transition:
-    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1) !important;
-}
-
-.profile-password-form :deep(.el-input__wrapper:hover) {
-  border-color: #9ca3af !important;
-}
-
-.profile-password-form :deep(.el-input__wrapper.is-focus),
-.profile-password-form :deep(.el-input.is-focus .el-input__wrapper) {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 1px #3b82f6 inset !important;
-}
-
-.profile-password-form :deep(.el-input__inner) {
-  color: #111827;
-  font-size: 14px;
-}
-
-.profile-password-form :deep(.el-input__inner::placeholder) {
-  color: #9ca3af;
-}
-
-.profile-password-form :deep(.el-input__suffix-inner) {
-  color: #94a3b8;
-}
-</style>

@@ -871,10 +871,9 @@ def _normalize_variables(
             raise ValueError(f"?????? '{tag}' ?? Sheet?")
 
         source = source_map[source_id]
-        if source.type != "local_excel":
+        if source.type not in {"local_excel", "svn"}:
             raise ValueError(
-                f"?????????????? Excel ???????? '{tag}' "
-                f"????????? '{source.type}'?"
+                f"项目校验变量仅支持 Excel 数据源，变量“{tag}”引用的数据源类型为“{source.type}”。"
             )
 
         resolved_sheet = sheet
