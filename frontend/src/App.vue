@@ -65,7 +65,7 @@ const navItems = computed(() => {
 })
 
 function isActive(routeName: string): boolean {
-  return route.name === routeName
+  return route.name === routeName || route.meta.activeNav === routeName
 }
 
 function handleLogout(): void {

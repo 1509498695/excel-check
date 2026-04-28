@@ -12,6 +12,7 @@ import DataTable from '../components/shell/DataTable.vue'
 import EmptyState from '../components/shell/EmptyState.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
 import PrimaryButton from '../components/shell/PrimaryButton.vue'
+import SecondaryButton from '../components/shell/SecondaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
 import StatusBadge from '../components/shell/StatusBadge.vue'
 
@@ -106,11 +107,38 @@ async function handleSwitchProject(projectId: number): Promise<void> {
     ElMessage.error(error instanceof Error ? error.message : '切换失败')
   }
 }
+
+function openUserGuide(): void {
+  const guideUrl = router.resolve({ name: 'user-guide' }).href
+  window.open(guideUrl, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <template>
   <div class="profile-settings-page flex h-full flex-col bg-canvas font-sans text-ink-700">
-    <PageHeader breadcrumb="主页 / 个人设置" title="个人设置" />
+    <PageHeader breadcrumb="主页 / 个人设置" title="个人设置">
+      <template #actions>
+        <SecondaryButton @click="openUserGuide">
+          <template #icon>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 19.5V5a2 2 0 0 1 2-2h10.5L20 6.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-1.5Z" />
+              <path d="M15 3v5h5" />
+              <path d="M8 12h8" />
+              <path d="M8 16h6" />
+            </svg>
+          </template>
+          系统使用说明
+        </SecondaryButton>
+      </template>
+    </PageHeader>
 
     <div class="profile-settings-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
       <div class="profile-settings-stack flex w-full flex-col gap-6">

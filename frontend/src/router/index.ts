@@ -43,6 +43,12 @@ export const router = createRouter({
       component: () => import('../views/ProfileView.vue'),
       meta: { auth: true },
     },
+    {
+      path: '/user-guide',
+      name: 'user-guide',
+      component: () => import('../views/UserGuideView.vue'),
+      meta: { auth: true, activeNav: 'profile' },
+    },
   ],
 })
 
