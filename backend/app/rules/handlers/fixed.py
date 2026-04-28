@@ -19,11 +19,15 @@ from backend.app.rules.domain.operators import (
     COMPARE_OPERATORS,
     SET_STYLE_OPERATORS,  # noqa: F401  保留导出，下游 Phase 2 拆分时复用
     evaluate_compare_assertion,
+    format_expected_value_set,
     is_not_null_violation,
     matches_compare_filter,
     matches_contains_filter,
+    matches_expected_text,
     matches_not_contains_filter,
     matches_not_null_filter,
+    normalize_expected_value_mode,
+    parse_expected_value_set,
 )
 from backend.app.rules.domain.result import build_fixed_result
 from backend.app.rules.domain.value import (
@@ -48,6 +52,21 @@ def _get_fixed_rule_param(rule: ValidationRule, param_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Rule '{rule.rule_type}' requires params.{param_name}.")
     return value.strip()
+
+
+def _get_fixed_rule_expected_value_mode(rule: ValidationRule) -> str:
+    """读取固定值比较模式，缺省保持历史单值语义。"""
+    try:
+        return normalize_expected_value_mode(rule.params.get("expected_value_mode"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Rule '{rule.rule_type}' requires params.expected_value_mode to be 'single' or 'set'."
+        ) from exc
+
+
+def _get_expected_value_set_display(expected_value: str) -> str:
+    """统一规则集异常提示里的值列表展示。"""
+    return format_expected_value_set(parse_expected_value_set(expected_value))
 
 
 def _parse_sequence_number(
@@ -251,6 +270,9 @@ def _apply_composite_filters(
                     actual_value=row[field],
                     operator=condition.operator,
                     expected_value=_resolve_condition_expected_value(row, variable, condition),
+                    expected_value_mode=condition.expected_value_mode
+                    if condition.value_source != "field"
+                    else None,
                 ),
                 axis=1,
             )
@@ -270,9 +292,18 @@ def _build_compare_failure_message(
 ) -> str:
     """生成组合变量比较断言失败的提示语。"""
     field_name = _get_field_display_name(variable, condition.field)
+    is_rule_set = (
+        condition.operator in {"eq", "ne"}
+        and condition.value_source != "field"
+        and normalize_expected_value_mode(condition.expected_value_mode) == "set"
+    )
     if condition.operator == "eq":
+        if is_rule_set:
+            return f"{branch_title}：{field_name} 应等于规则集中的任一值：{expected_display}。"
         return f"{branch_title}：{field_name} 应等于 {expected_display}。"
     if condition.operator == "ne":
+        if is_rule_set:
+            return f"{branch_title}：{field_name} 不应等于规则集中的任一值：{expected_display}。"
         return f"{branch_title}：{field_name} 不应等于 {expected_display}。"
     if condition.operator == "gt":
         return f"{branch_title}：{field_name} 应大于 {expected_display}。"
@@ -312,13 +343,21 @@ def _evaluate_row_assertion(
         expected_display = (
             _get_field_display_name(variable, condition.expected_field or "")
             if condition.value_source == "field"
-            else str(condition.expected_value or "")
+            else (
+                _get_expected_value_set_display(condition.expected_value or "")
+                if condition.operator in {"eq", "ne"}
+                and normalize_expected_value_mode(condition.expected_value_mode) == "set"
+                else str(condition.expected_value or "")
+            )
         )
 
         result = evaluate_compare_assertion(
             actual_value=actual_value,
             operator=condition.operator,
             expected_value=expected_value,
+            expected_value_mode=condition.expected_value_mode
+            if condition.value_source != "field"
+            else None,
         )
 
         if result.incomparable:
@@ -622,6 +661,7 @@ def check_fixed_value_compare(
     target_tag = _get_fixed_rule_param(rule, "target_tag")
     operator = _get_fixed_rule_param(rule, "operator")
     expected_value = _get_fixed_rule_param(rule, "expected_value")
+    expected_value_mode = _get_fixed_rule_expected_value_mode(rule)
     rule_name = _get_fixed_rule_param(rule, "rule_name")
 
     variable, frame, column_name = _get_single_variable_frame(
@@ -633,18 +673,33 @@ def check_fixed_value_compare(
     location = f"{variable.sheet} -> {column_name}"
 
     if operator in {"eq", "ne"}:
-        expected_text = expected_value.strip()
+        expected_display = (
+            _get_expected_value_set_display(expected_value)
+            if expected_value_mode == "set"
+            else expected_value.strip()
+        )
         for _, row in frame[[column_name, "_row_index"]].iterrows():
-            current_text = normalize_fixed_text(row[column_name])
-            is_match = current_text == expected_text
+            is_match = matches_expected_text(
+                actual_value=row[column_name],
+                expected_value=expected_value,
+                expected_value_mode=expected_value_mode,
+            )
             should_report = is_match if operator == "ne" else not is_match
             if not should_report:
                 continue
 
             message = (
-                f"该值不应等于 {expected_text}。"
+                (
+                    f"该值不应等于规则集中的任一值：{expected_display}。"
+                    if expected_value_mode == "set"
+                    else f"该值不应等于 {expected_display}。"
+                )
                 if operator == "ne"
-                else f"该值应等于 {expected_text}。"
+                else (
+                    f"该值应等于规则集中的任一值：{expected_display}。"
+                    if expected_value_mode == "set"
+                    else f"该值应等于 {expected_display}。"
+                )
             )
             abnormal_results.append(
                 build_fixed_result(

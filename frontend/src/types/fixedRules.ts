@@ -17,6 +17,7 @@ export type PipelineAssertionOperator =
   | 'unique'
   | 'duplicate_required'
 export type CompositeValueSource = 'literal' | 'field'
+export type ExpectedValueMode = 'single' | 'set'
 export type DualCompositeKeyCheckMode = 'baseline_only' | 'bidirectional'
 export type FixedRuleType =
   | 'fixed_value_compare'
@@ -47,6 +48,7 @@ export interface CompositeCondition {
   operator: CompositeConditionOperator
   value_source?: CompositeValueSource
   expected_value?: string
+  expected_value_mode?: ExpectedValueMode
   expected_field?: string
 }
 
@@ -93,6 +95,7 @@ export interface FixedRuleDefinition {
   rule_type: FixedRuleType
   operator?: FixedRuleOperator
   expected_value?: string
+  expected_value_mode?: ExpectedValueMode
   reference_variable_tag?: string
   sequence_direction?: SequenceDirection
   sequence_step?: string

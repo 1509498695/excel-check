@@ -26,6 +26,10 @@ from backend.app.api.schemas import DataSource, TaskTree, ValidationRule, Variab
 from backend.app.execution_pipeline import run_execution_pipeline
 from backend.app.loaders.local_reader import read_source_metadata
 from backend.app.loaders.svn_manager import update_svn_working_copy
+from backend.app.rules.domain.operators import (
+    normalize_expected_value_mode,
+    parse_expected_value_set,
+)
 from backend.app.utils.formatter import build_execution_response
 from backend.config import settings
 
@@ -81,6 +85,32 @@ SUPPORTED_LOCAL_SOURCE_SUFFIXES = {
     "local_excel": {".xls", ".xlsx"},
     "local_csv": {".csv"},
 }
+
+
+def _normalize_expected_value_mode_for_operator(
+    *,
+    operator: str,
+    expected_value: str,
+    expected_value_mode: str | None,
+    context: str,
+) -> str | None:
+    """校验固定值模式；仅 eq/ne 支持规则集。"""
+    try:
+        normalized_mode = normalize_expected_value_mode(expected_value_mode)
+    except ValueError as exc:
+        raise ValueError(f"{context} 的 expected_value_mode 仅支持 single 或 set。") from exc
+
+    if normalized_mode == "set":
+        if operator not in {"eq", "ne"}:
+            raise ValueError(f"{context} 只有等于/不等于支持规则集比较值。")
+        try:
+            parse_expected_value_set(expected_value)
+        except ValueError as exc:
+            raise ValueError(f"{context} 的规则集至少需要一个固定值。") from exc
+
+    return "set" if normalized_mode == "set" else None
+
+
 LEGACY_FIXED_RULE_KEYS = {"file_path", "sheet", "columns", "svn_enabled"}
 
 
@@ -543,6 +573,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
+                    expected_value_mode=rule.expected_value_mode,
                     reference_variable_tag=rule.reference_variable_tag,
                     sequence_direction=rule.sequence_direction,
                     sequence_step=rule.sequence_step,
@@ -566,6 +597,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
+                    expected_value_mode=rule.expected_value_mode,
                     reference_variable_tag=rule.reference_variable_tag,
                     sequence_direction=rule.sequence_direction,
                     sequence_step=rule.sequence_step,
@@ -635,6 +667,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 rule_type=rule.rule_type,
                 operator=rule.operator,
                 expected_value=rule.expected_value,
+                expected_value_mode=rule.expected_value_mode,
                 reference_variable_tag=rule.reference_variable_tag,
                 sequence_direction=rule.sequence_direction,
                 sequence_step=rule.sequence_step,
@@ -1009,6 +1042,7 @@ def _normalize_rules(
         rule_type = str(rule.rule_type).strip()
         operator = rule.operator.strip() if rule.operator else ""
         expected_value = rule.expected_value.strip() if rule.expected_value else ""
+        expected_value_mode = rule.expected_value_mode
         reference_variable_tag = (rule.reference_variable_tag or "").strip()
         sequence_direction = (rule.sequence_direction or "").strip()
         sequence_step = (rule.sequence_step or "").strip()
@@ -1036,6 +1070,7 @@ def _normalize_rules(
         variable_kind = target_variable.variable_kind or "single"
         normalized_operator: str | None = None
         normalized_expected_value: str | None = None
+        normalized_expected_value_mode: str | None = None
         normalized_reference_variable_tag: str | None = None
         normalized_sequence_direction: str | None = None
         normalized_sequence_step: str | None = None
@@ -1081,6 +1116,12 @@ def _normalize_rules(
                     raise ValueError(
                         f"???? '{rule_id}' ? expected_value ????????"
                     ) from exc
+            normalized_expected_value_mode = _normalize_expected_value_mode_for_operator(
+                operator=operator,
+                expected_value=expected_value,
+                expected_value_mode=expected_value_mode,
+                context=f"规则 '{rule_id}'",
+            )
             normalized_operator = operator
             normalized_expected_value = expected_value
         elif rule_type == "regex_check":
@@ -1184,6 +1225,7 @@ def _normalize_rules(
                 rule_type=rule_type,
                 operator=normalized_operator,
                 expected_value=normalized_expected_value,
+                expected_value_mode=normalized_expected_value_mode,
                 reference_variable_tag=normalized_reference_variable_tag,
                 sequence_direction=normalized_sequence_direction,
                 sequence_step=normalized_sequence_step,
@@ -1456,6 +1498,7 @@ def _normalize_composite_conditions(
         operator = str(condition.operator).strip()
         value_source = condition.value_source
         expected_value = condition.expected_value.strip() if condition.expected_value else ""
+        expected_value_mode = condition.expected_value_mode
         expected_field = condition.expected_field or ""
 
         if not condition_id:
@@ -1484,6 +1527,7 @@ def _normalize_composite_conditions(
 
         normalized_value_source: str | None = None
         normalized_expected_value: str | None = None
+        normalized_expected_value_mode: str | None = None
         normalized_expected_field: str | None = None
 
         if operator in COMPARE_STYLE_OPERATORS:
@@ -1498,8 +1542,18 @@ def _normalize_composite_conditions(
                         raise ValueError(
                             f"???? '{rule_id}' ?{section_label}? '{operator}' ????????????"
                         ) from exc
+                normalized_expected_value_mode = _normalize_expected_value_mode_for_operator(
+                    operator=operator,
+                    expected_value=expected_value,
+                    expected_value_mode=expected_value_mode,
+                    context=f"规则 '{rule_id}' 的{section_label}",
+                )
                 normalized_expected_value = expected_value
             elif normalized_value_source == "field":
+                if normalize_expected_value_mode(expected_value_mode) == "set":
+                    raise ValueError(
+                        f"规则 '{rule_id}' 的{section_label}字段对比不支持规则集比较值。"
+                    )
                 if not expected_field.strip():
                     raise ValueError(f"???? '{rule_id}' ?{section_label}?????????")
                 try:
@@ -1573,6 +1627,7 @@ def _normalize_composite_conditions(
                 operator=operator,
                 value_source=normalized_value_source,
                 expected_value=normalized_expected_value,
+                expected_value_mode=normalized_expected_value_mode,
                 expected_field=normalized_expected_field,
             )
         )
@@ -2031,6 +2086,7 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "operator": rule.operator,
             "expected_value": rule.expected_value,
+            "expected_value_mode": rule.expected_value_mode,
             "rule_name": rule.rule_name,
             "location": location,
         }

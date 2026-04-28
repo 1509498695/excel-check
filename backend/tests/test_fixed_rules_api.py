@@ -507,6 +507,198 @@ async def test_put_fixed_rules_config_persists_valid_v4_payload(
 
 
 @pytest.mark.anyio
+async def test_execute_fixed_rules_supports_expected_value_set_for_eq_ne(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验单变量等于/不等于规则支持逗号分隔的固定值规则集。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_expected_set.xlsx",
+        {"INT_ID": [0, 1, 2, 3], "DESC": ["a", "b", "c", "d"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[
+            {
+                "rule_id": "rule-int-id-in-set",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 应等于 0/1/2",
+                "target_variable_tag": target_tag,
+                "rule_type": "fixed_value_compare",
+                "operator": "eq",
+                "expected_value": "0, 1,2",
+                "expected_value_mode": "set",
+            },
+            {
+                "rule_id": "rule-int-id-not-in-set",
+                "group_id": "basic-checks",
+                "rule_name": "INT_ID 不应等于 2/4",
+                "target_variable_tag": target_tag,
+                "rule_type": "fixed_value_compare",
+                "operator": "ne",
+                "expected_value": "2,4",
+                "expected_value_mode": "set",
+            },
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    saved_rules = save_response.json()["data"]["rules"]
+    assert saved_rules[0]["expected_value_mode"] == "set"
+    assert saved_rules[1]["expected_value_mode"] == "set"
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert [item["rule_name"] for item in abnormal_results] == [
+        "INT_ID 应等于 0/1/2",
+        "INT_ID 不应等于 2/4",
+    ]
+    assert [item["raw_value"] for item in abnormal_results] == [3, 2]
+    assert "规则集中的任一值" in abnormal_results[0]["message"]
+    assert "规则集中的任一值" in abnormal_results[1]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_supports_expected_value_set_in_composite_rules(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证项目校验组合分支与串行节点里的固定值规则集可参与筛选和断言。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_composite_expected_set.xlsx",
+        {
+            "INT_ID": [1001, 1002, 1003, 1004],
+            "INT_Faction": [0, 1, 2, 3],
+            "INT_Group": ["A", "B", "C", "D"],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_composite_rule(
+                composite_variable["tag"],
+                rule_id="rule-composite-expected-set",
+                rule_name="组合分支规则集校验",
+            ),
+            _build_multi_composite_pipeline_rule(
+                composite_variable["tag"],
+                rule_id="rule-pipeline-expected-set",
+                rule_name="组合串行规则集校验",
+                nodes=[
+                    _build_pipeline_node(
+                        composite_variable["tag"],
+                        node_id="node-set",
+                        filters=[
+                            {
+                                "condition_id": "filter-faction-set",
+                                "field": "INT_Faction",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "2,3",
+                                "expected_value_mode": "set",
+                            }
+                        ],
+                        assertions=[
+                            {
+                                "condition_id": "assert-group-not-set",
+                                "field": "INT_Group",
+                                "operator": "ne",
+                                "value_source": "literal",
+                                "expected_value": "D",
+                                "expected_value_mode": "set",
+                            }
+                        ],
+                    )
+                ],
+            ),
+        ],
+    )
+    payload["rules"][0]["composite_config"] = {
+        "global_filters": [
+            {
+                "condition_id": "filter-faction-set",
+                "field": "INT_Faction",
+                "operator": "eq",
+                "value_source": "literal",
+                "expected_value": "0,1",
+                "expected_value_mode": "set",
+            }
+        ],
+        "branches": [
+            {
+                "branch_id": "branch-group-set",
+                "filters": [],
+                "assertions": [
+                    {
+                        "condition_id": "assert-group-set",
+                        "field": "INT_Group",
+                        "operator": "eq",
+                        "value_source": "literal",
+                        "expected_value": "A,C",
+                        "expected_value_mode": "set",
+                    }
+                ],
+            }
+        ],
+    }
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    saved_rules = save_response.json()["data"]["rules"]
+    assert saved_rules[0]["composite_config"]["global_filters"][0]["expected_value_mode"] == "set"
+    assert (
+        saved_rules[1]["pipeline_config"]["nodes"][0]["assertions"][0][
+            "expected_value_mode"
+        ]
+        == "set"
+    )
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert [item["rule_name"] for item in abnormal_results] == [
+        "组合分支规则集校验",
+        "组合串行规则集校验",
+    ]
+    assert [item["raw_value"] for item in abnormal_results] == ["B", "D"]
+    assert all("规则集中的任一值" in item["message"] for item in abnormal_results)
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_invalid_expected_value_set(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证规则集只能用于等于/不等于，且必须至少配置一个固定值。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "fixed_rules_invalid_expected_set.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    payload = _build_v4_payload(workbook_path)
+    payload["rules"][0]["expected_value_mode"] = "set"
+
+    async with _auth_client_ctx(auth_headers) as client:
+        gt_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        payload["rules"][0]["operator"] = "eq"
+        payload["rules"][0]["expected_value"] = ", ,"
+        empty_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert gt_response.status_code == 400
+    assert "规则集" in gt_response.json()["detail"]
+    assert empty_response.status_code == 400
+    assert "规则集" in empty_response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_put_fixed_rules_config_accepts_svn_excel_composite_variable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

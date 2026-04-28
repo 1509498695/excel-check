@@ -22,6 +22,7 @@ from backend.app.rules.domain.value import (
 
 COMPARE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SET_STYLE_OPERATORS = {"unique", "duplicate_required"}
+EXPECTED_VALUE_MODES = {"single", "set"}
 
 
 @dataclass(frozen=True)
@@ -32,11 +33,57 @@ class CompareAssertionResult:
     incomparable: bool = False
 
 
+def normalize_expected_value_mode(value: Any) -> str:
+    """缺省按单固定值处理，仅显式 set 启用逗号规则集。"""
+    if value is None:
+        return "single"
+    normalized = str(value).strip()
+    if not normalized:
+        return "single"
+    if normalized not in EXPECTED_VALUE_MODES:
+        raise ValueError("expected_value_mode must be 'single' or 'set'.")
+    return normalized
+
+
+def parse_expected_value_set(expected_value: Any) -> list[str]:
+    """把英文逗号分隔的规则集解析为归一化文本列表。"""
+    values: list[str] = []
+    for item in str(expected_value).split(","):
+        normalized = normalize_fixed_text(item)
+        if normalized:
+            values.append(normalized)
+    if not values:
+        raise ValueError("expected_value set must contain at least one value.")
+    return values
+
+
+def format_expected_value_set(expected_values: list[str]) -> str:
+    """规则集在异常信息中的展示文本。"""
+    return ", ".join(expected_values)
+
+
+def matches_expected_text(
+    *,
+    actual_value: Any,
+    expected_value: Any,
+    expected_value_mode: Any = None,
+) -> bool:
+    """eq/ne 共用的文本比较；set 模式命中任一值即视为匹配。"""
+    actual_text = normalize_fixed_text(actual_value)
+    mode = normalize_expected_value_mode(expected_value_mode)
+    if mode == "set":
+        return actual_text in parse_expected_value_set(expected_value)
+
+    expected_text = normalize_fixed_text(expected_value)
+    return actual_text == expected_text
+
+
 def matches_compare_filter(
     *,
     actual_value: Any,
     operator: str,
     expected_value: Any,
+    expected_value_mode: Any = None,
 ) -> bool:
     """筛选语义：True 表示行命中条件，应保留。
 
@@ -44,10 +91,16 @@ def matches_compare_filter(
     - eq/ne 走文本归一化后的相等比较
     - gt/lt 走数值比较；任一侧无法转数字时直接返回 False（行被剔除）
     """
+    mode = normalize_expected_value_mode(expected_value_mode)
+    if mode == "set" and operator not in {"eq", "ne"}:
+        raise ValueError("expected_value_mode='set' only supports eq/ne operators.")
+
     if operator in {"eq", "ne"}:
-        actual_text = normalize_fixed_text(actual_value)
-        expected_text = normalize_fixed_text(expected_value)
-        is_match = actual_text == expected_text
+        is_match = matches_expected_text(
+            actual_value=actual_value,
+            expected_value=expected_value,
+            expected_value_mode=mode,
+        )
         return is_match if operator == "eq" else not is_match
 
     actual_number = to_number(actual_value)
@@ -94,6 +147,7 @@ def evaluate_compare_assertion(
     actual_value: Any,
     operator: str,
     expected_value: Any,
+    expected_value_mode: Any = None,
 ) -> CompareAssertionResult:
     """断言语义：返回 ``failed`` / ``incomparable``。
 
@@ -102,10 +156,16 @@ def evaluate_compare_assertion(
     - gt/lt：任一侧无法转数字 → ``incomparable=True``（上报「无法按数值比较」）；
       数值化成功后按 ``<= / >=`` 判定 ``failed``
     """
+    mode = normalize_expected_value_mode(expected_value_mode)
+    if mode == "set" and operator not in {"eq", "ne"}:
+        raise ValueError("expected_value_mode='set' only supports eq/ne operators.")
+
     if operator in {"eq", "ne"}:
-        actual_text = normalize_fixed_text(actual_value)
-        expected_text = normalize_fixed_text(expected_value)
-        is_match = actual_text == expected_text
+        is_match = matches_expected_text(
+            actual_value=actual_value,
+            expected_value=expected_value,
+            expected_value_mode=mode,
+        )
         failed = not is_match if operator == "eq" else is_match
         return CompareAssertionResult(failed=failed)
 

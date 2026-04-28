@@ -32,6 +32,7 @@ import {
   isSingleVariable,
   isValidCompositeConfig,
   normalizeCompositeConfig,
+  normalizeExpectedValueMode,
   normalizeMultiCompositePipelineConfig,
   normalizeExpectedValue,
   pruneRulesByRemovedTags,
@@ -104,7 +105,7 @@ function createWorkbenchDemoRules(): FixedRuleDefinition[] {
     {
       rule_id: createEntityId('wb-rule'),
       group_id: gid,
-      rule_name: 'items-ID-大于+0',
+      rule_name: 'items-ID-大于-0',
       target_variable_tag: '[items-id]',
       rule_type: 'fixed_value_compare',
       operator: 'gt',
@@ -113,7 +114,7 @@ function createWorkbenchDemoRules(): FixedRuleDefinition[] {
     {
       rule_id: createEntityId('wb-rule'),
       group_id: gid,
-      rule_name: 'drops-RefID-大于+0',
+      rule_name: 'drops-RefID-大于-0',
       target_variable_tag: '[drops-ref]',
       rule_type: 'fixed_value_compare',
       operator: 'gt',
@@ -935,6 +936,10 @@ export const useWorkbenchStore = defineStore('workbench', {
         expected_value:
           rule.rule_type === 'fixed_value_compare' || rule.rule_type === 'regex_check'
             ? normalizeExpectedValue(rule.expected_value)
+            : undefined,
+        expected_value_mode:
+          rule.rule_type === 'fixed_value_compare' && (rule.operator === 'eq' || rule.operator === 'ne')
+            ? normalizeExpectedValueMode(rule.expected_value_mode)
             : undefined,
         reference_variable_tag:
           rule.rule_type === 'cross_table_mapping' || rule.rule_type === 'dual_composite_compare'

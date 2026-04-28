@@ -82,6 +82,7 @@ export function orchestrationRulesToValidationRules(
           target_tag: variable.tag,
           operator: rule.operator ?? 'gt',
           expected_value: rule.expected_value ?? '',
+          expected_value_mode: rule.expected_value_mode,
           rule_name: rule.rule_name,
           location: locationForSingle(variable),
         },

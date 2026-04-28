@@ -180,6 +180,160 @@ async def test_execute_engine_returns_three_rule_results() -> None:
 
 
 @pytest.mark.anyio
+async def test_execute_engine_supports_expected_value_set_for_eq_ne(
+    tmp_path: Path,
+) -> None:
+    """验证个人校验执行器的等于/不等于可使用英文逗号规则集。"""
+    workbook_path = tmp_path / "expected_value_set.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame({"ID": [0, 1, 2, 3]}).to_excel(
+            writer,
+            sheet_name="items",
+            index=False,
+        )
+
+    payload = {
+        "sources": [
+            {"id": "src_set", "type": "local_excel", "path": str(workbook_path)}
+        ],
+        "variables": [
+            {
+                "tag": "[items-id]",
+                "source_id": "src_set",
+                "sheet": "items",
+                "column": "ID",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "fixed_value_compare",
+                "params": {
+                    "target_tag": "[items-id]",
+                    "operator": "eq",
+                    "expected_value": "0, 1,2",
+                    "expected_value_mode": "set",
+                    "rule_name": "ID 必须属于 0/1/2",
+                    "location": "items -> ID",
+                },
+            },
+            {
+                "rule_type": "fixed_value_compare",
+                "params": {
+                    "target_tag": "[items-id]",
+                    "operator": "ne",
+                    "expected_value": "2,4",
+                    "expected_value_mode": "set",
+                    "rule_name": "ID 不应属于 2/4",
+                    "location": "items -> ID",
+                },
+            },
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert [item["rule_name"] for item in abnormal_results] == [
+        "ID 必须属于 0/1/2",
+        "ID 不应属于 2/4",
+    ]
+    assert abnormal_results[0]["raw_value"] == 3
+    assert abnormal_results[1]["raw_value"] == 2
+    assert "规则集中的任一值" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_supports_expected_value_set_in_composite_conditions(
+    tmp_path: Path,
+) -> None:
+    """验证组合变量筛选和断言中的固定值规则集也会生效。"""
+    workbook_path = tmp_path / "composite_expected_value_set.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1001, 1002, 1003, 1004],
+                "INT_Faction": [0, 1, 2, 3],
+                "INT_Group": ["A", "B", "C", "D"],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [
+            {
+                "id": "src_composite_set",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-composite]",
+                "source_id": "src_composite_set",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_Faction", "INT_Group"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "composite_condition_check",
+                "params": {
+                    "target_tag": "[items-composite]",
+                    "rule_name": "组合规则集校验",
+                    "composite_config": {
+                        "global_filters": [
+                            {
+                                "condition_id": "filter-faction-set",
+                                "field": "INT_Faction",
+                                "operator": "eq",
+                                "value_source": "literal",
+                                "expected_value": "0, 1",
+                                "expected_value_mode": "set",
+                            }
+                        ],
+                        "branches": [
+                            {
+                                "branch_id": "branch-group-set",
+                                "filters": [],
+                                "assertions": [
+                                    {
+                                        "condition_id": "assert-group-set",
+                                        "field": "INT_Group",
+                                        "operator": "eq",
+                                        "value_source": "literal",
+                                        "expected_value": "A,C",
+                                        "expected_value_mode": "set",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["raw_value"] == "B"
+    assert "规则集中的任一值" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
 async def test_execute_engine_filters_rules_by_selected_ids() -> None:
     """验证 selected_rule_ids 只会执行被勾选的规则。"""
     payload = {

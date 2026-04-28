@@ -21,6 +21,7 @@ FixedRuleType = Literal[
     "multi_composite_pipeline_check",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
+ExpectedValueMode = Literal["single", "set"]
 SequenceDirection = Literal["asc", "desc"]
 SequenceStartMode = Literal["auto", "manual"]
 CompositeFilterOperator = Literal[
@@ -82,6 +83,7 @@ class CompositeCondition(BaseModel):
     operator: CompositeFilterOperator | CompositeAssertionOperator
     value_source: CompositeValueSource | None = None
     expected_value: str | None = None
+    expected_value_mode: ExpectedValueMode | None = None
     expected_field: str | None = None
 
 
@@ -147,6 +149,7 @@ class FixedRuleDefinition(BaseModel):
     rule_type: FixedRuleType = "fixed_value_compare"
     operator: FixedRuleOperator | None = None
     expected_value: str | None = None
+    expected_value_mode: ExpectedValueMode | None = None
     reference_variable_tag: str | None = None
     sequence_direction: SequenceDirection | None = None
     sequence_step: str | None = None

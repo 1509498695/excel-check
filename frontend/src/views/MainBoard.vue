@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
@@ -19,6 +20,7 @@ import { useWorkbenchStore } from '../store/workbench'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
+const router = useRouter()
 
 type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
@@ -330,6 +332,11 @@ function openSourcePathReplacementDialog(): void {
   sourcePathReplacementDialogRef.value?.openDialog()
 }
 
+function openUserGuide(): void {
+  const guideUrl = router.resolve({ name: 'user-guide' }).href
+  window.open(guideUrl, '_blank', 'noopener,noreferrer')
+}
+
 function openSingleVariableCreate(): void {
   void variablePoolPanelRef.value?.openSingleCreateTab()
 }
@@ -392,6 +399,25 @@ function handleToggleVisibleRuleSelection(payload: {
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
     <PageHeader breadcrumb="主页 / 个人校验" title="配置表个人校验">
       <template #actions>
+        <PrimaryButton @click="openUserGuide">
+          <template #icon>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 19.5V5a2 2 0 0 1 2-2h10.5L20 6.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-1.5Z" />
+              <path d="M15 3v5h5" />
+              <path d="M8 12h8" />
+              <path d="M8 16h6" />
+            </svg>
+          </template>
+          系统使用说明
+        </PrimaryButton>
         <SecondaryButton
           v-if="store.pageError"
           @click="store.clearPageError()"

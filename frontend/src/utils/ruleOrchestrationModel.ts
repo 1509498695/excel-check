@@ -7,6 +7,7 @@ import type {
   CompositeBranch,
   CompositeCondition,
   CompositeRuleConfig,
+  ExpectedValueMode,
   FixedRuleDefinition,
   FixedRuleGroup,
   MultiCompositePipelineConfig,
@@ -35,6 +36,10 @@ export function ensureDefaultGroup(groups: FixedRuleGroup[]): FixedRuleGroup[] {
 export function normalizeExpectedValue(value: string | undefined): string | undefined {
   const normalized = value?.trim() ?? ''
   return normalized ? normalized : undefined
+}
+
+export function normalizeExpectedValueMode(value: ExpectedValueMode | undefined): ExpectedValueMode | undefined {
+  return value === 'set' ? 'set' : undefined
 }
 
 export function isCompareOperator(
@@ -109,6 +114,10 @@ export function normalizeCompositeCondition(condition: CompositeCondition): Comp
       value_source: valueSource,
       expected_value:
         valueSource === 'literal' ? normalizeExpectedValue(condition.expected_value) : undefined,
+      expected_value_mode:
+        valueSource === 'literal' && (operator === 'eq' || operator === 'ne')
+          ? normalizeExpectedValueMode(condition.expected_value_mode)
+          : undefined,
       expected_field:
         valueSource === 'field'
           ? preserveNonBlankIdentifier(condition.expected_field) || undefined

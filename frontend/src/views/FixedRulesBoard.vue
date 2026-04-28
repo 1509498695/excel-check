@@ -25,6 +25,7 @@ import type {
   CompositeFilterOperator,
   CompositeRuleConfig,
   DualCompositeComparison,
+  ExpectedValueMode,
   FixedRuleDefinition,
   FixedRuleOperator,
   FixedRuleSelection,
@@ -80,6 +81,7 @@ const ruleForm = reactive<{
   target_variable_tag: string
   selected_rule: FixedRuleSelection
   expected_value: string
+  expected_value_mode: ExpectedValueMode
   reference_variable_tag: string
   sequence_direction: 'asc' | 'desc'
   sequence_step: string
@@ -94,6 +96,7 @@ const ruleForm = reactive<{
   target_variable_tag: '',
   selected_rule: 'gt',
   expected_value: '0',
+  expected_value_mode: 'single',
   reference_variable_tag: '',
   sequence_direction: 'asc',
   sequence_step: '1',
@@ -195,6 +198,10 @@ const operatorSymbolMap: Record<FixedRuleOperator, string> = {
   gt: '>',
   lt: '<',
 }
+const expectedValueModeOptions: Array<{ label: string; value: ExpectedValueMode }> = [
+  { label: '固定值', value: 'single' },
+  { label: '规则集', value: 'set' },
+]
 
 const invalidRuleIdSet = computed(() => new Set(store.invalidRuleIds))
 const invalidGroupIdSet = computed(() => new Set(store.invalidGroupIds))
@@ -301,6 +308,9 @@ const shouldShowSequenceConfig = computed(
 const shouldShowManualSequenceStartValue = computed(
   () => shouldShowSequenceConfig.value && ruleForm.sequence_start_mode === 'manual',
 )
+const shouldShowSingleExpectedValueMode = computed(
+  () => ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne',
+)
 const isCompositeBranchRule = computed(
   () => ruleForm.rule_entry_type === 'composite',
 )
@@ -314,7 +324,9 @@ const expectedValuePlaceholder = computed(() =>
   ruleForm.selected_rule === 'regex_check'
     ? '输入完整正则表达式'
     : ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne'
-    ? '请输入要比较的精确值'
+    ? ruleForm.expected_value_mode === 'set'
+      ? '例如：0,1,2'
+      : '请输入要比较的精确值'
     : '请输入数值阈值',
 )
 const singleExpectedValueLabel = computed(() =>
@@ -549,8 +561,13 @@ watch(
     ruleForm.reference_variable_tag = ''
     if (!isCompareRuleSelection(selectedRule)) {
       ruleForm.expected_value = ''
+      ruleForm.expected_value_mode = 'single'
       syncRuleNameWithForm()
       return
+    }
+
+    if (selectedRule !== 'eq' && selectedRule !== 'ne') {
+      ruleForm.expected_value_mode = 'single'
     }
 
     if (!ruleForm.expected_value.trim() && (selectedRule === 'gt' || selectedRule === 'lt')) {
@@ -849,6 +866,36 @@ function isCompositeRegexOperator(
   return value === 'regex'
 }
 
+function normalizeExpectedValueMode(value: ExpectedValueMode | undefined): ExpectedValueMode {
+  return value === 'set' ? 'set' : 'single'
+}
+
+function parseExpectedValueSet(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function shouldShowConditionExpectedValueMode(condition: CompositeCondition): boolean {
+  return (
+    (condition.operator === 'eq' || condition.operator === 'ne') &&
+    (condition.value_source ?? 'literal') === 'literal'
+  )
+}
+
+function setRuleFormExpectedValueMode(value: string): void {
+  ruleForm.expected_value_mode = normalizeExpectedValueMode(value as ExpectedValueMode)
+}
+
+function setConditionExpectedValueMode(condition: CompositeCondition, value: string): void {
+  condition.expected_value_mode = normalizeExpectedValueMode(value as ExpectedValueMode)
+}
+
+function getExpectedValueModeHelpText(value: string): string {
+  return value.trim() ? '' : '多个固定值请用英文逗号分隔，例如：0,1,2。'
+}
+
 function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -860,6 +907,7 @@ function createCondition(): CompositeCondition {
     operator: 'eq',
     value_source: 'literal',
     expected_value: '',
+    expected_value_mode: 'single',
     expected_field: '',
   }
 }
@@ -1108,6 +1156,7 @@ function setConditionOperator(
   if (isCompositeContainsOperator(operator)) {
     condition.value_source = 'literal'
     condition.expected_field = undefined
+    condition.expected_value_mode = undefined
     if (typeof condition.expected_value !== 'string') {
       condition.expected_value = ''
     }
@@ -1116,6 +1165,7 @@ function setConditionOperator(
   if (isCompositeRegexOperator(operator)) {
     condition.value_source = undefined
     condition.expected_field = undefined
+    condition.expected_value_mode = undefined
     if (typeof condition.expected_value !== 'string') {
       condition.expected_value = ''
     }
@@ -1124,6 +1174,7 @@ function setConditionOperator(
   if (!isCompositeCompareOperator(operator)) {
     condition.value_source = undefined
     condition.expected_value = undefined
+    condition.expected_value_mode = undefined
     condition.expected_field = undefined
     return
   }
@@ -1133,8 +1184,14 @@ function setConditionOperator(
   }
   if (condition.value_source === 'field') {
     condition.expected_value = undefined
+    condition.expected_value_mode = undefined
   } else {
     condition.expected_field = undefined
+    if (operator !== 'eq' && operator !== 'ne') {
+      condition.expected_value_mode = undefined
+    } else {
+      condition.expected_value_mode = normalizeExpectedValueMode(condition.expected_value_mode)
+    }
   }
 }
 
@@ -1142,13 +1199,19 @@ function setConditionValueSource(condition: CompositeCondition, valueSource: 'li
   if (isCompositeContainsOperator(condition.operator)) {
     condition.value_source = 'literal'
     condition.expected_field = undefined
+    condition.expected_value_mode = undefined
     return
   }
   condition.value_source = valueSource
   if (valueSource === 'field') {
     condition.expected_value = undefined
+    condition.expected_value_mode = undefined
   } else {
     condition.expected_field = undefined
+    condition.expected_value_mode =
+      condition.operator === 'eq' || condition.operator === 'ne'
+        ? normalizeExpectedValueMode(condition.expected_value_mode)
+        : undefined
   }
 }
 
@@ -1176,6 +1239,9 @@ function getConditionExpectedValuePlaceholder(condition: CompositeCondition): st
   }
   if (isCompositeRegexOperator(condition.operator)) {
     return '输入完整正则表达式'
+  }
+  if (shouldShowConditionExpectedValueMode(condition) && condition.expected_value_mode === 'set') {
+    return '例如：0,1,2'
   }
   return '请输入比较值'
 }
@@ -1268,6 +1334,13 @@ function validateCompositeCondition(
 
   if (!condition.expected_value?.trim()) {
     return `${label}缺少比较值。`
+  }
+  if (
+    shouldShowConditionExpectedValueMode(condition) &&
+    condition.expected_value_mode === 'set' &&
+    parseExpectedValueSet(condition.expected_value).length === 0
+  ) {
+    return `${label}的规则集至少需要一个固定值。`
   }
   if ((condition.operator === 'gt' || condition.operator === 'lt') && Number.isNaN(Number(condition.expected_value))) {
     return `${label}的大于/小于比较值必须是合法数字。`
@@ -1427,14 +1500,14 @@ function buildDefaultRuleName(
       referenceVariable && (referenceVariable.variable_kind ?? 'single') === 'single'
         ? referenceVariable.column?.trim() || referenceVariable.tag
         : referenceVariableTag.trim()
-    return referenceColumn ? `${baseName}+${referenceColumn}` : baseName
+    return referenceColumn ? `${baseName}-${referenceColumn}` : baseName
   }
   if (!isCompareRuleSelection(selectedRule)) {
     return baseName
   }
 
   const normalizedExpectedValue = expectedValue.trim()
-  return normalizedExpectedValue ? `${baseName}+${normalizedExpectedValue}` : baseName
+  return normalizedExpectedValue ? `${baseName}-${normalizedExpectedValue}` : baseName
 }
 
 function buildDefaultRuleNameFromForm(): string {
@@ -1730,6 +1803,7 @@ function openCreateRuleDialog(): void {
   ruleForm.target_variable_tag = singleVariableOptions.value[0]?.tag ?? ''
   ruleForm.selected_rule = 'gt'
   ruleForm.expected_value = '0'
+  ruleForm.expected_value_mode = 'single'
   ruleForm.reference_variable_tag = ''
   ruleForm.sequence_direction = 'asc'
   ruleForm.sequence_step = '1'
@@ -1792,6 +1866,10 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
       rule.rule_type === 'fixed_value_compare' || rule.rule_type === 'regex_check'
         ? rule.expected_value ?? ''
         : ''
+    ruleForm.expected_value_mode =
+      rule.rule_type === 'fixed_value_compare' && (rule.operator === 'eq' || rule.operator === 'ne')
+        ? normalizeExpectedValueMode(rule.expected_value_mode)
+        : 'single'
     ruleForm.reference_variable_tag =
       rule.rule_type === 'cross_table_mapping' ? rule.reference_variable_tag ?? '' : ''
     ruleForm.sequence_direction = rule.rule_type === 'sequence_order_check' ? rule.sequence_direction ?? 'asc' : 'asc'
@@ -2022,6 +2100,14 @@ function validateRuleForm(): boolean {
     return false
   }
   if (
+    (ruleForm.selected_rule === 'eq' || ruleForm.selected_rule === 'ne') &&
+    ruleForm.expected_value_mode === 'set' &&
+    parseExpectedValueSet(ruleForm.expected_value).length === 0
+  ) {
+    ElMessage.warning('规则集至少需要填写一个固定值。')
+    return false
+  }
+  if (
     (ruleForm.selected_rule === 'gt' || ruleForm.selected_rule === 'lt') &&
     Number.isNaN(Number(ruleForm.expected_value))
   ) {
@@ -2105,6 +2191,10 @@ async function handleSaveRule(): Promise<void> {
         rule_type: 'fixed_value_compare',
         operator: selectedRule,
         expected_value: ruleForm.expected_value,
+        expected_value_mode:
+          selectedRule === 'eq' || selectedRule === 'ne'
+            ? normalizeExpectedValueMode(ruleForm.expected_value_mode)
+            : undefined,
       })
     } else if (selectedRule === 'in') {
       store.upsertRule({
@@ -2768,7 +2858,7 @@ async function handleSvnUpdate(): Promise<void> {
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则名称</label>
               <el-input
                 v-model="ruleForm.rule_name"
-                placeholder="例如：items-INT_ID-大于+0"
+                placeholder="例如：items-INT_ID-大于-0"
               />
             </div>
           </div>
@@ -2826,9 +2916,30 @@ async function handleSvnUpdate(): Promise<void> {
                 />
               </el-select>
             </div>
+            <div v-if="shouldShowExpectedValue && shouldShowSingleExpectedValueMode">
+              <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值类型</label>
+              <el-select
+                :model-value="ruleForm.expected_value_mode"
+                class="w-full"
+                @change="setRuleFormExpectedValueMode(String($event))"
+              >
+                <el-option
+                  v-for="option in expectedValueModeOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </div>
             <div v-if="shouldShowExpectedValue">
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">{{ singleExpectedValueLabel }}</label>
               <el-input v-model="ruleForm.expected_value" :placeholder="expectedValuePlaceholder" />
+              <p
+                v-if="ruleForm.expected_value_mode === 'set' && !ruleForm.expected_value.trim()"
+                class="mt-1 text-[12px] text-ink-500"
+              >
+                {{ getExpectedValueModeHelpText(ruleForm.expected_value) }}
+              </p>
             </div>
             <div v-else-if="shouldShowReferenceVariable">
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">比较值</label>
@@ -3136,6 +3247,21 @@ async function handleSvnUpdate(): Promise<void> {
                         <el-option label="字段" value="field" />
                       </el-select>
                     </div>
+                    <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                      <el-select
+                        :model-value="condition.expected_value_mode ?? 'single'"
+                        class="w-full"
+                        @change="setConditionExpectedValueMode(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in expectedValueModeOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">
                         {{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}
@@ -3144,6 +3270,12 @@ async function handleSvnUpdate(): Promise<void> {
                         v-model="condition.expected_value"
                         :placeholder="getConditionExpectedValuePlaceholder(condition)"
                       />
+                      <p
+                        v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                        class="mt-1 text-[12px] text-ink-500"
+                      >
+                        {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                      </p>
                     </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
@@ -3214,6 +3346,21 @@ async function handleSvnUpdate(): Promise<void> {
                         />
                       </el-select>
                     </div>
+                    <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                      <el-select
+                        :model-value="condition.expected_value_mode ?? 'single'"
+                        class="w-full"
+                        @change="setConditionExpectedValueMode(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in expectedValueModeOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
                     <div v-if="shouldShowConditionExpectedValue(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">
                         {{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}
@@ -3222,6 +3369,12 @@ async function handleSvnUpdate(): Promise<void> {
                         v-model="condition.expected_value"
                         :placeholder="getConditionExpectedValuePlaceholder(condition)"
                       />
+                      <p
+                        v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                        class="mt-1 text-[12px] text-ink-500"
+                      >
+                        {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                      </p>
                     </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
@@ -3309,12 +3462,33 @@ async function handleSvnUpdate(): Promise<void> {
                       <el-option label="字段" value="field" />
                     </el-select>
                   </div>
+                  <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                    <el-select
+                      :model-value="condition.expected_value_mode ?? 'single'"
+                      class="w-full"
+                      @change="setConditionExpectedValueMode(condition, String($event))"
+                    >
+                      <el-option
+                        v-for="option in expectedValueModeOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-select>
+                  </div>
                   <div v-if="shouldShowConditionExpectedValue(condition)">
                     <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
                     <el-input
                       v-model="condition.expected_value"
                       :placeholder="getConditionExpectedValuePlaceholder(condition)"
                     />
+                    <p
+                      v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                      class="mt-1 text-[12px] text-ink-500"
+                    >
+                      {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                    </p>
                   </div>
                   <div v-if="shouldShowConditionExpectedField(condition)">
                     <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
@@ -3424,16 +3598,37 @@ async function handleSvnUpdate(): Promise<void> {
                         @change="handleConditionValueSourceChange(condition, $event)"
                       >
                         <el-option label="固定值" value="literal" />
-                        <el-option label="字段" value="field" />
-                      </el-select>
-                    </div>
-                    <div v-if="shouldShowConditionExpectedValue(condition)">
-                      <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
-                      <el-input
-                        v-model="condition.expected_value"
-                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      <el-option label="字段" value="field" />
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                    <el-select
+                      :model-value="condition.expected_value_mode ?? 'single'"
+                      class="w-full"
+                      @change="setConditionExpectedValueMode(condition, String($event))"
+                    >
+                      <el-option
+                        v-for="option in expectedValueModeOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
                       />
-                    </div>
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValue(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
+                    <el-input
+                      v-model="condition.expected_value"
+                      :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                    />
+                    <p
+                      v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                      class="mt-1 text-[12px] text-ink-500"
+                    >
+                      {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                    </p>
+                  </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
                       <el-select v-model="condition.expected_field" class="w-full">
@@ -3512,16 +3707,37 @@ async function handleSvnUpdate(): Promise<void> {
                         @change="handleConditionValueSourceChange(condition, $event)"
                       >
                         <el-option label="固定值" value="literal" />
-                        <el-option label="字段" value="field" />
-                      </el-select>
-                    </div>
-                    <div v-if="shouldShowConditionExpectedValue(condition)">
-                      <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
-                      <el-input
-                        v-model="condition.expected_value"
-                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      <el-option label="字段" value="field" />
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                    <el-select
+                      :model-value="condition.expected_value_mode ?? 'single'"
+                      class="w-full"
+                      @change="setConditionExpectedValueMode(condition, String($event))"
+                    >
+                      <el-option
+                        v-for="option in expectedValueModeOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
                       />
-                    </div>
+                    </el-select>
+                  </div>
+                  <div v-if="shouldShowConditionExpectedValue(condition)">
+                    <label class="mb-1 block text-[12px] text-ink-500">{{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}</label>
+                    <el-input
+                      v-model="condition.expected_value"
+                      :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                    />
+                    <p
+                      v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                      class="mt-1 text-[12px] text-ink-500"
+                    >
+                      {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                    </p>
+                  </div>
                     <div v-if="shouldShowConditionExpectedField(condition)">
                       <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
                       <el-select v-model="condition.expected_field" class="w-full">

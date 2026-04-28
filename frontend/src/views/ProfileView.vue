@@ -12,7 +12,6 @@ import DataTable from '../components/shell/DataTable.vue'
 import EmptyState from '../components/shell/EmptyState.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
 import PrimaryButton from '../components/shell/PrimaryButton.vue'
-import SecondaryButton from '../components/shell/SecondaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
 import StatusBadge from '../components/shell/StatusBadge.vue'
 
@@ -118,7 +117,7 @@ function openUserGuide(): void {
   <div class="profile-settings-page flex h-full flex-col bg-canvas font-sans text-ink-700">
     <PageHeader breadcrumb="主页 / 个人设置" title="个人设置">
       <template #actions>
-        <SecondaryButton @click="openUserGuide">
+        <PrimaryButton @click="openUserGuide">
           <template #icon>
             <svg
               viewBox="0 0 24 24"
@@ -136,7 +135,7 @@ function openUserGuide(): void {
             </svg>
           </template>
           系统使用说明
-        </SecondaryButton>
+        </PrimaryButton>
       </template>
     </PageHeader>
 

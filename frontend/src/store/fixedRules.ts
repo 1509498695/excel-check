@@ -39,6 +39,7 @@ import {
   isSingleVariable,
   isValidCompositeConfig,
   normalizeCompositeConfig,
+  normalizeExpectedValueMode,
   normalizeMultiCompositePipelineConfig,
   normalizeExpectedValue,
   pruneRulesByRemovedTags,
@@ -1033,6 +1034,10 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         expected_value:
           rule.rule_type === 'fixed_value_compare' || rule.rule_type === 'regex_check'
             ? normalizeExpectedValue(rule.expected_value)
+            : undefined,
+        expected_value_mode:
+          rule.rule_type === 'fixed_value_compare' && (rule.operator === 'eq' || rule.operator === 'ne')
+            ? normalizeExpectedValueMode(rule.expected_value_mode)
             : undefined,
         reference_variable_tag:
           rule.rule_type === 'cross_table_mapping' || rule.rule_type === 'dual_composite_compare'
