@@ -1,10 +1,10 @@
 import type { ExpectedType, SourceType } from '../types/workbench'
 
 export const SOURCE_TYPE_OPTIONS: Array<{ label: string; value: SourceType; disabled?: boolean }> = [
+  { label: 'SVN（推荐 HTTP 链接）', value: 'svn' },
   { label: '本地 Excel (.xlsx / .xls)', value: 'local_excel' },
   { label: '本地 CSV（占位）(.csv)', value: 'local_csv', disabled: true },
   { label: '飞书表格（占位）', value: 'feishu', disabled: true },
-  { label: 'SVN（推荐 HTTP 链接）', value: 'svn' },
 ]
 
 export const EXPECTED_TYPE_OPTIONS: Array<{ label: string; value: ExpectedType }> = [
