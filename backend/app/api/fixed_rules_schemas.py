@@ -19,6 +19,7 @@ FixedRuleType = Literal[
     "composite_condition_check",
     "dual_composite_compare",
     "multi_composite_pipeline_check",
+    "multi_composite_mapping_check",
 ]
 FixedRuleOperator = Literal["eq", "ne", "gt", "lt"]
 ExpectedValueMode = Literal["single", "set"]
@@ -125,6 +126,66 @@ class MultiCompositePipelineConfig(BaseModel):
     nodes: list[MultiCompositePipelineNode] = Field(default_factory=list)
 
 
+class MultiCompositeMappingRange(BaseModel):
+    """描述旧版多组映射字段检查中的单段 Excel 行号范围。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    range_id: str
+    start_row: int
+    end_row: int
+    expected_value: str
+
+
+class MultiCompositeMappingFieldCheck(BaseModel):
+    """描述旧版多组映射校验中某一列字段的默认值与例外范围。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_id: str
+    field: str
+    default_expected_value: str
+    filters: list[CompositeCondition] = Field(default_factory=list)
+    ranges: list[MultiCompositeMappingRange] = Field(default_factory=list)
+
+
+class MultiCompositeMappingExclusionRange(BaseModel):
+    """描述多组映射筛选失败后可排除的 Excel 行号范围。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    range_id: str
+    start_row: int
+    end_row: int
+
+
+class MultiCompositeMappingFilter(CompositeCondition):
+    """描述多组映射校验中的单条筛选检查。"""
+
+    exclusion_ranges: list[MultiCompositeMappingExclusionRange] = Field(default_factory=list)
+
+
+class MultiCompositeMappingNode(BaseModel):
+    """描述多组映射校验中的单个组合变量节点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    variable_tag: str
+    filters: list[MultiCompositeMappingFilter] = Field(default_factory=list)
+    field_checks: list[MultiCompositeMappingFieldCheck] = Field(default_factory=list, exclude=True)
+    field: str | None = Field(default=None, exclude=True)
+    ranges: list[MultiCompositeMappingRange] | None = Field(default=None, exclude=True)
+
+
+class MultiCompositeMappingConfig(BaseModel):
+    """描述多组映射校验的完整节点队列。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[MultiCompositeMappingNode] = Field(default_factory=list)
+
+
 class DualCompositeComparison(BaseModel):
     """描述双组合变量比对中的单条字段比较规则。"""
 
@@ -159,6 +220,7 @@ class FixedRuleDefinition(BaseModel):
     key_check_mode: DualCompositeKeyCheckMode | None = None
     comparisons: list[DualCompositeComparison] = Field(default_factory=list)
     pipeline_config: MultiCompositePipelineConfig | None = None
+    mapping_config: MultiCompositeMappingConfig | None = None
 
 
 class FixedRulesConfigIssue(BaseModel):

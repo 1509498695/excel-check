@@ -28,11 +28,13 @@ import {
   createEntityId,
   ensureDefaultGroup,
   isCompositeVariable,
+  isValidMultiCompositeMappingConfig,
   isValidMultiCompositePipelineConfig,
   isSingleVariable,
   isValidCompositeConfig,
   normalizeCompositeConfig,
   normalizeExpectedValueMode,
+  normalizeMultiCompositeMappingConfig,
   normalizeMultiCompositePipelineConfig,
   normalizeExpectedValue,
   pruneRulesByRemovedTags,
@@ -356,6 +358,13 @@ export const useWorkbenchStore = defineStore('workbench', {
             return true
           }
 
+          if (rule.rule_type === 'multi_composite_pipeline_check') {
+            return !isValidMultiCompositePipelineConfig(rule.pipeline_config, variableMap)
+          }
+          if (rule.rule_type === 'multi_composite_mapping_check') {
+            return !isValidMultiCompositeMappingConfig(rule.mapping_config, variableMap)
+          }
+
           const targetTag = rule.target_variable_tag.trim()
           const variable = variableMap.get(targetTag)
           if (!targetTag || !variable) {
@@ -365,8 +374,7 @@ export const useWorkbenchStore = defineStore('workbench', {
           if (isSingleVariable(variable)) {
             if (
               rule.rule_type === 'composite_condition_check' ||
-              rule.rule_type === 'dual_composite_compare' ||
-              rule.rule_type === 'multi_composite_pipeline_check'
+              rule.rule_type === 'dual_composite_compare'
             ) {
               return true
             }
@@ -433,9 +441,6 @@ export const useWorkbenchStore = defineStore('workbench', {
           }
           if (rule.rule_type === 'dual_composite_compare') {
             return !isValidDualCompositeRule(rule, variableMap)
-          }
-          if (rule.rule_type === 'multi_composite_pipeline_check') {
-            return !isValidMultiCompositePipelineConfig(rule.pipeline_config, variableMap)
           }
           return true
         })
@@ -911,8 +916,18 @@ export const useWorkbenchStore = defineStore('workbench', {
         rule.rule_type === 'multi_composite_pipeline_check'
           ? normalizeMultiCompositePipelineConfig(rule.pipeline_config)
           : undefined
+      const normalizedMappingConfig =
+        rule.rule_type === 'multi_composite_mapping_check'
+          ? normalizeMultiCompositeMappingConfig(rule.mapping_config)
+          : undefined
       const variableMap = new Map(this.variables.map((variable) => [variable.tag, variable] as const))
-      const targetVariable = variableMap.get(rule.target_variable_tag.trim())
+      const normalizedTargetTag =
+        rule.rule_type === 'multi_composite_pipeline_check'
+          ? normalizedPipelineConfig?.nodes[0]?.variable_tag ?? rule.target_variable_tag
+          : rule.rule_type === 'multi_composite_mapping_check'
+          ? normalizedMappingConfig?.nodes[0]?.variable_tag ?? rule.target_variable_tag
+          : rule.target_variable_tag
+      const targetVariable = variableMap.get(normalizedTargetTag.trim())
       const referenceVariable =
         rule.rule_type === 'dual_composite_compare'
           ? variableMap.get(rule.reference_variable_tag?.trim() ?? '')
@@ -930,7 +945,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         rule_id: rule.rule_id ?? createEntityId('wb-rule'),
         group_id: rule.group_id,
         rule_name: rule.rule_name.trim(),
-        target_variable_tag: rule.target_variable_tag.trim(),
+        target_variable_tag: normalizedTargetTag.trim(),
         rule_type: rule.rule_type,
         operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
         expected_value:
@@ -959,6 +974,7 @@ export const useWorkbenchStore = defineStore('workbench', {
             : undefined,
         composite_config: normalizedCompositeConfig,
         pipeline_config: normalizedPipelineConfig,
+        mapping_config: normalizedMappingConfig,
         key_check_mode:
           rule.rule_type === 'dual_composite_compare'
             ? rule.key_check_mode ?? 'baseline_only'

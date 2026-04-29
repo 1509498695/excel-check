@@ -12,6 +12,9 @@ from backend.app.api.fixed_rules_schemas import (
     CompositeCondition,
     CompositeRuleConfig,
     DualCompositeComparison,
+    MultiCompositeMappingConfig,
+    MultiCompositeMappingExclusionRange,
+    MultiCompositeMappingFilter,
     MultiCompositePipelineConfig,
 )
 from backend.app.api.schemas import ValidationRule, VariableTag
@@ -37,6 +40,7 @@ from backend.app.rules.domain.value import (
 )
 from backend.app.rules.engine_core import RuleExecutionContext, register_rule
 from backend.app.rules.infrastructure.tag_extractor import (
+    by_mapping_node_tags,
     by_pipeline_node_tags,
     by_reference_and_target_tag,
     by_target_tag,
@@ -214,6 +218,23 @@ def _get_multi_composite_pipeline_config(
         ) from exc
 
 
+def _get_multi_composite_mapping_config(
+    rule: ValidationRule,
+) -> MultiCompositeMappingConfig:
+    """读取并校验多组映射校验规则配置。"""
+    config_payload = rule.params.get("mapping_config")
+    if not isinstance(config_payload, dict):
+        raise ValueError(
+            f"Rule '{rule.rule_type}' requires params.mapping_config."
+        )
+    try:
+        return MultiCompositeMappingConfig.model_validate(config_payload)
+    except Exception as exc:  # pragma: no cover - 非法配置由接口层先挡一层
+        raise ValueError(
+            f"Rule '{rule.rule_type}' provides invalid mapping_config: {exc}"
+        ) from exc
+
+
 def _resolve_condition_expected_value(
     row: pd.Series,
     variable: VariableTag,
@@ -241,46 +262,54 @@ def _apply_composite_filters(
 
     filtered = frame
     for condition in conditions:
-        field = condition.field
-        if field not in filtered.columns:
-            raise ValueError(
-                f"Composite variable '{variable.tag}' is missing field '{field}'."
-            )
-
-        series = filtered[field]
-        if condition.operator == "not_null":
-            mask = series.apply(matches_not_null_filter)
-        elif condition.operator == "contains":
-            mask = series.apply(
-                lambda value: matches_contains_filter(
-                    actual_value=value,
-                    expected_value=condition.expected_value,
-                )
-            )
-        elif condition.operator == "not_contains":
-            mask = series.apply(
-                lambda value: matches_not_contains_filter(
-                    actual_value=value,
-                    expected_value=condition.expected_value,
-                )
-            )
-        else:
-            mask = filtered.apply(
-                lambda row: matches_compare_filter(
-                    actual_value=row[field],
-                    operator=condition.operator,
-                    expected_value=_resolve_condition_expected_value(row, variable, condition),
-                    expected_value_mode=condition.expected_value_mode
-                    if condition.value_source != "field"
-                    else None,
-                ),
-                axis=1,
-            )
+        mask = _build_composite_filter_mask(filtered, variable, condition)
         filtered = filtered.loc[mask].copy()
         if filtered.empty:
             return filtered
 
     return filtered
+
+
+def _build_composite_filter_mask(
+    frame: pd.DataFrame,
+    variable: VariableTag,
+    condition: CompositeCondition,
+) -> pd.Series:
+    """生成单条组合变量筛选条件的命中布尔序列。"""
+    field = condition.field
+    if field not in frame.columns:
+        raise ValueError(
+            f"Composite variable '{variable.tag}' is missing field '{field}'."
+        )
+
+    series = frame[field]
+    if condition.operator == "not_null":
+        return series.apply(matches_not_null_filter)
+    if condition.operator == "contains":
+        return series.apply(
+            lambda value: matches_contains_filter(
+                actual_value=value,
+                expected_value=condition.expected_value,
+            )
+        )
+    if condition.operator == "not_contains":
+        return series.apply(
+            lambda value: matches_not_contains_filter(
+                actual_value=value,
+                expected_value=condition.expected_value,
+            )
+        )
+    return frame.apply(
+        lambda row: matches_compare_filter(
+            actual_value=row[field],
+            operator=condition.operator,
+            expected_value=_resolve_condition_expected_value(row, variable, condition),
+            expected_value_mode=condition.expected_value_mode
+            if condition.value_source != "field"
+            else None,
+        ),
+        axis=1,
+    )
 
 
 def _build_compare_failure_message(
@@ -611,6 +640,57 @@ def _evaluate_pipeline_node_assertions(
     return abnormal_results
 
 
+def _is_row_in_mapping_exclusion_ranges(
+    row_index: int,
+    ranges: list[MultiCompositeMappingExclusionRange],
+) -> bool:
+    """判断筛选失败行是否命中当前筛选的排除范围。"""
+    return any(row_range.start_row <= row_index <= row_range.end_row for row_range in ranges)
+
+
+def _evaluate_mapping_filter_check(
+    *,
+    variable: VariableTag,
+    node_title: str,
+    filter_title: str,
+    rule_name: str,
+    frame: pd.DataFrame,
+    condition: MultiCompositeMappingFilter,
+) -> list[dict[str, Any]]:
+    """按单条筛选条件检查失败行，并应用筛选失败排除行号范围。"""
+    abnormal_results: list[dict[str, Any]] = []
+    field = condition.field
+    location = _build_rule_location(variable, field)
+    field_name = _get_field_display_name(variable, field)
+    if field not in frame.columns:
+        raise ValueError(f"Mapping rule references unknown field '{field}'.")
+
+    matched_mask = _build_composite_filter_mask(frame, variable, condition)
+    failed_frame = frame.loc[~matched_mask].copy()
+    if failed_frame.empty:
+        return abnormal_results
+
+    for _, row in failed_frame.iterrows():
+        row_index = int(row["_row_index"])
+        actual_value = row[field]
+        if _is_row_in_mapping_exclusion_ranges(row_index, condition.exclusion_ranges):
+            continue
+        abnormal_results.append(
+            build_fixed_result(
+                row_index=row_index,
+                raw_value=actual_value,
+                rule_name=rule_name,
+                location=location,
+                message=(
+                    f"{node_title} / {filter_title}：Excel 第 {row_index} 行未通过筛选条件，"
+                    f"字段 {field_name} 未命中筛选失败排除行号范围。"
+                ),
+            )
+        )
+
+    return abnormal_results
+
+
 @register_rule("regex_check", dependent_tags=by_target_tag)
 def check_regex_check(
     rule: ValidationRule,
@@ -926,6 +1006,42 @@ def check_multi_composite_pipeline_check(
             return node_abnormal_results
 
     return []
+
+
+@register_rule("multi_composite_mapping_check", dependent_tags=by_mapping_node_tags)
+def check_multi_composite_mapping_check(
+    rule: ValidationRule,
+    context: RuleExecutionContext,
+) -> list[dict[str, Any]]:
+    """执行多组映射校验；所有节点独立执行并汇总异常。"""
+    rule_name = _get_fixed_rule_param(rule, "rule_name")
+    mapping_config = _get_multi_composite_mapping_config(rule)
+    abnormal_results: list[dict[str, Any]] = []
+
+    for node_index, node in enumerate(mapping_config.nodes, start=1):
+        variable, frame = _get_composite_variable_frame(
+            context,
+            node.variable_tag,
+            rule.rule_type,
+        )
+
+        node_title = f"映射节点 {node_index}"
+        for filter_index, condition in enumerate(
+            node.filters,
+            start=1,
+        ):
+            abnormal_results.extend(
+                _evaluate_mapping_filter_check(
+                    variable=variable,
+                    node_title=node_title,
+                    filter_title=f"筛选条件 {filter_index}",
+                    rule_name=rule_name,
+                    frame=frame,
+                    condition=condition,
+                )
+            )
+
+    return abnormal_results
 
 
 @register_rule("dual_composite_compare", dependent_tags=by_reference_and_target_tag)

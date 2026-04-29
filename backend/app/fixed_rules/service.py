@@ -17,6 +17,10 @@ from backend.app.api.fixed_rules_schemas import (
     FixedRuleGroup,
     FixedRulesConfig,
     FixedRulesConfigIssue,
+    MultiCompositeMappingConfig,
+    MultiCompositeMappingExclusionRange,
+    MultiCompositeMappingFilter,
+    MultiCompositeMappingNode,
     MultiCompositePipelineConfig,
     MultiCompositePipelineNode,
     UNGROUPED_GROUP_ID,
@@ -46,6 +50,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "composite_condition_check",
     "dual_composite_compare",
     "multi_composite_pipeline_check",
+    "multi_composite_mapping_check",
 }
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
 SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
@@ -168,19 +173,26 @@ def parse_raw_fixed_rules_config(raw: dict) -> FixedRulesConfig:
 
 def load_fixed_rules_config_with_issues(
     config: FixedRulesConfig | None = None,
+    *,
+    allow_legacy_mapping_config: bool = False,
 ) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
     """从文件或传入的配置加载并校验固定规则，返回配置与问题列表。"""
     if config is not None:
         return _validate_and_normalize_fixed_rules_config(
             _ensure_v4_config(config),
             allow_runtime_issues=True,
+            allow_legacy_mapping_config=allow_legacy_mapping_config,
         )
-    return _load_fixed_rules_config_payload(allow_runtime_issues=True)
+    return _load_fixed_rules_config_payload(
+        allow_runtime_issues=True,
+        allow_legacy_mapping_config=allow_legacy_mapping_config,
+    )
 
 
 def _load_fixed_rules_config_payload(
     *,
     allow_runtime_issues: bool,
+    allow_legacy_mapping_config: bool = False,
 ) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
     """?????????????"""
     config_path = settings.fixed_rules_config_path
@@ -196,6 +208,7 @@ def _load_fixed_rules_config_payload(
     return _validate_and_normalize_fixed_rules_config(
         raw_config,
         allow_runtime_issues=allow_runtime_issues,
+        allow_legacy_mapping_config=allow_legacy_mapping_config,
     )
 
 
@@ -366,6 +379,10 @@ def build_fixed_rules_task_tree(
                 node.variable_tag
                 for node in (rule.pipeline_config.nodes if rule.pipeline_config else [])
             ],
+            *[
+                node.variable_tag
+                for node in (rule.mapping_config.nodes if rule.mapping_config else [])
+            ],
         ]
         if tag
     }
@@ -378,7 +395,10 @@ def build_fixed_rules_task_tree(
         ValidationRule(
             rule_id=rule.rule_id,
             rule_type=rule.rule_type,
-            params=_build_fixed_rule_params(rule, variable_map[rule.target_variable_tag]),
+            params=_build_fixed_rule_params(
+                rule,
+                variable_map[_get_primary_rule_target_tag(rule)],
+            ),
         )
         for rule in ordered_rules
     ]
@@ -389,6 +409,15 @@ def build_fixed_rules_task_tree(
         rules=task_rules,
         selected_rule_ids=selected_rule_ids,
     )
+
+
+def _get_primary_rule_target_tag(rule: FixedRuleDefinition) -> str:
+    """返回规则参数里用于兼容 target_tag 的主变量。"""
+    if rule.rule_type == "multi_composite_pipeline_check" and rule.pipeline_config:
+        return rule.pipeline_config.nodes[0].variable_tag
+    if rule.rule_type == "multi_composite_mapping_check" and rule.mapping_config:
+        return rule.mapping_config.nodes[0].variable_tag
+    return rule.target_variable_tag
 
 
 def validate_and_normalize_fixed_rules_config(
@@ -406,6 +435,7 @@ def _validate_and_normalize_fixed_rules_config(
     config: FixedRulesConfig,
     *,
     allow_runtime_issues: bool,
+    allow_legacy_mapping_config: bool = False,
 ) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
     """???????????????????????????"""
     migrated_config = _ensure_v4_config(config)
@@ -433,6 +463,7 @@ def _validate_and_normalize_fixed_rules_config(
         migrated_config.rules,
         group_ids={group.group_id for group in groups},
         variable_map=variable_map,
+        allow_legacy_mapping_config=allow_legacy_mapping_config,
     )
 
     configured = bool(
@@ -583,6 +614,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     key_check_mode=rule.key_check_mode,
                     comparisons=rule.comparisons,
                     pipeline_config=rule.pipeline_config,
+                    mapping_config=rule.mapping_config,
                 )
             )
             continue
@@ -607,6 +639,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     key_check_mode=rule.key_check_mode,
                     comparisons=rule.comparisons,
                     pipeline_config=rule.pipeline_config,
+                    mapping_config=rule.mapping_config,
                 )
             )
             continue
@@ -677,6 +710,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 key_check_mode=rule.key_check_mode,
                 comparisons=rule.comparisons,
                 pipeline_config=rule.pipeline_config,
+                mapping_config=rule.mapping_config,
             )
         )
 
@@ -1029,6 +1063,7 @@ def _normalize_rules(
     *,
     group_ids: set[str],
     variable_map: dict[str, VariableTag],
+    allow_legacy_mapping_config: bool = False,
 ) -> list[FixedRuleDefinition]:
     """???????????????????????"""
     normalized_rules: list[FixedRuleDefinition] = []
@@ -1055,19 +1090,25 @@ def _normalize_rules(
             raise ValueError(f"???? ID ???'{rule_id}'?")
         if group_id not in group_ids:
             raise ValueError(f"???? '{rule_id}' ?????????? '{group_id}'?")
-        if not rule_name:
-            raise ValueError(f"???? '{rule_id}' ?? rule_name?")
-        if not target_variable_tag:
-            raise ValueError(f"???? '{rule_id}' ?? target_variable_tag?")
-        if target_variable_tag not in variable_map:
-            raise ValueError(
-                f"???? '{rule_id}' ????????? '{target_variable_tag}'?"
-            )
         if rule_type not in SUPPORTED_FIXED_RULE_TYPES:
             raise ValueError(f"???? '{rule_id}' ??????? rule_type '{rule_type}'?")
 
-        target_variable = variable_map[target_variable_tag]
-        variable_kind = target_variable.variable_kind or "single"
+        if not rule_name:
+            raise ValueError(f"???? '{rule_id}' ?? rule_name?")
+
+        is_node_driven_rule = rule_type in {
+            "multi_composite_pipeline_check",
+            "multi_composite_mapping_check",
+        }
+        target_variable = variable_map.get(target_variable_tag)
+        if not is_node_driven_rule:
+            if not target_variable_tag:
+                raise ValueError(f"???? '{rule_id}' ?? target_variable_tag?")
+            if target_variable is None:
+                raise ValueError(
+                    f"???? '{rule_id}' ????????? '{target_variable_tag}'?"
+                )
+        variable_kind = (target_variable.variable_kind or "single") if target_variable else ""
         normalized_operator: str | None = None
         normalized_expected_value: str | None = None
         normalized_expected_value_mode: str | None = None
@@ -1080,27 +1121,24 @@ def _normalize_rules(
         normalized_key_check_mode: DualCompositeKeyCheckMode | None = None
         normalized_dual_comparisons: list[DualCompositeComparison] = []
         normalized_pipeline_config: MultiCompositePipelineConfig | None = None
+        normalized_mapping_config: MultiCompositeMappingConfig | None = None
 
-        if variable_kind == "single" and rule_type == "composite_condition_check":
-            raise ValueError(
-                f"???? '{rule_id}' ???????? '{target_variable_tag}'????????????????"
-            )
-        if variable_kind == "single" and rule_type == "dual_composite_compare":
-            raise ValueError(
-                f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存双组合变量比对。"
-            )
-        if variable_kind == "single" and rule_type == "multi_composite_pipeline_check":
-            raise ValueError(
-                f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存多组合变量串行校验。"
-            )
-        if variable_kind == "composite" and rule_type not in {
-            "composite_condition_check",
-            "dual_composite_compare",
-            "multi_composite_pipeline_check",
-        }:
-            raise ValueError(
-                f"???? '{rule_id}' ???????? '{target_variable_tag}'???????????????"
-            )
+        if not is_node_driven_rule:
+            if variable_kind == "single" and rule_type == "composite_condition_check":
+                raise ValueError(
+                    f"???? '{rule_id}' ???????? '{target_variable_tag}'????????????????"
+                )
+            if variable_kind == "single" and rule_type == "dual_composite_compare":
+                raise ValueError(
+                    f"规则 '{rule_id}' 引用了单变量 '{target_variable_tag}'，不能保存双组合变量比对。"
+                )
+            if variable_kind == "composite" and rule_type not in {
+                "composite_condition_check",
+                "dual_composite_compare",
+            }:
+                raise ValueError(
+                    f"规则 '{rule_id}' 引用了组合变量 '{target_variable_tag}'，不能保存单变量规则。"
+                )
 
         if rule_type == "fixed_value_compare":
             if operator not in SUPPORTED_FIXED_RULE_OPERATORS:
@@ -1211,10 +1249,18 @@ def _normalize_rules(
         elif rule_type == "multi_composite_pipeline_check":
             normalized_pipeline_config = _normalize_multi_composite_pipeline_config(
                 rule_id=rule_id,
-                target_variable_tag=target_variable_tag,
                 pipeline_config=rule.pipeline_config,
                 variable_map=variable_map,
             )
+            target_variable_tag = normalized_pipeline_config.nodes[0].variable_tag
+        elif rule_type == "multi_composite_mapping_check":
+            normalized_mapping_config = _normalize_multi_composite_mapping_config(
+                rule_id=rule_id,
+                mapping_config=rule.mapping_config,
+                variable_map=variable_map,
+                allow_legacy_mapping_config=allow_legacy_mapping_config,
+            )
+            target_variable_tag = normalized_mapping_config.nodes[0].variable_tag
 
         normalized_rules.append(
             FixedRuleDefinition(
@@ -1235,6 +1281,7 @@ def _normalize_rules(
                 key_check_mode=normalized_key_check_mode,
                 comparisons=normalized_dual_comparisons,
                 pipeline_config=normalized_pipeline_config,
+                mapping_config=normalized_mapping_config,
             )
         )
         seen_rule_ids.add(rule_id)
@@ -1308,7 +1355,6 @@ def _normalize_composite_rule_config(
 def _normalize_multi_composite_pipeline_config(
     *,
     rule_id: str,
-    target_variable_tag: str,
     pipeline_config: MultiCompositePipelineConfig | None,
     variable_map: dict[str, VariableTag],
 ) -> MultiCompositePipelineConfig:
@@ -1372,12 +1418,170 @@ def _normalize_multi_composite_pipeline_config(
         )
         seen_node_ids.add(node_id)
 
-    if normalized_nodes[0].variable_tag != target_variable_tag:
-        raise ValueError(
-            f"规则 '{rule_id}' 的 target_variable_tag 必须与首个节点变量保持一致。"
+    return MultiCompositePipelineConfig(nodes=normalized_nodes)
+
+
+def _normalize_multi_composite_mapping_config(
+    *,
+    rule_id: str,
+    mapping_config: MultiCompositeMappingConfig | None,
+    variable_map: dict[str, VariableTag],
+    allow_legacy_mapping_config: bool = False,
+) -> MultiCompositeMappingConfig:
+    """校验并规范多组映射校验配置。"""
+    if mapping_config is None:
+        raise ValueError(f"规则 '{rule_id}' 缺少 mapping_config。")
+    if not mapping_config.nodes:
+        raise ValueError(f"规则 '{rule_id}' 至少需要一个映射节点。")
+
+    normalized_nodes: list[MultiCompositeMappingNode] = []
+    seen_node_ids: set[str] = set()
+
+    for node_index, node in enumerate(mapping_config.nodes, start=1):
+        node_id = node.node_id.strip()
+        variable_tag = (node.variable_tag or "").strip()
+        if not node_id:
+            raise ValueError(f"规则 '{rule_id}' 的映射节点 {node_index} 缺少 node_id。")
+        if node_id in seen_node_ids:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点存在重复 node_id '{node_id}'。"
+            )
+        if not variable_tag:
+            raise ValueError(f"规则 '{rule_id}' 的映射节点 {node_index} 缺少 variable_tag。")
+        if variable_tag not in variable_map:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 引用了不存在的组合变量 '{variable_tag}'。"
+            )
+
+        variable = variable_map[variable_tag]
+        if (variable.variable_kind or "single") != "composite":
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 引用了单变量 '{variable_tag}'，"
+                "多组映射校验仅支持组合变量。"
+            )
+
+        available_fields = _collect_composite_available_fields(variable)
+        filters = _normalize_multi_composite_mapping_filters(
+            rule_id=rule_id,
+            conditions=node.filters,
+            node_index=node_index,
+            available_fields=available_fields,
+        )
+        if not filters:
+            if allow_legacy_mapping_config and _has_legacy_mapping_node_content(node):
+                normalized_nodes.append(
+                    MultiCompositeMappingNode(
+                        node_id=node_id,
+                        variable_tag=variable_tag,
+                        filters=[],
+                    )
+                )
+                seen_node_ids.add(node_id)
+                continue
+            raise ValueError(f"规则 '{rule_id}' 的映射节点 {node_index} 至少需要一条筛选条件。")
+
+        normalized_nodes.append(
+            MultiCompositeMappingNode(
+                node_id=node_id,
+                variable_tag=variable_tag,
+                filters=filters,
+            )
+        )
+        seen_node_ids.add(node_id)
+
+    return MultiCompositeMappingConfig(nodes=normalized_nodes)
+
+
+def _has_legacy_mapping_node_content(node: MultiCompositeMappingNode) -> bool:
+    """识别旧版字段检查配置，读取时允许丢弃，保存时仍要求重配筛选。"""
+    return bool(node.field_checks or node.field or node.ranges)
+
+
+def _normalize_multi_composite_mapping_filters(
+    *,
+    rule_id: str,
+    conditions: list[MultiCompositeMappingFilter],
+    node_index: int,
+    available_fields: list[str],
+) -> list[MultiCompositeMappingFilter]:
+    """校验并规范单个映射节点下的筛选检查列表。"""
+    normalized_conditions = _normalize_composite_conditions(
+        rule_id=rule_id,
+        conditions=conditions,
+        section_label=f"映射节点 {node_index} 的筛选条件",
+        available_fields=available_fields,
+        allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+    )
+    normalized_filters: list[MultiCompositeMappingFilter] = []
+
+    for filter_index, condition in enumerate(conditions, start=1):
+        normalized_condition = normalized_conditions[filter_index - 1]
+        exclusion_ranges = _normalize_multi_composite_mapping_exclusion_ranges(
+            rule_id=rule_id,
+            node_index=node_index,
+            filter_index=filter_index,
+            ranges=condition.exclusion_ranges,
+        )
+        normalized_filters.append(
+            MultiCompositeMappingFilter(
+                **normalized_condition.model_dump(mode="python"),
+                exclusion_ranges=exclusion_ranges,
+            )
         )
 
-    return MultiCompositePipelineConfig(nodes=normalized_nodes)
+    return normalized_filters
+
+
+def _normalize_multi_composite_mapping_exclusion_ranges(
+    *,
+    rule_id: str,
+    node_index: int,
+    filter_index: int,
+    ranges: list[MultiCompositeMappingExclusionRange],
+) -> list[MultiCompositeMappingExclusionRange]:
+    """校验并规范单条筛选失败后的排除行号范围。"""
+    if not ranges:
+        return []
+
+    normalized_ranges: list[MultiCompositeMappingExclusionRange] = []
+    seen_range_ids: set[str] = set()
+
+    for range_index, row_range in enumerate(ranges, start=1):
+        range_id = row_range.range_id.strip()
+        start_row = row_range.start_row
+        end_row = row_range.end_row
+
+        if not range_id:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                f"第 {range_index} 段排除范围缺少 range_id。"
+            )
+        if range_id in seen_range_ids:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                f"存在重复 range_id '{range_id}'。"
+            )
+        if start_row <= 0 or end_row <= 0:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                f"第 {range_index} 段排除范围行号必须大于 0。"
+            )
+        if start_row > end_row:
+            raise ValueError(
+                f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                f"第 {range_index} 段排除范围开始行不能大于结束行。"
+            )
+
+        seen_range_ids.add(range_id)
+        normalized_ranges.append(
+            MultiCompositeMappingExclusionRange(
+                range_id=range_id,
+                start_row=start_row,
+                end_row=end_row,
+            )
+        )
+
+    return normalized_ranges
 
 
 def _normalize_dual_composite_rule(
@@ -2076,6 +2280,15 @@ def _build_fixed_rule_params(
             "rule_name": rule.rule_name,
             "pipeline_config": rule.pipeline_config.model_dump(mode="json", exclude_none=True)
             if rule.pipeline_config
+            else None,
+        }
+
+    if rule.rule_type == "multi_composite_mapping_check":
+        return {
+            "target_tag": target_variable.tag,
+            "rule_name": rule.rule_name,
+            "mapping_config": rule.mapping_config.model_dump(mode="json", exclude_none=True)
+            if rule.mapping_config
             else None,
         }
 

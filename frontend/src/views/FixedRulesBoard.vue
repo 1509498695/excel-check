@@ -29,6 +29,10 @@ import type {
   FixedRuleDefinition,
   FixedRuleOperator,
   FixedRuleSelection,
+  MultiCompositeMappingConfig,
+  MultiCompositeMappingExclusionRange,
+  MultiCompositeMappingFilter,
+  MultiCompositeMappingNode,
   MultiCompositePipelineConfig,
   MultiCompositePipelineNode,
   PipelineAssertionOperator,
@@ -36,7 +40,12 @@ import type {
 import type { DataSource, VariableTag } from '../types/workbench'
 
 type ConditionMode = 'filter' | 'assertion'
-type RuleEntryType = 'single' | 'composite' | 'dual_composite' | 'multi_composite_pipeline'
+type RuleEntryType =
+  | 'single'
+  | 'composite'
+  | 'dual_composite'
+  | 'multi_composite_pipeline'
+  | 'multi_composite_mapping'
 type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
 type SectionKey = 'source' | 'variable' | 'rule' | 'result'
@@ -114,6 +123,9 @@ const dualCompositeComparisons = ref<DualCompositeComparison[]>([])
 const pipelineRuleForm = reactive<MultiCompositePipelineConfig>({
   nodes: [],
 })
+const mappingRuleForm = reactive<MultiCompositeMappingConfig>({
+  nodes: [],
+})
 
 const ruleSelectionOptions: Array<{ label: string; value: FixedRuleSelection }> = [
   { label: '等于 (=)', value: 'eq' },
@@ -131,6 +143,7 @@ const ruleEntryTypeOptions: Array<{ label: string; value: RuleEntryType }> = [
   { label: '组合分支校验', value: 'composite' },
   { label: '跨组变量校验', value: 'dual_composite' },
   { label: '多组串行校验', value: 'multi_composite_pipeline' },
+  { label: '多组映射校验', value: 'multi_composite_mapping' },
 ]
 const dualCompositeOperatorOptions: Array<{ label: string; value: FixedRuleOperator | 'not_null' }> = [
   { label: '等于 (=)', value: 'eq' },
@@ -191,6 +204,7 @@ const ruleSelectionNameMap: Record<FixedRuleSelection, string> = {
   composite_condition_check: '组合分支校验',
   dual_composite_compare: '跨组变量校验',
   multi_composite_pipeline_check: '多组串行校验',
+  multi_composite_mapping_check: '多组映射校验',
 }
 const operatorSymbolMap: Record<FixedRuleOperator, string> = {
   eq: '=',
@@ -319,6 +333,12 @@ const isDualCompositeRule = computed(
 )
 const isMultiCompositePipelineRule = computed(
   () => ruleForm.rule_entry_type === 'multi_composite_pipeline',
+)
+const isMultiCompositeMappingRule = computed(
+  () => ruleForm.rule_entry_type === 'multi_composite_mapping',
+)
+const shouldShowTopTargetVariable = computed(
+  () => !isMultiCompositePipelineRule.value && !isMultiCompositeMappingRule.value,
 )
 const expectedValuePlaceholder = computed(() =>
   ruleForm.selected_rule === 'regex_check'
@@ -488,6 +508,12 @@ const currentGroupVariableCount = computed(() => {
       if (pipelineTags.length) {
         return pipelineTags
       }
+      const mappingTags = (rule.mapping_config?.nodes ?? [])
+        .map((node) => node.variable_tag.trim())
+        .filter(Boolean)
+      if (mappingTags.length) {
+        return mappingTags
+      }
       return [rule.target_variable_tag.trim()].filter(Boolean)
     }),
   )
@@ -503,6 +529,10 @@ const svnResultStats = computed(() => {
 watch(
   () => ruleForm.selected_rule,
   (selectedRule) => {
+    if (isInitializingRuleDialog.value) {
+      return
+    }
+
     if (selectedRule === 'dual_composite_compare') {
       ruleForm.expected_value = ''
       if (
@@ -522,8 +552,22 @@ watch(
       ruleForm.key_check_mode = 'baseline_only'
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetMappingConfig()
       if (!pipelineRuleForm.nodes.length) {
-        resetPipelineConfig(ruleForm.target_variable_tag)
+        resetPipelineConfig()
+      }
+      syncRuleNameWithForm()
+      return
+    }
+    if (selectedRule === 'multi_composite_mapping_check') {
+      ruleForm.expected_value = ''
+      ruleForm.reference_variable_tag = ''
+      ruleForm.key_check_mode = 'baseline_only'
+      resetCompositeConfig()
+      resetDualCompositeComparisons()
+      resetPipelineConfig()
+      if (!mappingRuleForm.nodes.length) {
+        resetMappingConfig()
       }
       syncRuleNameWithForm()
       return
@@ -581,11 +625,16 @@ watch(
 watch(
   () => ruleForm.rule_entry_type,
   (entryType) => {
+    if (isInitializingRuleDialog.value) {
+      return
+    }
+
     if (entryType === 'single') {
       if (
         ruleForm.selected_rule === 'composite_condition_check' ||
         ruleForm.selected_rule === 'dual_composite_compare' ||
-        ruleForm.selected_rule === 'multi_composite_pipeline_check'
+        ruleForm.selected_rule === 'multi_composite_pipeline_check' ||
+        ruleForm.selected_rule === 'multi_composite_mapping_check'
       ) {
         ruleForm.selected_rule = 'gt'
       }
@@ -593,6 +642,7 @@ watch(
       resetCompositeConfig()
       resetDualCompositeComparisons()
       resetPipelineConfig()
+      resetMappingConfig()
     } else if (entryType === 'composite') {
       ruleForm.selected_rule = 'composite_condition_check'
       ruleForm.expected_value = ''
@@ -600,6 +650,7 @@ watch(
       ruleForm.key_check_mode = 'baseline_only'
       resetDualCompositeComparisons()
       resetPipelineConfig()
+      resetMappingConfig()
       resetCompositeConfig()
     } else if (entryType === 'dual_composite') {
       ruleForm.selected_rule = 'dual_composite_compare'
@@ -608,17 +659,29 @@ watch(
       resetCompositeConfig()
       resetPipelineConfig()
       resetDualCompositeComparisons()
-    } else {
+      resetMappingConfig()
+    } else if (entryType === 'multi_composite_pipeline') {
       ruleForm.selected_rule = 'multi_composite_pipeline_check'
       ruleForm.expected_value = ''
       ruleForm.reference_variable_tag = ''
       ruleForm.key_check_mode = 'baseline_only'
       resetCompositeConfig()
       resetDualCompositeComparisons()
-      resetPipelineConfig(ruleForm.target_variable_tag)
+      resetPipelineConfig()
+      resetMappingConfig()
+    } else {
+      ruleForm.selected_rule = 'multi_composite_mapping_check'
+      ruleForm.expected_value = ''
+      ruleForm.reference_variable_tag = ''
+      ruleForm.key_check_mode = 'baseline_only'
+      resetCompositeConfig()
+      resetDualCompositeComparisons()
+      resetPipelineConfig()
+      resetMappingConfig()
     }
 
     if (
+      shouldShowTopTargetVariable.value &&
       ruleForm.target_variable_tag &&
       !filteredTargetVariableOptions.value.some(
         (variable) => variable.tag === ruleForm.target_variable_tag,
@@ -652,9 +715,16 @@ watch(
     () => dualCompositeComparisons.value.length,
     () => pipelineRuleForm.nodes.length,
     () => pipelineRuleForm.nodes.map((node) => `${node.node_id}:${node.variable_tag}`).join('|'),
+    () => mappingRuleForm.nodes.length,
+    () => mappingRuleForm.nodes.map((node) => `${node.node_id}:${node.variable_tag}`).join('|'),
   ],
   () => {
+    if (isInitializingRuleDialog.value) {
+      return
+    }
+
     if (
+      shouldShowTopTargetVariable.value &&
       ruleForm.target_variable_tag &&
       !filteredTargetVariableOptions.value.some(
         (variable) => variable.tag === ruleForm.target_variable_tag,
@@ -675,13 +745,6 @@ watch(
     ) {
       ruleForm.reference_variable_tag = ''
     }
-    if (
-      isMultiCompositePipelineRule.value &&
-      pipelineRuleForm.nodes[0] &&
-      ruleForm.target_variable_tag !== pipelineRuleForm.nodes[0].variable_tag
-    ) {
-      ruleForm.target_variable_tag = pipelineRuleForm.nodes[0].variable_tag
-    }
     syncRuleNameWithForm()
   },
 )
@@ -689,15 +752,32 @@ watch(
 watch(
   () => ruleForm.target_variable_tag,
   (targetVariableTag) => {
-    if (!isMultiCompositePipelineRule.value) {
+    if (isInitializingRuleDialog.value) {
       return
     }
-    if (!pipelineRuleForm.nodes.length) {
+
+    if (!shouldShowTopTargetVariable.value) {
+      return
+    }
+    if (isMultiCompositePipelineRule.value && !pipelineRuleForm.nodes.length) {
       resetPipelineConfig(targetVariableTag)
       return
     }
-    if (pipelineRuleForm.nodes[0].variable_tag !== targetVariableTag) {
+    if (
+      isMultiCompositePipelineRule.value &&
+      pipelineRuleForm.nodes[0]?.variable_tag !== targetVariableTag
+    ) {
       pipelineRuleForm.nodes[0].variable_tag = getDefaultCompositeVariableTag(targetVariableTag)
+    }
+    if (isMultiCompositeMappingRule.value && !mappingRuleForm.nodes.length) {
+      resetMappingConfig(targetVariableTag)
+      return
+    }
+    if (
+      isMultiCompositeMappingRule.value &&
+      mappingRuleForm.nodes[0]?.variable_tag !== targetVariableTag
+    ) {
+      handleMappingNodeVariableChange(0, getDefaultCompositeVariableTag(targetVariableTag))
     }
   },
 )
@@ -949,6 +1029,30 @@ function createPipelineNode(preferredVariableTag = ''): MultiCompositePipelineNo
   }
 }
 
+function createMappingExclusionRange(startRow = 2): MultiCompositeMappingExclusionRange {
+  return {
+    range_id: createId('mapping-range'),
+    start_row: startRow,
+    end_row: startRow,
+  }
+}
+
+function createMappingFilter(): MultiCompositeMappingFilter {
+  return {
+    ...createCondition(),
+    exclusion_ranges: [],
+  }
+}
+
+function createMappingNode(preferredVariableTag = ''): MultiCompositeMappingNode {
+  const variableTag = getDefaultCompositeVariableTag(preferredVariableTag)
+  return {
+    node_id: createId('mapping-node'),
+    variable_tag: variableTag,
+    filters: [],
+  }
+}
+
 function normalizeCompositeConfig(config?: CompositeRuleConfig): CompositeRuleConfig {
   return {
     global_filters: (config?.global_filters ?? []).map((condition) => ({
@@ -994,6 +1098,9 @@ function getRuleEntryTypeBySelection(selection: FixedRuleSelection): RuleEntryTy
   }
   if (selection === 'multi_composite_pipeline_check') {
     return 'multi_composite_pipeline'
+  }
+  if (selection === 'multi_composite_mapping_check') {
+    return 'multi_composite_mapping'
   }
   if (selection === 'composite_condition_check') {
     return 'composite'
@@ -1042,6 +1149,46 @@ function applyPipelineConfig(
 
 function resetPipelineConfig(preferredVariableTag = ''): void {
   applyPipelineConfig(undefined, preferredVariableTag)
+}
+
+function normalizeMappingConfig(
+  config?: MultiCompositeMappingConfig,
+  preferredVariableTag = '',
+): MultiCompositeMappingConfig {
+  const fallbackVariableTag = getDefaultCompositeVariableTag(preferredVariableTag)
+  const nextNodes = (config?.nodes?.length ? config.nodes : [createMappingNode(fallbackVariableTag)]).map(
+    (node, index) => {
+      const variableTag = getDefaultCompositeVariableTag(
+        node.variable_tag || (index === 0 ? fallbackVariableTag : ''),
+      )
+      return {
+        node_id: node.node_id || createId('mapping-node'),
+        variable_tag: variableTag,
+        filters: (node.filters ?? []).map((condition) => ({
+          ...condition,
+          condition_id: condition.condition_id || createId('condition'),
+          exclusion_ranges: (condition.exclusion_ranges ?? []).map((range) => ({
+            range_id: range.range_id || createId('mapping-range'),
+            start_row: Number(range.start_row) || 1,
+            end_row: Number(range.end_row) || 1,
+          })),
+        })),
+      }
+    },
+  )
+  return { nodes: nextNodes }
+}
+
+function applyMappingConfig(
+  config?: MultiCompositeMappingConfig,
+  preferredVariableTag = '',
+): void {
+  const next = normalizeMappingConfig(config, preferredVariableTag)
+  mappingRuleForm.nodes = next.nodes
+}
+
+function resetMappingConfig(preferredVariableTag = ''): void {
+  applyMappingConfig(undefined, preferredVariableTag)
 }
 
 function addPipelineNode(): void {
@@ -1099,9 +1246,72 @@ function handlePipelineNodeVariableChange(nodeIndex: number, value: string): voi
     return
   }
   node.variable_tag = value
-  if (nodeIndex === 0) {
-    ruleForm.target_variable_tag = value
+}
+
+function addMappingNode(): void {
+  mappingRuleForm.nodes.push(createMappingNode())
+}
+
+function removeMappingNode(nodeId: string): void {
+  mappingRuleForm.nodes = mappingRuleForm.nodes.filter((node) => node.node_id !== nodeId)
+}
+
+function moveMappingNode(nodeId: string, direction: 'up' | 'down'): void {
+  const currentIndex = mappingRuleForm.nodes.findIndex((node) => node.node_id === nodeId)
+  if (currentIndex < 0) {
+    return
   }
+  const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+  if (targetIndex < 0 || targetIndex >= mappingRuleForm.nodes.length) {
+    return
+  }
+  const nextNodes = [...mappingRuleForm.nodes]
+  const [currentNode] = nextNodes.splice(currentIndex, 1)
+  nextNodes.splice(targetIndex, 0, currentNode)
+  mappingRuleForm.nodes = nextNodes
+}
+
+function addMappingNodeFilter(node: MultiCompositeMappingNode): void {
+  node.filters.push(createMappingFilter())
+}
+
+function removeMappingNodeFilter(node: MultiCompositeMappingNode, conditionId: string): void {
+  node.filters = node.filters.filter((condition) => condition.condition_id !== conditionId)
+}
+
+function getMappingNodeVariable(node: MultiCompositeMappingNode): VariableTag | null {
+  return variableMap.value.get(node.variable_tag) ?? null
+}
+
+function getMappingNodeFieldOptions(
+  node: MultiCompositeMappingNode,
+): Array<{ label: string; value: string }> {
+  return buildCompositeFieldOptions(getMappingNodeVariable(node))
+}
+
+function handleMappingNodeVariableChange(nodeIndex: number, value: string): void {
+  const node = mappingRuleForm.nodes[nodeIndex]
+  if (!node) {
+    return
+  }
+  node.variable_tag = value
+  node.filters = []
+}
+
+function getNextMappingExclusionRangeStart(condition: MultiCompositeMappingFilter): number {
+  if (!condition.exclusion_ranges.length) {
+    return 2
+  }
+  const lastEnd = Math.max(...condition.exclusion_ranges.map((range) => Number(range.end_row) || 1))
+  return lastEnd + 1
+}
+
+function addMappingExclusionRange(condition: MultiCompositeMappingFilter): void {
+  condition.exclusion_ranges.push(createMappingExclusionRange(getNextMappingExclusionRangeStart(condition)))
+}
+
+function removeMappingExclusionRange(condition: MultiCompositeMappingFilter, rangeId: string): void {
+  condition.exclusion_ranges = condition.exclusion_ranges.filter((range) => range.range_id !== rangeId)
 }
 
 function addGlobalFilter(): void {
@@ -1374,6 +1584,54 @@ function validateDualCompositeComparison(
   return null
 }
 
+function getMappingRangeStartError(range: MultiCompositeMappingExclusionRange): string {
+  if (range.start_row == null) {
+    return '请输入起始行号'
+  }
+  const startRow = Number(range.start_row)
+  if (!Number.isInteger(startRow) || startRow <= 0) {
+    return '行号必须为正整数'
+  }
+  const endRow = Number(range.end_row)
+  if (Number.isInteger(endRow) && endRow > 0 && startRow > endRow) {
+    return '起始行号不能大于结束行号'
+  }
+  return ''
+}
+
+function getMappingRangeEndError(range: MultiCompositeMappingExclusionRange): string {
+  if (range.end_row == null) {
+    return '请输入结束行号'
+  }
+  const endRow = Number(range.end_row)
+  if (!Number.isInteger(endRow) || endRow <= 0) {
+    return '行号必须为正整数'
+  }
+  const startRow = Number(range.start_row)
+  if (Number.isInteger(startRow) && startRow > 0 && startRow > endRow) {
+    return '起始行号不能大于结束行号'
+  }
+  return ''
+}
+
+function validateMappingExclusionRanges(
+  ranges: MultiCompositeMappingExclusionRange[],
+  label: string,
+): string | null {
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index]
+    const startError = getMappingRangeStartError(range)
+    if (startError) {
+      return `${label}第 ${index + 1} 段排除范围：${startError}。`
+    }
+    const endError = getMappingRangeEndError(range)
+    if (endError) {
+      return `${label}第 ${index + 1} 段排除范围：${endError}。`
+    }
+  }
+  return null
+}
+
 function getDualCompositeOperatorLabel(operator: FixedRuleOperator | 'not_null'): string {
   if (operator === 'not_null') {
     return '都非空'
@@ -1486,6 +1744,9 @@ function buildDefaultRuleName(
     if (selectedRule === 'multi_composite_pipeline_check') {
       return `${normalizedSheet}-${variable.tag}-多组串行校验`
     }
+    if (selectedRule === 'multi_composite_mapping_check') {
+      return `${normalizedSheet}-${variable.tag}-多组映射校验`
+    }
     return `${normalizedSheet}-${variable.tag}-组合分支校验`
   }
   const normalizedColumn = variable.column?.trim() ?? ''
@@ -1511,8 +1772,14 @@ function buildDefaultRuleName(
 }
 
 function buildDefaultRuleNameFromForm(): string {
+  const nodeVariable =
+    isMultiCompositePipelineRule.value
+      ? variableMap.value.get(pipelineRuleForm.nodes[0]?.variable_tag ?? '') ?? null
+      : isMultiCompositeMappingRule.value
+      ? variableMap.value.get(mappingRuleForm.nodes[0]?.variable_tag ?? '') ?? null
+      : selectedRuleVariable.value
   return buildDefaultRuleName(
-    selectedRuleVariable.value,
+    nodeVariable,
     ruleForm.selected_rule,
     ruleForm.expected_value,
     ruleForm.reference_variable_tag,
@@ -1643,6 +1910,18 @@ function buildRuleCondition(rule: FixedRuleDefinition): string {
       })
       .join('；')
   }
+  if (rule.rule_type === 'multi_composite_mapping_check') {
+    const nodes = rule.mapping_config?.nodes ?? []
+    return nodes
+      .map((node, index) => {
+        const exclusionRangeCount = node.filters.reduce(
+          (total, condition) => total + (condition.exclusion_ranges?.length ?? 0),
+          0,
+        )
+        return `映射节点 ${index + 1}：${node.filters.length} 条筛选，${exclusionRangeCount} 段排除范围`
+      })
+      .join('；')
+  }
   if (rule.rule_type === 'not_null') {
     return `${columnName} 非空校验`
   }
@@ -1671,6 +1950,10 @@ function buildRuleSelectionSummary(rule: FixedRuleDefinition): string {
   if (rule.rule_type === 'multi_composite_pipeline_check') {
     const nodeCount = rule.pipeline_config?.nodes.length ?? 0
     return nodeCount <= 1 ? '1 个组合变量' : `${nodeCount} 个多组串行节点`
+  }
+  if (rule.rule_type === 'multi_composite_mapping_check') {
+    const nodeCount = rule.mapping_config?.nodes.length ?? 0
+    return nodeCount <= 1 ? '1 个映射节点' : `${nodeCount} 个映射节点`
   }
   if (rule.rule_type === 'composite_condition_check') {
     return '组合分支校验'
@@ -1793,7 +2076,7 @@ async function handleRemoveGroup(): Promise<void> {
   }
 }
 
-function openCreateRuleDialog(): void {
+async function openCreateRuleDialog(): Promise<void> {
   isInitializingRuleDialog.value = true
   ruleDialogMode.value = 'create'
   ruleForm.rule_id = ''
@@ -1813,14 +2096,16 @@ function openCreateRuleDialog(): void {
   resetCompositeConfig()
   resetDualCompositeComparisons()
   resetPipelineConfig()
+  resetMappingConfig()
   isRuleNameManuallyEdited.value = false
   lastAutoGeneratedRuleName.value = ''
+  isRuleDialogVisible.value = true
+  await nextTick()
   isInitializingRuleDialog.value = false
   syncRuleNameWithForm()
-  isRuleDialogVisible.value = true
 }
 
-function openEditRuleDialog(rule: FixedRuleDefinition): void {
+async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
   isInitializingRuleDialog.value = true
   ruleDialogMode.value = 'edit'
   ruleForm.rule_id = rule.rule_id
@@ -1836,6 +2121,7 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
     applyCompositeConfig(rule.composite_config)
     resetDualCompositeComparisons()
     resetPipelineConfig(rule.target_variable_tag ?? '')
+    resetMappingConfig(rule.target_variable_tag ?? '')
   } else if (rule.rule_type === 'dual_composite_compare') {
     ruleForm.selected_rule = 'dual_composite_compare'
     ruleForm.expected_value = ''
@@ -1848,6 +2134,7 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
     resetCompositeConfig()
     applyDualCompositeComparisons(rule.comparisons)
     resetPipelineConfig(rule.target_variable_tag ?? '')
+    resetMappingConfig(rule.target_variable_tag ?? '')
   } else if (rule.rule_type === 'multi_composite_pipeline_check') {
     ruleForm.selected_rule = 'multi_composite_pipeline_check'
     ruleForm.expected_value = ''
@@ -1860,6 +2147,20 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
     resetCompositeConfig()
     resetDualCompositeComparisons()
     applyPipelineConfig(rule.pipeline_config, rule.target_variable_tag ?? '')
+    resetMappingConfig(rule.target_variable_tag ?? '')
+  } else if (rule.rule_type === 'multi_composite_mapping_check') {
+    ruleForm.selected_rule = 'multi_composite_mapping_check'
+    ruleForm.expected_value = ''
+    ruleForm.reference_variable_tag = ''
+    ruleForm.sequence_direction = 'asc'
+    ruleForm.sequence_step = '1'
+    ruleForm.sequence_start_mode = 'auto'
+    ruleForm.sequence_start_value = ''
+    ruleForm.key_check_mode = 'baseline_only'
+    resetCompositeConfig()
+    resetDualCompositeComparisons()
+    resetPipelineConfig(rule.target_variable_tag ?? '')
+    applyMappingConfig(rule.mapping_config, rule.target_variable_tag ?? '')
   } else {
     ruleForm.selected_rule = getRuleSelectionValue(rule)
     ruleForm.expected_value =
@@ -1882,6 +2183,7 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
     resetCompositeConfig()
     resetDualCompositeComparisons()
     resetPipelineConfig(rule.target_variable_tag ?? '')
+    resetMappingConfig(rule.target_variable_tag ?? '')
   }
   const defaultRuleName = buildDefaultRuleName(
     resolveRuleVariable(rule),
@@ -1896,8 +2198,9 @@ function openEditRuleDialog(rule: FixedRuleDefinition): void {
   if (!normalizedRuleName || normalizedRuleName === defaultRuleName) {
     applySystemRuleName(defaultRuleName)
   }
-  isInitializingRuleDialog.value = false
   isRuleDialogVisible.value = true
+  await nextTick()
+  isInitializingRuleDialog.value = false
 }
 
 function validateRuleForm(): boolean {
@@ -1905,25 +2208,28 @@ function validateRuleForm(): boolean {
     ElMessage.warning('规则名称不能为空。')
     return false
   }
-  if (!ruleForm.target_variable_tag.trim()) {
-    ElMessage.warning('请先选择目标变量。')
-    return false
-  }
 
   const variable = selectedRuleVariable.value
-  if (!variable) {
-    ElMessage.warning('当前目标变量不存在，请重新选择。')
-    return false
-  }
+  if (shouldShowTopTargetVariable.value) {
+    if (!ruleForm.target_variable_tag.trim()) {
+      ElMessage.warning('请先选择目标变量。')
+      return false
+    }
 
-  if (isSingleRuleEntry.value && (variable.variable_kind ?? 'single') !== 'single') {
-    ElMessage.warning('单一变量校验只能选择单变量。')
-    return false
-  }
+    if (!variable) {
+      ElMessage.warning('当前目标变量不存在，请重新选择。')
+      return false
+    }
 
-  if (isCompositeRuleEntry.value && (variable.variable_kind ?? 'single') !== 'composite') {
-    ElMessage.warning('当前规则类型只能选择组合变量。')
-    return false
+    if (isSingleRuleEntry.value && (variable.variable_kind ?? 'single') !== 'single') {
+      ElMessage.warning('单一变量校验只能选择单变量。')
+      return false
+    }
+
+    if (isCompositeRuleEntry.value && (variable.variable_kind ?? 'single') !== 'composite') {
+      ElMessage.warning('当前规则类型只能选择组合变量。')
+      return false
+    }
   }
 
   if (ruleForm.rule_entry_type === 'dual_composite') {
@@ -2056,6 +2362,55 @@ function validateRuleForm(): boolean {
     return true
   }
 
+  if (ruleForm.rule_entry_type === 'multi_composite_mapping') {
+    if (!mappingRuleForm.nodes.length) {
+      ElMessage.warning('多组映射校验至少需要一个节点。')
+      return false
+    }
+
+    for (let nodeIndex = 0; nodeIndex < mappingRuleForm.nodes.length; nodeIndex += 1) {
+      const node = mappingRuleForm.nodes[nodeIndex]
+      if (!node.variable_tag.trim()) {
+        ElMessage.warning(`映射节点 ${nodeIndex + 1} 缺少组合变量。`)
+        return false
+      }
+      const nodeVariable = getMappingNodeVariable(node)
+      if (!nodeVariable || (nodeVariable.variable_kind ?? 'single') !== 'composite') {
+        ElMessage.warning(`映射节点 ${nodeIndex + 1} 只能选择组合变量。`)
+        return false
+      }
+      const nodeFieldOptions = getMappingNodeFieldOptions(node)
+      if (!node.filters.length) {
+        ElMessage.warning(`映射节点 ${nodeIndex + 1} 至少需要一条筛选条件。`)
+        return false
+      }
+      for (let filterIndex = 0; filterIndex < node.filters.length; filterIndex += 1) {
+        const filterLabel = `映射节点 ${nodeIndex + 1} 的筛选条件 ${filterIndex + 1}`
+        const error = validateCompositeCondition(
+          node.filters[filterIndex],
+          'filter',
+          filterLabel,
+          nodeFieldOptions,
+        )
+        if (error) {
+          ElMessage.warning(error)
+          return false
+        }
+        const rangeError = validateMappingExclusionRanges(
+          node.filters[filterIndex].exclusion_ranges,
+          `${filterLabel} 的`,
+        )
+        if (rangeError) {
+          ElMessage.warning(rangeError)
+          return false
+        }
+      }
+    }
+
+    ruleForm.target_variable_tag = mappingRuleForm.nodes[0]?.variable_tag ?? ''
+    return true
+  }
+
   if (!shouldShowExpectedValue.value) {
     if (ruleForm.selected_rule === 'sequence_order_check') {
       if (!ruleForm.sequence_step.trim()) {
@@ -2157,6 +2512,21 @@ async function handleSaveRule(): Promise<void> {
         target_variable_tag: firstNodeVariableTag,
         rule_type: 'multi_composite_pipeline_check',
         pipeline_config: normalizedPipelineConfig,
+      })
+    } else if (ruleForm.rule_entry_type === 'multi_composite_mapping') {
+      const normalizedMappingConfig = normalizeMappingConfig(
+        mappingRuleForm,
+        ruleForm.target_variable_tag,
+      )
+      const firstNodeVariableTag = normalizedMappingConfig.nodes[0]?.variable_tag ?? ''
+      ruleForm.target_variable_tag = firstNodeVariableTag
+      store.upsertRule({
+        rule_id: ruleForm.rule_id || undefined,
+        group_id: ruleForm.group_id,
+        rule_name: ruleForm.rule_name,
+        target_variable_tag: firstNodeVariableTag,
+        rule_type: 'multi_composite_mapping_check',
+        mapping_config: normalizedMappingConfig,
       })
   } else {
     const selectedRule = ruleForm.selected_rule
@@ -2841,7 +3211,10 @@ async function handleSvnUpdate(): Promise<void> {
       <div class="flex flex-col gap-6">
         <!-- 段 1：基本信息 -->
         <section class="flex flex-col gap-3">
-          <SectionHeader title="基本信息" description="规则归属、命名、类型与目标变量" />
+          <SectionHeader
+            title="基本信息"
+            :description="shouldShowTopTargetVariable ? '规则归属、命名、类型与目标变量' : '规则归属、命名、类型与节点变量'"
+          />
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则组</label>
@@ -2873,7 +3246,7 @@ async function handleSvnUpdate(): Promise<void> {
               />
             </el-select>
           </div>
-          <div>
+          <div v-if="shouldShowTopTargetVariable">
             <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标变量</label>
             <el-select
               v-model="ruleForm.target_variable_tag"
@@ -2898,6 +3271,9 @@ async function handleSvnUpdate(): Promise<void> {
               </span>
               <span v-else>请先选择目标变量</span>
             </div>
+          </div>
+          <div v-else class="rounded-field border border-line bg-subtle px-3 py-2 text-[12px] text-ink-500">
+            该规则的变量在每个节点内选择，保存时仅兼容写入首个节点变量。
           </div>
         </section>
 
@@ -3124,7 +3500,7 @@ async function handleSvnUpdate(): Promise<void> {
                 <div>
                   <div class="text-[13px] font-medium text-ink-900">节点 {{ nodeIndex + 1 }}</div>
                   <div class="mt-1 text-[12px] text-ink-500">
-                    {{ nodeIndex === 0 ? '首节点变量会同步到目标变量。' : '按当前顺序参与串行短路执行。' }}
+                    节点变量仅作用于当前节点，按当前顺序参与串行短路执行。
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -3390,6 +3766,269 @@ async function handleSvnUpdate(): Promise<void> {
                   </div>
                 </div>
               </div>
+            </div>
+          </template>
+
+          <template v-else-if="isMultiCompositeMappingRule">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-[13px] font-medium text-ink-900">映射节点</div>
+                <div class="mt-1 text-[12px] text-ink-500">每条筛选条件独立检查失败行，可用 Excel 行号范围排除符合预期的数据。</div>
+              </div>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-field bg-accent px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-accent-ink"
+                @click="addMappingNode"
+              >
+                <Plus class="h-3 w-3" /> 添加节点
+              </button>
+            </div>
+
+            <div
+              v-for="(node, nodeIndex) in mappingRuleForm.nodes"
+              :key="node.node_id"
+              class="rounded-field border border-line bg-subtle p-4"
+            >
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[13px] font-medium text-ink-900">映射节点 {{ nodeIndex + 1 }}</div>
+                  <div class="mt-1 text-[12px] text-ink-500">
+                    节点变量仅作用于当前节点，该节点独立执行并汇总异常。
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    :disabled="nodeIndex === 0"
+                    @click="moveMappingNode(node.node_id, 'up')"
+                  >
+                    上移
+                  </button>
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    :disabled="nodeIndex === mappingRuleForm.nodes.length - 1"
+                    @click="moveMappingNode(node.node_id, 'down')"
+                  >
+                    下移
+                  </button>
+                  <button
+                    type="button"
+                    class="ec-btn-danger-outline-compact"
+                    :disabled="mappingRuleForm.nodes.length === 1"
+                    @click="removeMappingNode(node.node_id)"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+
+              <div class="rounded-field bg-card p-4">
+                <label class="mb-1.5 block text-[12px] font-medium text-ink-500">组合变量</label>
+                <el-select
+                  :model-value="node.variable_tag"
+                  class="w-full"
+                  filterable
+                  placeholder="选择组合变量"
+                  @change="handleMappingNodeVariableChange(nodeIndex, String($event))"
+                >
+                  <el-option
+                    v-for="variable in compositeVariableOptions"
+                    :key="variable.tag"
+                    :label="buildVariableOptionLabel(variable)"
+                    :value="variable.tag"
+                  />
+                </el-select>
+                <div class="mt-2 text-[12px] text-ink-500">
+                  <span v-if="getMappingNodeVariable(node)">
+                    {{ getMappingNodeVariable(node)?.source_id }} · {{ getMappingNodeVariable(node)?.sheet }} ·
+                    {{ getVariableColumnSummary(getMappingNodeVariable(node)) }}
+                  </span>
+                  <span v-else>请先选择节点变量</span>
+                </div>
+              </div>
+
+              <div class="mt-4 rounded-field bg-card p-4">
+                <div class="mb-3 flex items-center justify-between">
+                  <div class="text-[12px] font-medium text-ink-700">筛选条件</div>
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    @click="addMappingNodeFilter(node)"
+                  >
+                    <Plus class="h-3 w-3" /> 添加筛选
+                  </button>
+                </div>
+                <div v-if="!node.filters.length" class="text-[12px] text-ink-500">
+                  暂无筛选条件，命中该组合变量的全部行
+                </div>
+                <div
+                  v-for="(condition, filterIndex) in node.filters"
+                  :key="condition.condition_id"
+                  class="mt-3 rounded-field border border-line p-3"
+                >
+                  <div class="mb-2 flex items-center justify-between">
+                    <span class="text-[12px] text-ink-700">筛选条件 {{ filterIndex + 1 }}</span>
+                    <button
+                      type="button"
+                      class="ec-btn-danger-outline-compact"
+                      @click="removeMappingNodeFilter(node, condition.condition_id)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                      <el-select v-model="condition.field" class="w-full">
+                        <el-option
+                          v-for="field in getMappingNodeFieldOptions(node)"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">筛选条件</label>
+                      <el-select
+                        :model-value="condition.operator"
+                        class="w-full"
+                        @change="handleFilterOperatorChange(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in getConditionOptions('filter')"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionValueSource(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
+                      <el-select
+                        :model-value="condition.value_source ?? 'literal'"
+                        class="w-full"
+                        @change="handleConditionValueSourceChange(condition, $event)"
+                      >
+                        <el-option label="固定值" value="literal" />
+                        <el-option label="字段" value="field" />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionExpectedValueMode(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">比较值类型</label>
+                      <el-select
+                        :model-value="condition.expected_value_mode ?? 'single'"
+                        class="w-full"
+                        @change="setConditionExpectedValueMode(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in expectedValueModeOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionExpectedValue(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">
+                        {{ isCompositeRegexOperator(condition.operator) ? '正则表达式' : '比较值' }}
+                      </label>
+                      <el-input
+                        v-model="condition.expected_value"
+                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      />
+                      <p
+                        v-if="condition.expected_value_mode === 'set' && !condition.expected_value?.trim()"
+                        class="mt-1 text-[12px] text-ink-500"
+                      >
+                        {{ getExpectedValueModeHelpText(condition.expected_value ?? '') }}
+                      </p>
+                    </div>
+                    <div v-if="shouldShowConditionExpectedField(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                      <el-select v-model="condition.expected_field" class="w-full">
+                        <el-option
+                          v-for="field in getMappingNodeFieldOptions(node)"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                  </div>
+
+                  <div class="mt-4 rounded-field bg-subtle p-3">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0 flex-1">
+                        <div class="text-[12px] font-medium text-ink-700">筛选失败排除行号范围</div>
+                        <div class="mt-1 text-[12px] text-ink-500">
+                          筛选失败行命中范围时，将从异常结果中移除。
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-field bg-accent px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-accent-ink"
+                        @click="addMappingExclusionRange(condition)"
+                      >
+                        <Plus class="h-3 w-3" /> <span>添加范围</span>
+                      </button>
+                    </div>
+                    <div
+                      v-if="!condition.exclusion_ranges.length"
+                      class="mt-2 space-y-1 text-[12px] text-ink-500"
+                    >
+                      <div>暂无排除范围</div>
+                      <div>不配置时，所有筛选失败数据都将保留在异常结果中。</div>
+                    </div>
+                    <div
+                      v-for="range in condition.exclusion_ranges"
+                      :key="range.range_id"
+                      class="mt-3 grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-field border border-line bg-card p-3"
+                    >
+                      <div>
+                        <label class="mb-1 block text-[12px] text-ink-500">起始行号</label>
+                        <el-input-number
+                          v-model="range.start_row"
+                          class="w-full"
+                          :min="1"
+                          :precision="0"
+                          :step="1"
+                          step-strictly
+                          controls-position="right"
+                        />
+                        <p v-if="getMappingRangeStartError(range)" class="mt-1 text-[12px] text-danger">
+                          {{ getMappingRangeStartError(range) }}
+                        </p>
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-[12px] text-ink-500">结束行号</label>
+                        <el-input-number
+                          v-model="range.end_row"
+                          class="w-full"
+                          :min="1"
+                          :precision="0"
+                          :step="1"
+                          step-strictly
+                          controls-position="right"
+                        />
+                        <p v-if="getMappingRangeEndError(range)" class="mt-1 text-[12px] text-danger">
+                          {{ getMappingRangeEndError(range) }}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        class="ec-btn-danger-outline-compact mt-6"
+                        @click="removeMappingExclusionRange(condition, range.range_id)"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </template>
 

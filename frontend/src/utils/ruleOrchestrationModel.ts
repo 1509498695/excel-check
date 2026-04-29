@@ -10,6 +10,10 @@ import type {
   ExpectedValueMode,
   FixedRuleDefinition,
   FixedRuleGroup,
+  MultiCompositeMappingConfig,
+  MultiCompositeMappingExclusionRange,
+  MultiCompositeMappingFilter,
+  MultiCompositeMappingNode,
   MultiCompositePipelineConfig,
   MultiCompositePipelineNode,
   PipelineAssertionOperator,
@@ -93,6 +97,10 @@ function createBranchId(): string {
 
 function createNodeId(): string {
   return createEntityId('node')
+}
+
+function createRangeId(): string {
+  return createEntityId('range')
 }
 
 function preserveNonBlankIdentifier(value: string | undefined): string {
@@ -195,6 +203,50 @@ export function normalizeMultiCompositePipelineConfig(
   }
 }
 
+export function normalizeMultiCompositeMappingExclusionRange(
+  range: MultiCompositeMappingExclusionRange,
+): MultiCompositeMappingExclusionRange {
+  return {
+    range_id: range.range_id.trim() || createRangeId(),
+    start_row: Number(range.start_row),
+    end_row: Number(range.end_row),
+  }
+}
+
+export function normalizeMultiCompositeMappingFilter(
+  condition: MultiCompositeMappingFilter,
+): MultiCompositeMappingFilter {
+  const normalizedCondition = normalizeCompositeCondition(condition)
+  return {
+    ...normalizedCondition,
+    exclusion_ranges: (condition.exclusion_ranges ?? []).map(
+      normalizeMultiCompositeMappingExclusionRange,
+    ),
+  }
+}
+
+export function normalizeMultiCompositeMappingNode(
+  node: MultiCompositeMappingNode,
+): MultiCompositeMappingNode {
+  return {
+    node_id: node.node_id.trim() || createNodeId(),
+    variable_tag: preserveNonBlankIdentifier(node.variable_tag),
+    filters: (node.filters ?? []).map(normalizeMultiCompositeMappingFilter),
+  }
+}
+
+export function normalizeMultiCompositeMappingConfig(
+  config: MultiCompositeMappingConfig | undefined,
+): MultiCompositeMappingConfig | undefined {
+  if (!config) {
+    return undefined
+  }
+
+  return {
+    nodes: config.nodes.map(normalizeMultiCompositeMappingNode),
+  }
+}
+
 export function isValidCompositeCondition(
   condition: CompositeCondition,
   section: 'filter' | 'assertion',
@@ -294,6 +346,79 @@ export function isValidMultiCompositePipelineConfig(
   })
 }
 
+function isValidMappingExclusionRange(range: MultiCompositeMappingExclusionRange): boolean {
+  const startRow = Number(range.start_row)
+  const endRow = Number(range.end_row)
+  return (
+    Boolean(range.range_id.trim()) &&
+    Number.isInteger(startRow) &&
+    Number.isInteger(endRow) &&
+    startRow > 0 &&
+    endRow > 0 &&
+    startRow <= endRow
+  )
+}
+
+function getCompositeAvailableFields(variable: VariableTag): Set<string> {
+  const keyColumn = variable.key_column?.trim() ?? ''
+  return new Set([
+    '__key__',
+    ...(variable.columns ?? [])
+      .map((column) => column.trim())
+      .filter((column) => column && column !== keyColumn),
+  ])
+}
+
+function isValidMappingFilter(
+  condition: MultiCompositeMappingFilter,
+  availableFields?: Set<string>,
+): boolean {
+  if (!isValidCompositeCondition(condition, 'filter')) {
+    return false
+  }
+  if (!condition.exclusion_ranges.every(isValidMappingExclusionRange)) {
+    return false
+  }
+  return availableFields ? availableFields.has(condition.field.trim()) : true
+}
+
+function isValidMappingNode(
+  node: MultiCompositeMappingNode,
+  variableMap?: Map<string, VariableTag>,
+): boolean {
+  if (!node.node_id.trim() || !node.variable_tag.trim() || !node.filters.length) {
+    return false
+  }
+
+  if (!variableMap) {
+    return node.filters.every((condition) => isValidMappingFilter(condition))
+  }
+
+  const variable = variableMap.get(node.variable_tag.trim())
+  if (!isCompositeVariable(variable)) {
+    return false
+  }
+
+  const availableFields = getCompositeAvailableFields(variable)
+  for (const condition of node.filters) {
+    if (!isValidMappingFilter(condition, availableFields)) {
+      return false
+    }
+  }
+  return true
+}
+
+export function isValidMultiCompositeMappingConfig(
+  config: MultiCompositeMappingConfig | undefined,
+  variableMap?: Map<string, VariableTag>,
+): boolean {
+  if (!config?.nodes.length) {
+    return false
+  }
+
+  return config.nodes.every((node) => isValidMappingNode(node, variableMap))
+}
+
 export function pruneRulesByRemovedTags(
   rules: FixedRuleDefinition[],
   removedTags: Set<string>,
@@ -307,6 +432,9 @@ export function pruneRulesByRemovedTags(
       !removedTags.has(rule.target_variable_tag) &&
       !removedTags.has(rule.reference_variable_tag?.trim() ?? '') &&
       !(rule.pipeline_config?.nodes ?? []).some((node) =>
+        removedTags.has(node.variable_tag.trim()),
+      ) &&
+      !(rule.mapping_config?.nodes ?? []).some((node) =>
         removedTags.has(node.variable_tag.trim()),
       ),
   )

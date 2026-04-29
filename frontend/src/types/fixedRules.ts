@@ -29,6 +29,7 @@ export type FixedRuleType =
   | 'composite_condition_check'
   | 'dual_composite_compare'
   | 'multi_composite_pipeline_check'
+  | 'multi_composite_mapping_check'
 export type FixedRuleSelection =
   | FixedRuleOperator
   | 'regex_check'
@@ -39,6 +40,7 @@ export type FixedRuleSelection =
   | 'composite_condition_check'
   | 'dual_composite_compare'
   | 'multi_composite_pipeline_check'
+  | 'multi_composite_mapping_check'
 export type SequenceDirection = 'asc' | 'desc'
 export type SequenceStartMode = 'auto' | 'manual'
 
@@ -81,6 +83,44 @@ export interface MultiCompositePipelineConfig {
   nodes: MultiCompositePipelineNode[]
 }
 
+export interface MultiCompositeMappingRange {
+  range_id: string
+  start_row: number
+  end_row: number
+  expected_value: string
+}
+
+export interface MultiCompositeMappingFieldCheck {
+  check_id: string
+  field: string
+  default_expected_value: string
+  filters: CompositeCondition[]
+  ranges: MultiCompositeMappingRange[]
+}
+
+export interface MultiCompositeMappingExclusionRange {
+  range_id: string
+  start_row: number
+  end_row: number
+}
+
+export interface MultiCompositeMappingFilter extends CompositeCondition {
+  exclusion_ranges: MultiCompositeMappingExclusionRange[]
+}
+
+export interface MultiCompositeMappingNode {
+  node_id: string
+  variable_tag: string
+  filters: MultiCompositeMappingFilter[]
+  field_checks?: MultiCompositeMappingFieldCheck[]
+  field?: string
+  ranges?: MultiCompositeMappingRange[]
+}
+
+export interface MultiCompositeMappingConfig {
+  nodes: MultiCompositeMappingNode[]
+}
+
 export interface FixedRuleGroup {
   group_id: string
   group_name: string
@@ -105,6 +145,7 @@ export interface FixedRuleDefinition {
   key_check_mode?: DualCompositeKeyCheckMode
   comparisons?: DualCompositeComparison[]
   pipeline_config?: MultiCompositePipelineConfig
+  mapping_config?: MultiCompositeMappingConfig
 }
 
 export interface FixedRulesConfig {

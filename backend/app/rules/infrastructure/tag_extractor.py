@@ -56,15 +56,37 @@ def by_reference_and_target_tag(rule: ValidationRule) -> list[str]:
 
 def by_pipeline_node_tags(rule: ValidationRule) -> list[str]:
     """``multi_composite_pipeline_check``：从 ``params.pipeline_config.nodes`` 中提取全部节点 tag。"""
-    pipeline_config = rule.params.get("pipeline_config")
-    if not isinstance(pipeline_config, dict):
+    return _by_config_node_tags(
+        rule,
+        config_key="pipeline_config",
+        rule_label="multi_composite_pipeline_check",
+    )
+
+
+def by_mapping_node_tags(rule: ValidationRule) -> list[str]:
+    """``multi_composite_mapping_check``：从 ``params.mapping_config.nodes`` 中提取全部节点 tag。"""
+    return _by_config_node_tags(
+        rule,
+        config_key="mapping_config",
+        rule_label="multi_composite_mapping_check",
+    )
+
+
+def _by_config_node_tags(
+    rule: ValidationRule,
+    *,
+    config_key: str,
+    rule_label: str,
+) -> list[str]:
+    config = rule.params.get(config_key)
+    if not isinstance(config, dict):
         raise ValueError(
-            "Rule 'multi_composite_pipeline_check' requires params.pipeline_config."
+            f"Rule '{rule_label}' requires params.{config_key}."
         )
-    nodes = pipeline_config.get("nodes")
+    nodes = config.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         raise ValueError(
-            "Rule 'multi_composite_pipeline_check' requires non-empty params.pipeline_config.nodes."
+            f"Rule '{rule_label}' requires non-empty params.{config_key}.nodes."
         )
 
     tags: list[str] = []
@@ -72,12 +94,12 @@ def by_pipeline_node_tags(rule: ValidationRule) -> list[str]:
     for node in nodes:
         if not isinstance(node, dict):
             raise ValueError(
-                "Rule 'multi_composite_pipeline_check' provides invalid params.pipeline_config.nodes."
+                f"Rule '{rule_label}' provides invalid params.{config_key}.nodes."
             )
         variable_tag = node.get("variable_tag")
         if not isinstance(variable_tag, str) or not variable_tag.strip():
             raise ValueError(
-                "Rule 'multi_composite_pipeline_check' requires each node to provide variable_tag."
+                f"Rule '{rule_label}' requires each node to provide variable_tag."
             )
         normalized_tag = variable_tag.strip()
         if normalized_tag in seen_tags:

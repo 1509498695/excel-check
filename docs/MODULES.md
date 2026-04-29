@@ -33,7 +33,7 @@
 |:---|:---|
 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源 CRUD、本地文件选择、`source_id`-级 `config_issues` 注入。 |
 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量 / 组合变量、Sheet/列下拉、详情弹窗、JSON 预览。 |
-| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗，支持单一变量、组合分支、跨组变量、多组串行 4 类入口。 |
+| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗，支持单一变量、组合分支、跨组变量、多组串行、多组映射 5 类入口；多组串行 / 多组映射的变量在节点内选择，多组映射按筛选条件独立检查失败行，并支持筛选失败排除行号范围。 |
 | [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表 + Excel 导出，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
 
 ### 2.3 已废弃 / 未使用组件
@@ -57,7 +57,7 @@
 | [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 项目校验配置 CRUD / SVN 更新 / 执行。 |
 | [utils/apiFetch.ts](../frontend/src/utils/apiFetch.ts) | 统一注入 JWT、`401` 跳登录、空响应体兼容。 |
 | [utils/taskTree.ts](../frontend/src/utils/taskTree.ts) | `TaskTree` 组装与归一化。 |
-| [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 个人校验 / 项目校验共享的规则模型工具。 |
+| [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 个人校验 / 项目校验共享的规则模型工具，包含组合分支、串行节点与映射节点的规范化校验。 |
 | [utils/workbenchOrchestrationRules.ts](../frontend/src/utils/workbenchOrchestrationRules.ts) | 编排规则映射为引擎 `ValidationRule[]`。 |
 | [utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 个人校验元数据辅助（来源类型、规则类型、列预览限制等）。 |
 | [router/index.ts](../frontend/src/router/index.ts) | vue-router：路由表与全局认证守卫。 |

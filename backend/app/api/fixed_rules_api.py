@@ -57,7 +57,10 @@ async def get_fixed_rules_config(
             config_issues = []
         else:
             parsed = parse_raw_fixed_rules_config(raw)
-            config, config_issues = load_fixed_rules_config_with_issues(parsed)
+            config, config_issues = load_fixed_rules_config_with_issues(
+                parsed,
+                allow_legacy_mapping_config=True,
+            )
     except (FileNotFoundError, ValueError, ImportError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

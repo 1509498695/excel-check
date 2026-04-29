@@ -18,6 +18,42 @@ export function orchestrationRulesToValidationRules(
   const variableMap = new Map(variables.map((v) => [v.tag, v] as const))
 
   return rules.map((rule) => {
+    if (rule.rule_type === 'multi_composite_pipeline_check') {
+      const firstNodeTag = rule.pipeline_config?.nodes[0]?.variable_tag.trim() ?? ''
+      const variable = variableMap.get(firstNodeTag)
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'multi_composite_pipeline_check',
+        params: variable
+          ? {
+              target_tag: variable.tag,
+              rule_name: rule.rule_name,
+              pipeline_config: rule.pipeline_config
+                ? JSON.parse(JSON.stringify(rule.pipeline_config))
+                : undefined,
+            }
+          : {},
+      }
+    }
+
+    if (rule.rule_type === 'multi_composite_mapping_check') {
+      const firstNodeTag = rule.mapping_config?.nodes[0]?.variable_tag.trim() ?? ''
+      const variable = variableMap.get(firstNodeTag)
+      return {
+        rule_id: rule.rule_id,
+        rule_type: 'multi_composite_mapping_check',
+        params: variable
+          ? {
+              target_tag: variable.tag,
+              rule_name: rule.rule_name,
+              mapping_config: rule.mapping_config
+                ? JSON.parse(JSON.stringify(rule.mapping_config))
+                : undefined,
+            }
+          : {},
+      }
+    }
+
     const variable = variableMap.get(rule.target_variable_tag.trim())
     if (!variable) {
       return {
@@ -56,20 +92,6 @@ export function orchestrationRulesToValidationRules(
             right_field: comparison.right_field,
           })),
           rule_name: rule.rule_name,
-        },
-      }
-    }
-
-    if (rule.rule_type === 'multi_composite_pipeline_check') {
-      return {
-        rule_id: rule.rule_id,
-        rule_type: 'multi_composite_pipeline_check',
-        params: {
-          target_tag: variable.tag,
-          rule_name: rule.rule_name,
-          pipeline_config: rule.pipeline_config
-            ? JSON.parse(JSON.stringify(rule.pipeline_config))
-            : undefined,
         },
       }
     }

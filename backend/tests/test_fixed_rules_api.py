@@ -297,6 +297,138 @@ def _build_multi_composite_pipeline_rule(
     }
 
 
+def _build_mapping_range(
+    start_row: int,
+    end_row: int,
+    expected_value: str,
+    *,
+    range_id: str = "range-1",
+) -> dict[str, object]:
+    return {
+        "range_id": range_id,
+        "start_row": start_row,
+        "end_row": end_row,
+        "expected_value": expected_value,
+    }
+
+
+def _build_mapping_exclusion_range(
+    start_row: int,
+    end_row: int,
+    *,
+    range_id: str = "range-1",
+) -> dict[str, object]:
+    return {
+        "range_id": range_id,
+        "start_row": start_row,
+        "end_row": end_row,
+    }
+
+
+def _build_mapping_field_check(
+    *,
+    field: str = "INT_Group",
+    default_expected_value: str = "1",
+    filters: list[dict[str, object]] | None = None,
+    ranges: list[dict[str, object]] | None = None,
+    check_id: str = "mapping-field-1",
+) -> dict[str, object]:
+    return {
+        "check_id": check_id,
+        "field": field,
+        "default_expected_value": default_expected_value,
+        "filters": filters or [],
+        "ranges": ranges or [],
+    }
+
+
+def _build_mapping_filter(
+    *,
+    field: str = "INT_Group",
+    operator: str = "eq",
+    expected_value: str | None = "1",
+    value_source: str | None = "literal",
+    expected_field: str | None = None,
+    exclusion_ranges: list[dict[str, object]] | None = None,
+    condition_id: str = "mapping-filter-1",
+) -> dict[str, object]:
+    condition: dict[str, object] = {
+        "condition_id": condition_id,
+        "field": field,
+        "operator": operator,
+        "exclusion_ranges": exclusion_ranges or [],
+    }
+    if value_source is not None:
+        condition["value_source"] = value_source
+    if expected_value is not None:
+        condition["expected_value"] = expected_value
+    if expected_field is not None:
+        condition["expected_field"] = expected_field
+    return condition
+
+
+def _build_mapping_node(
+    variable_tag: str,
+    *,
+    field: str = "INT_Group",
+    field_checks: list[dict[str, object]] | None = None,
+    filters: list[dict[str, object]] | None = None,
+    ranges: list[dict[str, object]] | None = None,
+    node_id: str = "mapping-node-1",
+    legacy_shape: bool = False,
+) -> dict[str, object]:
+    if legacy_shape:
+        return {
+            "node_id": node_id,
+            "variable_tag": variable_tag,
+            "field": field,
+            "filters": filters or [],
+            "ranges": ranges
+            or [
+                _build_mapping_range(
+                    2,
+                    3,
+                    "1",
+                    range_id=f"{node_id}-range-1",
+                )
+            ],
+        }
+
+    return {
+        "node_id": node_id,
+        "variable_tag": variable_tag,
+        "filters": filters
+        or [
+            _build_mapping_filter(
+                field=field,
+                exclusion_ranges=ranges,
+                condition_id=f"{node_id}-filter-1",
+            )
+        ],
+        **({"field_checks": field_checks} if field_checks is not None else {}),
+    }
+
+
+def _build_multi_composite_mapping_rule(
+    target_variable_tag: str,
+    *,
+    nodes: list[dict[str, object]] | None = None,
+    rule_id: str = "rule-multi-mapping",
+    group_id: str = "basic-checks",
+    rule_name: str = "多组映射校验",
+) -> dict[str, object]:
+    return {
+        "rule_id": rule_id,
+        "group_id": group_id,
+        "rule_name": rule_name,
+        "target_variable_tag": target_variable_tag,
+        "rule_type": "multi_composite_mapping_check",
+        "mapping_config": {
+            "nodes": nodes or [_build_mapping_node(target_variable_tag)],
+        },
+    }
+
+
 def _build_v4_payload(
     workbook_path: Path,
     *,
@@ -1622,7 +1754,7 @@ async def test_put_fixed_rules_config_rejects_multi_pipeline_bound_to_single_var
         response = await client.put("/api/v1/fixed-rules/config", json=payload)
 
     assert response.status_code == 400
-    assert "不能保存多组合变量串行校验" in response.json()["detail"]
+    assert "多组合变量串行校验仅支持组合变量" in response.json()["detail"]
 
 
 @pytest.mark.anyio
@@ -2242,6 +2374,740 @@ async def test_execute_fixed_rules_multi_composite_pipeline_short_circuits_after
     assert "节点 2" in abnormal_results[0]["message"]
     assert "节点 3" not in abnormal_results[0]["message"]
     assert abnormal_results[0]["location"] == "items -> DESC4"
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_multi_composite_mapping_round_trip(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组映射筛选配置和排除范围保存后可再次读取。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_round_trip.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 2, 3],
+            "INT_Faction": [0, 1, 1],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    mapping_rule = _build_multi_composite_mapping_rule(
+        composite_variable["tag"],
+        nodes=[
+            _build_mapping_node(
+                composite_variable["tag"],
+                filters=[
+                    _build_mapping_filter(
+                        field="INT_Faction",
+                        expected_value="1",
+                        condition_id="filter-faction",
+                        exclusion_ranges=[
+                            _build_mapping_exclusion_range(3, 4, range_id="range-3-4"),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[mapping_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    saved_rule = get_response.json()["data"]["rules"][0]
+    assert saved_rule["rule_type"] == "multi_composite_mapping_check"
+    assert saved_rule["target_variable_tag"] == composite_variable["tag"]
+    saved_node = saved_rule["mapping_config"]["nodes"][0]
+    saved_filter = saved_node["filters"][0]
+    assert "field_checks" not in saved_node
+    assert saved_filter["field"] == "INT_Faction"
+    assert saved_filter["exclusion_ranges"][0] == {
+        "range_id": "range-3-4",
+        "start_row": 3,
+        "end_row": 4,
+    }
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_filter_failure_reports_abnormal(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证筛选失败且未配置排除范围时输出异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_execute.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 0, 1],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选失败异常",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert save_response.status_code == 200
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["rule_name"] == "筛选失败异常"
+    assert abnormal_results[0]["row_index"] == 3
+    assert abnormal_results[0]["location"] == "items -> INT_Group"
+    assert "筛选失败排除行号范围" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_filter_passes_without_abnormal(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证筛选通过的行不会产生异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_filter_pass.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 1, 1],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选全部通过",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    assert execute_response.json()["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_excludes_single_row_range(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证筛选失败行命中单行排除范围时不输出异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_single_exclusion.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 0, 1],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选失败单行排除",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(3, 3, range_id="row-3"),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    assert execute_response.json()["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_excludes_any_multi_row_range(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证筛选失败行命中多段排除范围中任意一段时不输出异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_multi_exclusion_ranges.xlsx",
+        {
+            "INT_ID": [1, 2, 3, 4],
+            "INT_Group": [0, 0, 0, 0],
+            "INT_Faction": [0, 0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选失败多段排除",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(2, 2, range_id="row-2"),
+                                    _build_mapping_exclusion_range(4, 5, range_id="row-4-5"),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["row_index"] == 3
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_runs_all_nodes(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组映射校验不会因前一个节点异常而跳过后续节点。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_all_nodes.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [0, 9, 0],
+            "DESC3": ["OK", "BAD", "OK"],
+        },
+    )
+    variable_one = {
+        "tag": _build_composite_tag("items-source", "items", "mapping-node-one"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_Group"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    variable_two = {
+        "tag": _build_composite_tag("items-source", "items", "mapping-node-two"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "DESC3"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[variable_one, variable_two],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                variable_one["tag"],
+                rule_name="多节点映射校验",
+                nodes=[
+                    _build_mapping_node(
+                        variable_one["tag"],
+                        field="INT_Group",
+                        node_id="mapping-node-1",
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="0",
+                                condition_id="node-1-filter",
+                            )
+                        ],
+                    ),
+                    _build_mapping_node(
+                        variable_two["tag"],
+                        field="DESC3",
+                        node_id="mapping-node-2",
+                        filters=[
+                            _build_mapping_filter(
+                                field="DESC3",
+                                expected_value="OK",
+                                condition_id="node-2-filter",
+                            )
+                        ],
+                    ),
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert {result["location"] for result in abnormal_results} == {
+        "items -> INT_Group",
+        "items -> DESC3",
+    }
+    assert all("节点 2" in result["message"] or "节点 1" in result["message"] for result in abnormal_results)
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_reports_multiple_failed_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证同一节点内多条筛选条件独立检查并分别汇总异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_multi_fields.xlsx",
+        {
+            "INT_ID": [1],
+            "INT_Group": [9],
+            "INT_Faction": [9],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="多筛选映射校验",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="0",
+                                condition_id="filter-group",
+                            ),
+                            _build_mapping_filter(
+                                field="INT_Faction",
+                                expected_value="1",
+                                condition_id="filter-faction",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert {result["location"] for result in abnormal_results} == {
+        "items -> INT_Group",
+        "items -> INT_Faction",
+    }
+    assert {result["row_index"] for result in abnormal_results} == {2}
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_checks_filters_independently(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证同一节点内多条筛选不是 AND 筛选，而是分别作为检查项执行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_filters.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 9, 9],
+            "INT_Faction": [1, 0, 1],
+            "DESC3": ["use", "use", "skip"],
+        },
+    )
+    composite_variable = {
+        "tag": _build_composite_tag("items-source", "items", "mapping-filter-node"),
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "INT_Group", "INT_Faction", "DESC3"],
+        "key_column": "INT_ID",
+        "expected_type": "json",
+    }
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Faction",
+                                expected_value="1",
+                                condition_id="filter-faction",
+                            ),
+                            _build_mapping_filter(
+                                field="DESC3",
+                                operator="contains",
+                                expected_value="use",
+                                condition_id="filter-desc",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert {result["location"] for result in abnormal_results} == {
+        "items -> INT_Faction",
+        "items -> DESC3",
+    }
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_mapping_node_without_filters(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证旧字段/行号范围配置需要重新配置筛选条件后才能保存。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_missing_range.xlsx",
+        {
+            "INT_ID": [1, 2],
+            "INT_Group": [1, 1],
+            "INT_Faction": [0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        legacy_shape=True,
+                        ranges=[
+                            _build_mapping_range(2, 2, "1", range_id="range-2"),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "至少需要一条筛选条件" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_get_fixed_rules_config_discards_legacy_mapping_shape_without_crash(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
+) -> None:
+    """验证读取旧版字段检查配置不会失败，但重新保存必须补齐筛选条件。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_legacy_shape.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 1], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        legacy_shape=True,
+                        ranges=[
+                            _build_mapping_range(2, 2, "1", range_id="range-legacy"),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    await seed_fixed_rules_config(payload, test_project_id)
+
+    async with _auth_client_ctx(auth_headers) as client:
+        get_response = await client.get("/api/v1/fixed-rules/config")
+        save_response = await client.put(
+            "/api/v1/fixed-rules/config",
+            json=get_response.json()["data"],
+        )
+
+    assert get_response.status_code == 200
+    saved_node = get_response.json()["data"]["rules"][0]["mapping_config"]["nodes"][0]
+    assert saved_node["filters"] == []
+    assert "field" not in saved_node
+    assert "ranges" not in saved_node
+    assert "field_checks" not in saved_node
+    assert save_response.status_code == 400
+    assert "至少需要一条筛选条件" in save_response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_invalid_mapping_exclusion_range(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证排除范围的起始行不能大于结束行。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_overlap.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 1, 2],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(5, 4, range_id="range-5-4"),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "开始行不能大于结束行" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_non_positive_mapping_exclusion_range(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证排除范围行号必须为正整数。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_empty_default.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 1], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(0, 3),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "行号必须大于 0" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_discards_deprecated_mapping_field_checks(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证旧字段检查配置不再保存到新版映射规则中。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_duplicate_fields.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 1], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                            )
+                        ],
+                        field_checks=[
+                            _build_mapping_field_check(field="INT_Group", check_id="check-1"),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    saved_node = get_response.json()["data"]["rules"][0]["mapping_config"]["nodes"][0]
+    assert "field_checks" not in saved_node
+    assert len(saved_node["filters"]) == 1
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_accepts_stale_target_for_node_rules(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证节点型规则不再依赖顶部 target_variable_tag 的旧值。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_stale_target.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 1], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    mapping_rule = _build_multi_composite_mapping_rule(
+        "stale-target-tag",
+        nodes=[_build_mapping_node(composite_variable["tag"])],
+    )
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[mapping_rule],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+        get_response = await client.get("/api/v1/fixed-rules/config")
+
+    assert save_response.status_code == 200
+    saved_rule = get_response.json()["data"]["rules"][0]
+    assert saved_rule["target_variable_tag"] == composite_variable["tag"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_mapping_rule_bound_to_single_variable(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证多组映射校验不能绑定单变量。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_single_variable.xlsx",
+        {"INT_ID": [1, 2, 3], "DESC": ["a", "b", "c"]},
+    )
+    target_tag = _build_single_tag("items-source", "items", "INT_ID")
+    payload = _build_v4_payload(
+        workbook_path,
+        rules=[_build_multi_composite_mapping_rule(target_tag)],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "多组映射校验" in response.json()["detail"]
 
 
 @pytest.mark.anyio
