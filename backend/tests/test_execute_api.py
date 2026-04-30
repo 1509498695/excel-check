@@ -65,6 +65,20 @@ def _create_dual_composite_test_workbook(target_path: Path) -> Path:
     return target_path
 
 
+def _create_mapping_exclusion_test_workbook(target_path: Path) -> Path:
+    """创建多组映射排除范围判定值测试所需的 Excel 文件。"""
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1, 2, 3],
+                "INT_Group": [1, 0, 1],
+                "INT_Faction": [0, 0, 0],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    return target_path
+
+
 def _create_paginated_test_workbook(target_path: Path) -> Path:
     """创建用于执行结果分页测试的 Excel 文件。"""
     with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
@@ -331,6 +345,82 @@ async def test_execute_engine_supports_expected_value_set_in_composite_condition
     assert len(abnormal_results) == 1
     assert abnormal_results[0]["raw_value"] == "B"
     assert "规则集中的任一值" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_multi_composite_mapping_exclusion_requires_expected_value_hit(
+    tmp_path: Path,
+) -> None:
+    """验证个人校验多组映射排除范围需同时命中行号和判定值。"""
+    workbook_path = _create_mapping_exclusion_test_workbook(
+        tmp_path / "mapping_exclusion_expected_value.xlsx"
+    )
+    payload = {
+        "sources": [
+            {
+                "id": "src_mapping",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-mapping]",
+                "source_id": "src_mapping",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_Group", "INT_Faction"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "multi_composite_mapping_check",
+                "params": {
+                    "target_tag": "[items-mapping]",
+                    "rule_name": "个人映射排除判定值",
+                    "mapping_config": {
+                        "nodes": [
+                            {
+                                "node_id": "mapping-node-1",
+                                "variable_tag": "[items-mapping]",
+                                "filters": [
+                                    {
+                                        "condition_id": "filter-group",
+                                        "field": "INT_Group",
+                                        "operator": "eq",
+                                        "value_source": "literal",
+                                        "expected_value": "1",
+                                        "exclusion_ranges": [
+                                            {
+                                                "range_id": "row-3-miss",
+                                                "start_row": 3,
+                                                "end_row": 3,
+                                                "expected_value": "9",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["row_index"] == 3
+    assert "筛选失败排除行号范围或判定值" in abnormal_results[0]["message"]
 
 
 @pytest.mark.anyio
@@ -1186,6 +1276,81 @@ async def test_execute_engine_supports_dual_composite_compare(tmp_path: Path) ->
     assert len(abnormal_results) == 1
     assert abnormal_results[0]["rule_name"] == "双组合变量比对"
     assert "Key 10001" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_returns_configured_display_field_value(tmp_path: Path) -> None:
+    """异常结果按规则配置输出当前关联变量内的显示字段值。"""
+    workbook_path = tmp_path / "display_field_rules.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "ID": [1, 2, 3],
+                "Faction": [1, 1, 1],
+                "Name": ["Ok", "Ok", "Bad"],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    composite_config = {
+        "global_filters": [],
+        "branches": [
+            {
+                "branch_id": "branch-display",
+                "filters": [],
+                "assertions": [
+                    {
+                        "condition_id": "name-must-ok",
+                        "field": "Name",
+                        "operator": "eq",
+                        "value_source": "literal",
+                        "expected_value": "Ok",
+                    }
+                ],
+            }
+        ],
+    }
+    payload = {
+        "sources": [
+            {
+                "id": "src_display",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[items-composite]",
+                "source_id": "src_display",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["ID", "Faction", "Name"],
+                "key_column": "ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "composite_condition_check",
+                "params": {
+                    "target_tag": "[items-composite]",
+                    "rule_name": "名称显示字段校验",
+                    "display_field": "Name",
+                    "composite_config": composite_config,
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["display_value"] == "Bad"
 
 
 @pytest.mark.anyio

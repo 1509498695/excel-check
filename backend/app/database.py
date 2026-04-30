@@ -40,6 +40,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_user_primary_project_column()
+    await _ensure_execution_result_display_value_column()
     await ensure_default_auth_bootstrap()
 
 
@@ -62,6 +63,25 @@ async def _ensure_user_primary_project_column() -> None:
         has_column = await conn.run_sync(_has_primary_project_column)
         if not has_column:
             await conn.execute(text("ALTER TABLE users ADD COLUMN primary_project_id INTEGER"))
+
+
+async def _ensure_execution_result_display_value_column() -> None:
+    """为已有运行时数据库补齐 execution_result_items.display_value_json 列。"""
+
+    def _has_display_value_column(sync_conn) -> bool:
+        inspector = inspect(sync_conn)
+        columns = inspector.get_columns("execution_result_items")
+        return any(column["name"] == "display_value_json" for column in columns)
+
+    async with engine.begin() as conn:
+        has_column = await conn.run_sync(_has_display_value_column)
+        if not has_column:
+            await conn.execute(
+                text(
+                    "ALTER TABLE execution_result_items "
+                    "ADD COLUMN display_value_json TEXT DEFAULT 'null'"
+                )
+            )
 
 
 async def _seed_default_project():

@@ -88,6 +88,7 @@ const ruleForm = reactive<{
   rule_name: string
   rule_entry_type: RuleEntryType
   target_variable_tag: string
+  display_field: string
   selected_rule: FixedRuleSelection
   expected_value: string
   expected_value_mode: ExpectedValueMode
@@ -103,6 +104,7 @@ const ruleForm = reactive<{
   rule_name: '',
   rule_entry_type: 'single',
   target_variable_tag: '',
+  display_field: '',
   selected_rule: 'gt',
   expected_value: '0',
   expected_value_mode: 'single',
@@ -282,6 +284,17 @@ function buildCompositeFieldOptions(variable: VariableTag | null): Array<{ label
   ]
 }
 
+function buildDisplayFieldOptions(variable: VariableTag | null): Array<{ label: string; value: string }> {
+  if (!variable) {
+    return []
+  }
+  if ((variable.variable_kind ?? 'single') === 'composite') {
+    return buildCompositeFieldOptions(variable)
+  }
+  const column = variable.column?.trim() ?? ''
+  return column ? [{ label: column, value: column }] : []
+}
+
 function resolveFieldOptionValue(
   options: Array<{ label: string; value: string }>,
   field: string,
@@ -305,6 +318,7 @@ const compositeFieldOptions = computed(() => {
 const referenceCompositeFieldOptions = computed(() => {
   return buildCompositeFieldOptions(selectedReferenceVariable.value)
 })
+const displayFieldOptions = computed(() => buildDisplayFieldOptions(selectedRuleVariable.value))
 
 const canCreateRule = computed(() => variableOptions.value.length > 0)
 
@@ -689,6 +703,7 @@ watch(
     ) {
       ruleForm.target_variable_tag = filteredTargetVariableOptions.value[0]?.tag ?? ''
     }
+    ruleForm.display_field = normalizeDisplayField(ruleForm.display_field, displayFieldOptions.value)
 
     if (
       ruleForm.reference_variable_tag &&
@@ -745,6 +760,7 @@ watch(
     ) {
       ruleForm.reference_variable_tag = ''
     }
+    ruleForm.display_field = normalizeDisplayField(ruleForm.display_field, displayFieldOptions.value)
     syncRuleNameWithForm()
   },
 )
@@ -1024,6 +1040,7 @@ function createPipelineNode(preferredVariableTag = ''): MultiCompositePipelineNo
   return {
     node_id: createId('pipeline-node'),
     variable_tag: getDefaultCompositeVariableTag(preferredVariableTag),
+    display_field: '',
     filters: [],
     assertions: [createCondition()],
   }
@@ -1034,6 +1051,7 @@ function createMappingExclusionRange(startRow = 2): MultiCompositeMappingExclusi
     range_id: createId('mapping-range'),
     start_row: startRow,
     end_row: startRow,
+    expected_value: '',
   }
 }
 
@@ -1049,6 +1067,7 @@ function createMappingNode(preferredVariableTag = ''): MultiCompositeMappingNode
   return {
     node_id: createId('mapping-node'),
     variable_tag: variableTag,
+    display_field: '',
     filters: [],
   }
 }
@@ -1126,6 +1145,7 @@ function normalizePipelineConfig(
       node_id: node.node_id || createId('pipeline-node'),
       variable_tag:
         getDefaultCompositeVariableTag(node.variable_tag || (index === 0 ? fallbackVariableTag : '')),
+      display_field: node.display_field?.trim() ?? '',
       filters: (node.filters ?? []).map((condition) => ({
         ...condition,
         condition_id: condition.condition_id || createId('condition'),
@@ -1164,6 +1184,7 @@ function normalizeMappingConfig(
       return {
         node_id: node.node_id || createId('mapping-node'),
         variable_tag: variableTag,
+        display_field: node.display_field?.trim() ?? '',
         filters: (node.filters ?? []).map((condition) => ({
           ...condition,
           condition_id: condition.condition_id || createId('condition'),
@@ -1171,6 +1192,7 @@ function normalizeMappingConfig(
             range_id: range.range_id || createId('mapping-range'),
             start_row: Number(range.start_row) || 1,
             end_row: Number(range.end_row) || 1,
+            expected_value: range.expected_value?.trim() ?? '',
           })),
         })),
       }
@@ -1189,6 +1211,14 @@ function applyMappingConfig(
 
 function resetMappingConfig(preferredVariableTag = ''): void {
   applyMappingConfig(undefined, preferredVariableTag)
+}
+
+function getNodeDisplayFieldOptions(node: MultiCompositePipelineNode | MultiCompositeMappingNode): Array<{ label: string; value: string }> {
+  return buildDisplayFieldOptions(variableMap.value.get(node.variable_tag) ?? null)
+}
+
+function normalizeDisplayField(value: string, options: Array<{ label: string; value: string }>): string {
+  return options.some((option) => option.value === value) ? value : ''
 }
 
 function addPipelineNode(): void {
@@ -1246,6 +1276,7 @@ function handlePipelineNodeVariableChange(nodeIndex: number, value: string): voi
     return
   }
   node.variable_tag = value
+  node.display_field = normalizeDisplayField(node.display_field ?? '', getNodeDisplayFieldOptions(node))
 }
 
 function addMappingNode(): void {
@@ -1295,6 +1326,7 @@ function handleMappingNodeVariableChange(nodeIndex: number, value: string): void
     return
   }
   node.variable_tag = value
+  node.display_field = normalizeDisplayField(node.display_field ?? '', getNodeDisplayFieldOptions(node))
   node.filters = []
 }
 
@@ -1614,6 +1646,14 @@ function getMappingRangeEndError(range: MultiCompositeMappingExclusionRange): st
   return ''
 }
 
+function getMappingRangeExpectedValueError(range: MultiCompositeMappingExclusionRange): string {
+  const expectedValues = (range.expected_value ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  return expectedValues.length ? '' : '请输入判定值，多个值用英文逗号分隔'
+}
+
 function validateMappingExclusionRanges(
   ranges: MultiCompositeMappingExclusionRange[],
   label: string,
@@ -1627,6 +1667,10 @@ function validateMappingExclusionRanges(
     const endError = getMappingRangeEndError(range)
     if (endError) {
       return `${label}第 ${index + 1} 段排除范围：${endError}。`
+    }
+    const expectedValueError = getMappingRangeExpectedValueError(range)
+    if (expectedValueError) {
+      return `${label}第 ${index + 1} 段排除范围：${expectedValueError}。`
     }
   }
   return null
@@ -2084,6 +2128,7 @@ async function openCreateRuleDialog(): Promise<void> {
   ruleForm.rule_name = ''
   ruleForm.rule_entry_type = 'single'
   ruleForm.target_variable_tag = singleVariableOptions.value[0]?.tag ?? ''
+  ruleForm.display_field = ''
   ruleForm.selected_rule = 'gt'
   ruleForm.expected_value = '0'
   ruleForm.expected_value_mode = 'single'
@@ -2112,6 +2157,7 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
   ruleForm.group_id = rule.group_id
   ruleForm.rule_name = rule.rule_name
   ruleForm.target_variable_tag = rule.target_variable_tag ?? ''
+  ruleForm.display_field = rule.display_field ?? ''
   ruleForm.rule_entry_type = getRuleEntryTypeBySelection(getRuleSelectionValue(rule))
   if (rule.rule_type === 'composite_condition_check') {
     ruleForm.selected_rule = 'composite_condition_check'
@@ -2484,6 +2530,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         reference_variable_tag: ruleForm.reference_variable_tag,
         rule_type: 'dual_composite_compare',
         key_check_mode: ruleForm.key_check_mode,
@@ -2495,6 +2542,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: 'composite_condition_check',
         composite_config: normalizeCompositeConfig(compositeRuleForm),
       })
@@ -2510,6 +2558,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: firstNodeVariableTag,
+        display_field: '',
         rule_type: 'multi_composite_pipeline_check',
         pipeline_config: normalizedPipelineConfig,
       })
@@ -2525,6 +2574,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: firstNodeVariableTag,
+        display_field: '',
         rule_type: 'multi_composite_mapping_check',
         mapping_config: normalizedMappingConfig,
       })
@@ -2536,6 +2586,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: 'sequence_order_check',
         sequence_direction: ruleForm.sequence_direction,
         sequence_step: ruleForm.sequence_step,
@@ -2549,6 +2600,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: 'regex_check',
         expected_value: ruleForm.expected_value,
       })
@@ -2558,6 +2610,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: 'fixed_value_compare',
         operator: selectedRule,
         expected_value: ruleForm.expected_value,
@@ -2572,6 +2625,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: 'cross_table_mapping',
         reference_variable_tag: ruleForm.reference_variable_tag,
       })
@@ -2581,6 +2635,7 @@ async function handleSaveRule(): Promise<void> {
         group_id: ruleForm.group_id,
         rule_name: ruleForm.rule_name,
         target_variable_tag: ruleForm.target_variable_tag,
+        display_field: ruleForm.display_field,
         rule_type: selectedRule,
       })
     }
@@ -3272,6 +3327,27 @@ async function handleSvnUpdate(): Promise<void> {
               <span v-else>请先选择目标变量</span>
             </div>
           </div>
+          <div v-if="shouldShowTopTargetVariable">
+            <label class="mb-1.5 block text-[12px] font-medium text-ink-500">结果显示字段</label>
+            <el-select
+              v-model="ruleForm.display_field"
+              class="w-full"
+              filterable
+              clearable
+              :disabled="!displayFieldOptions.length"
+              placeholder="默认不显示"
+            >
+              <el-option
+                v-for="field in displayFieldOptions"
+                :key="field.value"
+                :label="field.label"
+                :value="field.value"
+              />
+            </el-select>
+            <p class="mt-1 text-[12px] text-ink-500">
+              仅用于异常结果和导出展示，不参与校验判断。
+            </p>
+          </div>
           <div v-else class="rounded-field border border-line bg-subtle px-3 py-2 text-[12px] text-ink-500">
             该规则的变量在每个节点内选择，保存时仅兼容写入首个节点变量。
           </div>
@@ -3553,6 +3629,25 @@ async function handleSvnUpdate(): Promise<void> {
                     {{ getVariableColumnSummary(getPipelineNodeVariable(node)) }}
                   </span>
                   <span v-else>请先选择节点变量</span>
+                </div>
+                <div class="mt-3">
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">结果显示字段</label>
+                  <el-select
+                    v-model="node.display_field"
+                    class="w-full"
+                    filterable
+                    clearable
+                    :disabled="!getNodeDisplayFieldOptions(node).length"
+                    placeholder="默认不显示"
+                  >
+                    <el-option
+                      v-for="field in getNodeDisplayFieldOptions(node)"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                  <p class="mt-1 text-[12px] text-ink-500">异常来自该节点时展示该字段值。</p>
                 </div>
               </div>
 
@@ -3847,6 +3942,25 @@ async function handleSvnUpdate(): Promise<void> {
                   </span>
                   <span v-else>请先选择节点变量</span>
                 </div>
+                <div class="mt-3">
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">结果显示字段</label>
+                  <el-select
+                    v-model="node.display_field"
+                    class="w-full"
+                    filterable
+                    clearable
+                    :disabled="!getNodeDisplayFieldOptions(node).length"
+                    placeholder="默认不显示"
+                  >
+                    <el-option
+                      v-for="field in getNodeDisplayFieldOptions(node)"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                  <p class="mt-1 text-[12px] text-ink-500">异常来自该节点时展示该字段值。</p>
+                </div>
               </div>
 
               <div class="mt-4 rounded-field bg-card p-4">
@@ -3964,7 +4078,7 @@ async function handleSvnUpdate(): Promise<void> {
                       <div class="min-w-0 flex-1">
                         <div class="text-[12px] font-medium text-ink-700">筛选失败排除行号范围</div>
                         <div class="mt-1 text-[12px] text-ink-500">
-                          筛选失败行命中范围时，将从异常结果中移除。
+                          筛选失败行需同时命中行号范围和判定值，才会从异常结果中移除。
                         </div>
                       </div>
                       <button
@@ -3985,7 +4099,7 @@ async function handleSvnUpdate(): Promise<void> {
                     <div
                       v-for="range in condition.exclusion_ranges"
                       :key="range.range_id"
-                      class="mt-3 grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-field border border-line bg-card p-3"
+                      class="mt-3 grid grid-cols-[1fr_1fr_1.2fr_auto] items-start gap-3 rounded-field border border-line bg-card p-3"
                     >
                       <div>
                         <label class="mb-1 block text-[12px] text-ink-500">起始行号</label>
@@ -4015,6 +4129,19 @@ async function handleSvnUpdate(): Promise<void> {
                         />
                         <p v-if="getMappingRangeEndError(range)" class="mt-1 text-[12px] text-danger">
                           {{ getMappingRangeEndError(range) }}
+                        </p>
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-[12px] text-ink-500">判定值</label>
+                        <el-input
+                          v-model="range.expected_value"
+                          placeholder="例如：0,1,2"
+                        />
+                        <p
+                          v-if="getMappingRangeExpectedValueError(range)"
+                          class="mt-1 text-[12px] text-danger"
+                        >
+                          {{ getMappingRangeExpectedValueError(range) }}
                         </p>
                       </div>
                       <button

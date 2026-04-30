@@ -151,7 +151,7 @@ const stepStatuses = computed<{
   rule: !store.variables.length ? 'pending' : store.orchestrationRuleCount ? 'done' : 'active',
   result: !store.orchestrationRuleCount
     ? 'pending'
-    : store.executionMeta || store.pageError
+    : store.executionMeta || store.pageError || store.svnUpdateSummary || store.svnUpdateResults.length
       ? 'done'
       : 'active',
 }))
@@ -174,7 +174,9 @@ function getSectionStatusLabel(step: StepIndex): string {
     if (store.pageError) {
       return '需关注'
     }
-    return store.executionMeta ? '已完成' : '待执行'
+    return store.executionMeta || store.svnUpdateSummary || store.svnUpdateResults.length
+      ? '已完成'
+      : '待执行'
   }
 
   if (step === 1) {
@@ -206,10 +208,23 @@ const workflowGuide = computed(() => {
   if (!store.orchestrationRuleCount) {
     return { step: 3 as StepIndex, action: 'scroll' as const }
   }
-  if (store.isExecuting || store.pageError || store.executionMeta) {
+  if (
+    store.isExecuting ||
+    store.isUpdatingSvn ||
+    store.pageError ||
+    store.executionMeta ||
+    store.svnUpdateSummary ||
+    store.svnUpdateResults.length
+  ) {
     return { step: 4 as StepIndex, action: 'scroll' as const }
   }
   return { step: 4 as StepIndex, action: 'execute' as const }
+})
+
+const svnResultStats = computed(() => {
+  const successCount = store.svnUpdateResults.filter((item) => item.status === 'success').length
+  const failedCount = store.svnUpdateResults.length - successCount
+  return { successCount, failedCount }
 })
 
 const activeGuideStep = computed(() => selectedGuideStep.value ?? workflowGuide.value.step)
@@ -324,6 +339,18 @@ async function runExecution(): Promise<void> {
   }
 }
 
+async function handleSvnUpdate(): Promise<void> {
+  try {
+    await store.runSvnUpdate()
+    await ensureStepExpanded(4)
+    await scrollToStep(4)
+    ElMessage.success(store.svnUpdateSummary || 'SVN 更新完成。')
+  } catch {
+    await ensureStepExpanded(4)
+    await scrollToStep(4)
+  }
+}
+
 function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
 }
@@ -399,6 +426,12 @@ function handleToggleVisibleRuleSelection(payload: {
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
     <PageHeader breadcrumb="主页 / 个人校验" title="配置表个人校验">
       <template #actions>
+        <SecondaryButton
+          :disabled="store.isUpdatingSvn || !store.canRunSvnUpdate"
+          @click="handleSvnUpdate"
+        >
+          {{ store.isUpdatingSvn ? 'SVN 更新中…' : 'SVN 更新' }}
+        </SecondaryButton>
         <PrimaryButton @click="openUserGuide">
           <template #icon>
             <svg
@@ -622,7 +655,36 @@ function handleToggleVisibleRuleSelection(payload: {
           content-class="pt-4"
           @toggle="toggleSection(4)"
         >
-          <ResultBoardPanel :rule-count="store.orchestrationRuleCount" variant="personal" />
+          <ResultBoardPanel :store="store" :rule-count="store.orchestrationRuleCount" variant="personal">
+            <template #extra>
+              <div
+                v-if="store.svnUpdateSummary"
+                class="rounded-card border border-line border-l-4 border-l-accent bg-accent-soft/40 px-5 py-3"
+              >
+                <div class="text-[13px] font-medium text-ink-900">{{ store.svnUpdateSummary }}</div>
+                <div class="mt-1 text-[12px] text-ink-500">
+                  成功 {{ svnResultStats.successCount }} 个，失败 {{ svnResultStats.failedCount }} 个
+                </div>
+              </div>
+
+              <div v-if="store.svnUpdateResults.length" class="flex flex-col gap-2">
+                <article
+                  v-for="item in store.svnUpdateResults"
+                  :key="item.working_copy"
+                  class="rounded-field border border-line px-4 py-3"
+                  :class="item.status === 'error' ? 'border-l-4 border-l-danger bg-danger-soft/30' : 'bg-canvas'"
+                >
+                  <div class="truncate font-mono text-[12px] text-ink-900">{{ item.working_copy }}</div>
+                  <div class="mt-1 text-[12px]" :class="item.status === 'error' ? 'text-danger' : 'text-success'">
+                    {{ item.status === 'success' ? '更新成功' : '更新失败' }}
+                  </div>
+                  <div class="mt-1 whitespace-pre-wrap break-all text-[12px] text-ink-500">
+                    {{ item.output || item.error || '无额外输出' }}
+                  </div>
+                </article>
+              </div>
+            </template>
+          </ResultBoardPanel>
         </CollapsibleSection>
       </div>
 

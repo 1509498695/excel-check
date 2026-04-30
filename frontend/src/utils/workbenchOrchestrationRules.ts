@@ -28,6 +28,7 @@ export function orchestrationRulesToValidationRules(
           ? {
               target_tag: variable.tag,
               rule_name: rule.rule_name,
+              display_field: rule.display_field,
               pipeline_config: rule.pipeline_config
                 ? JSON.parse(JSON.stringify(rule.pipeline_config))
                 : undefined,
@@ -46,6 +47,7 @@ export function orchestrationRulesToValidationRules(
           ? {
               target_tag: variable.tag,
               rule_name: rule.rule_name,
+              display_field: rule.display_field,
               mapping_config: rule.mapping_config
                 ? JSON.parse(JSON.stringify(rule.mapping_config))
                 : undefined,
@@ -70,6 +72,7 @@ export function orchestrationRulesToValidationRules(
         params: {
           target_tag: variable.tag,
           rule_name: rule.rule_name,
+          display_field: rule.display_field,
           composite_config: rule.composite_config
             ? JSON.parse(JSON.stringify(rule.composite_config))
             : undefined,
@@ -85,6 +88,7 @@ export function orchestrationRulesToValidationRules(
           target_tag: variable.tag,
           reference_tag: rule.reference_variable_tag?.trim() ?? '',
           key_check_mode: rule.key_check_mode ?? 'baseline_only',
+          display_field: rule.display_field,
           comparisons: (rule.comparisons ?? []).map((comparison) => ({
             comparison_id: comparison.comparison_id,
             left_field: comparison.left_field,
@@ -107,6 +111,7 @@ export function orchestrationRulesToValidationRules(
           expected_value_mode: rule.expected_value_mode,
           rule_name: rule.rule_name,
           location: locationForSingle(variable),
+          display_field: rule.display_field,
         },
       }
     }
@@ -120,6 +125,7 @@ export function orchestrationRulesToValidationRules(
           pattern: rule.expected_value ?? '',
           rule_name: rule.rule_name,
           location: locationForSingle(variable),
+          display_field: rule.display_field,
         },
       }
     }
@@ -134,6 +140,7 @@ export function orchestrationRulesToValidationRules(
           target_tag: variable.tag,
           rule_name: rule.rule_name,
           location: locationForSingle(variable),
+          display_field: rule.display_field,
         },
       }
     }
@@ -150,6 +157,7 @@ export function orchestrationRulesToValidationRules(
           start_value: rule.sequence_start_value ?? '',
           rule_name: rule.rule_name,
           location: locationForSingle(variable),
+          display_field: rule.display_field,
         },
       }
     }
@@ -161,6 +169,7 @@ export function orchestrationRulesToValidationRules(
         target_tags: [variable.tag],
         rule_name: rule.rule_name,
         location: locationForSingle(variable),
+        display_field: rule.display_field,
       },
     }
   })

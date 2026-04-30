@@ -167,6 +167,21 @@ def _build_rule_location(variable: VariableTag, field: str) -> str:
     return f"{variable.sheet} -> {_get_field_display_name(variable, field)}"
 
 
+def _get_display_field_param(rule: ValidationRule) -> str | None:
+    """读取可选结果显示字段。"""
+    display_field = rule.params.get("display_field")
+    if isinstance(display_field, str) and display_field.strip():
+        return display_field.strip()
+    return None
+
+
+def _get_row_display_value(row: pd.Series, display_field: str | None) -> Any:
+    """按异常行读取结果显示字段值；未配置或字段不存在时保持空。"""
+    if not display_field or display_field not in row.index:
+        return None
+    return row[display_field]
+
+
 def _get_composite_rule_config(rule: ValidationRule) -> CompositeRuleConfig:
     """读取并校验组合变量条件分支规则配置。"""
     config_payload = rule.params.get("composite_config")
@@ -346,6 +361,7 @@ def _evaluate_row_assertion(
     rule_name: str,
     frame: pd.DataFrame,
     condition: CompositeCondition,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行组合变量的逐行断言。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -361,6 +377,7 @@ def _evaluate_row_assertion(
                     build_fixed_result(
                         row_index=row["_row_index"],
                         raw_value=actual_value,
+                        display_value=_get_row_display_value(row, display_field),
                         rule_name=rule_name,
                         location=location,
                         message=f"{branch_title}：{_get_field_display_name(variable, field)} 不能为空。",
@@ -394,6 +411,7 @@ def _evaluate_row_assertion(
                 build_fixed_result(
                     row_index=row["_row_index"],
                     raw_value=actual_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(
@@ -409,6 +427,7 @@ def _evaluate_row_assertion(
                 build_fixed_result(
                     row_index=row["_row_index"],
                     raw_value=actual_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=_build_compare_failure_message(
@@ -430,6 +449,7 @@ def _evaluate_unique_assertion(
     rule_name: str,
     frame: pd.DataFrame,
     condition: CompositeCondition,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行组合变量的唯一性断言。"""
     field = condition.field
@@ -443,6 +463,7 @@ def _evaluate_unique_assertion(
         build_fixed_result(
             row_index=row["_row_index"],
             raw_value=row[field],
+            display_value=_get_row_display_value(row, display_field),
             rule_name=rule_name,
             location=location,
             level="warning",
@@ -461,6 +482,7 @@ def _evaluate_duplicate_required_assertion(
     rule_name: str,
     frame: pd.DataFrame,
     condition: CompositeCondition,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行“至少存在一组重复值”的集合断言。"""
     field = condition.field
@@ -479,6 +501,7 @@ def _evaluate_duplicate_required_assertion(
         build_fixed_result(
             row_index=row["_row_index"],
             raw_value=row[field],
+            display_value=_get_row_display_value(row, display_field),
             rule_name=rule_name,
             location=location,
             level="warning",
@@ -497,6 +520,7 @@ def _evaluate_regex_assertion(
     rule_name: str,
     frame: pd.DataFrame,
     condition: CompositeCondition,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行组合变量分支上的正则断言。"""
     compiled_pattern = re.compile(condition.expected_value or "")
@@ -506,6 +530,7 @@ def _evaluate_regex_assertion(
         build_fixed_result(
             row_index=row["_row_index"],
             raw_value=row[field],
+            display_value=_get_row_display_value(row, display_field),
             rule_name=rule_name,
             location=location,
             message=(
@@ -513,7 +538,7 @@ def _evaluate_regex_assertion(
                 f" {condition.expected_value or ''}。"
             ),
         )
-        for _, row in frame[[field, "_row_index"]].iterrows()
+        for _, row in frame.iterrows()
         if not compiled_pattern.fullmatch(
             "" if normalize_fixed_text(row[field]) is None else normalize_fixed_text(row[field]) or ""
         )
@@ -527,6 +552,7 @@ def _evaluate_composite_branch_assertions(
     rule_name: str,
     frame: pd.DataFrame,
     branch: CompositeBranch,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行单个分支上的所有断言。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -540,6 +566,7 @@ def _evaluate_composite_branch_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "unique":
@@ -550,6 +577,7 @@ def _evaluate_composite_branch_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "duplicate_required":
@@ -560,6 +588,7 @@ def _evaluate_composite_branch_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "regex":
@@ -570,6 +599,7 @@ def _evaluate_composite_branch_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         else:  # pragma: no cover - 接口层与 service 已做校验
@@ -587,6 +617,7 @@ def _evaluate_pipeline_node_assertions(
     rule_name: str,
     frame: pd.DataFrame,
     assertions: list[CompositeCondition],
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行多组合变量串行校验单个节点上的全部最终判定。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -600,6 +631,7 @@ def _evaluate_pipeline_node_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "unique":
@@ -610,6 +642,7 @@ def _evaluate_pipeline_node_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "duplicate_required":
@@ -620,6 +653,7 @@ def _evaluate_pipeline_node_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         elif condition.operator == "regex":
@@ -630,6 +664,7 @@ def _evaluate_pipeline_node_assertions(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=display_field,
                 )
             )
         else:  # pragma: no cover - 接口层与 service 已做校验
@@ -642,10 +677,31 @@ def _evaluate_pipeline_node_assertions(
 
 def _is_row_in_mapping_exclusion_ranges(
     row_index: int,
+    actual_value: Any,
     ranges: list[MultiCompositeMappingExclusionRange],
 ) -> bool:
-    """判断筛选失败行是否命中当前筛选的排除范围。"""
-    return any(row_range.start_row <= row_index <= row_range.end_row for row_range in ranges)
+    """判断筛选失败行是否同时命中排除行号范围与判定值集合。"""
+    actual_text = normalize_fixed_text(actual_value)
+    for row_range in ranges:
+        if not (row_range.start_row <= row_index <= row_range.end_row):
+            continue
+        expected_value = (row_range.expected_value or "").strip()
+        if not expected_value:
+            raise ValueError("Mapping exclusion range requires expected_value.")
+        if actual_text in parse_expected_value_set(expected_value):
+            return True
+    return False
+
+
+def _validate_mapping_exclusion_ranges(
+    ranges: list[MultiCompositeMappingExclusionRange],
+) -> None:
+    """提前校验排除范围判定值，避免无异常行时漏掉配置问题。"""
+    for row_range in ranges:
+        expected_value = (row_range.expected_value or "").strip()
+        if not expected_value:
+            raise ValueError("Mapping exclusion range requires expected_value.")
+        parse_expected_value_set(expected_value)
 
 
 def _evaluate_mapping_filter_check(
@@ -656,6 +712,7 @@ def _evaluate_mapping_filter_check(
     rule_name: str,
     frame: pd.DataFrame,
     condition: MultiCompositeMappingFilter,
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """按单条筛选条件检查失败行，并应用筛选失败排除行号范围。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -664,6 +721,7 @@ def _evaluate_mapping_filter_check(
     field_name = _get_field_display_name(variable, field)
     if field not in frame.columns:
         raise ValueError(f"Mapping rule references unknown field '{field}'.")
+    _validate_mapping_exclusion_ranges(condition.exclusion_ranges)
 
     matched_mask = _build_composite_filter_mask(frame, variable, condition)
     failed_frame = frame.loc[~matched_mask].copy()
@@ -673,17 +731,18 @@ def _evaluate_mapping_filter_check(
     for _, row in failed_frame.iterrows():
         row_index = int(row["_row_index"])
         actual_value = row[field]
-        if _is_row_in_mapping_exclusion_ranges(row_index, condition.exclusion_ranges):
+        if _is_row_in_mapping_exclusion_ranges(row_index, actual_value, condition.exclusion_ranges):
             continue
         abnormal_results.append(
             build_fixed_result(
                 row_index=row_index,
                 raw_value=actual_value,
+                display_value=_get_row_display_value(row, display_field),
                 rule_name=rule_name,
                 location=location,
                 message=(
                     f"{node_title} / {filter_title}：Excel 第 {row_index} 行未通过筛选条件，"
-                    f"字段 {field_name} 未命中筛选失败排除行号范围。"
+                    f"字段 {field_name} 未命中筛选失败排除行号范围或判定值。"
                 ),
             )
         )
@@ -713,6 +772,7 @@ def check_regex_check(
     )
     location = f"{variable.sheet} -> {column_name}"
     abnormal_results: list[dict[str, Any]] = []
+    display_field = _get_display_field_param(rule)
 
     for _, row in frame[[column_name, "_row_index"]].iterrows():
         text = normalize_fixed_text(row[column_name])
@@ -723,6 +783,7 @@ def check_regex_check(
             build_fixed_result(
                 row_index=row["_row_index"],
                 raw_value=row[column_name],
+                display_value=_get_row_display_value(row, display_field),
                 rule_name=rule_name,
                 location=location,
                 message=f"该值不符合正则格式 {pattern}。",
@@ -751,6 +812,7 @@ def check_fixed_value_compare(
     )
     abnormal_results: list[dict[str, Any]] = []
     location = f"{variable.sheet} -> {column_name}"
+    display_field = _get_display_field_param(rule)
 
     if operator in {"eq", "ne"}:
         expected_display = (
@@ -785,6 +847,7 @@ def check_fixed_value_compare(
                 build_fixed_result(
                     row_index=row["_row_index"],
                     raw_value=row[column_name],
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=message,
@@ -803,6 +866,7 @@ def check_fixed_value_compare(
                 build_fixed_result(
                     row_index=row["_row_index"],
                     raw_value=raw_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message="该值无法按数值参与比较。",
@@ -823,6 +887,7 @@ def check_fixed_value_compare(
             build_fixed_result(
                 row_index=row["_row_index"],
                 raw_value=raw_value,
+                display_value=_get_row_display_value(row, display_field),
                 rule_name=rule_name,
                 location=location,
                 message=message,
@@ -860,6 +925,7 @@ def check_sequence_order(
     abnormal_results: list[dict[str, Any]] = []
     delta = step if direction == "asc" else -step
     direction_label = "升序" if direction == "asc" else "降序"
+    display_field = _get_display_field_param(rule)
 
     expected_value: float | None = None
     if start_mode == "manual":
@@ -881,6 +947,7 @@ def check_sequence_order(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=raw_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(
@@ -902,6 +969,7 @@ def check_sequence_order(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=raw_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(
@@ -921,6 +989,7 @@ def check_sequence_order(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=raw_value,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(
@@ -944,6 +1013,7 @@ def check_composite_condition_check(
     """执行组合变量条件分支校验。"""
     target_tag = _get_fixed_rule_param(rule, "target_tag")
     rule_name = _get_fixed_rule_param(rule, "rule_name")
+    display_field = _get_display_field_param(rule)
     composite_config = _get_composite_rule_config(rule)
     variable, frame = _get_composite_variable_frame(context, target_tag, rule.rule_type)
 
@@ -969,6 +1039,7 @@ def check_composite_condition_check(
                 rule_name=rule_name,
                 frame=branch_frame,
                 branch=branch,
+                display_field=display_field,
             )
         )
 
@@ -1001,6 +1072,7 @@ def check_multi_composite_pipeline_check(
             rule_name=rule_name,
             frame=filtered_frame,
             assertions=node.assertions,
+            display_field=node.display_field,
         )
         if node_abnormal_results:
             return node_abnormal_results
@@ -1038,6 +1110,7 @@ def check_multi_composite_mapping_check(
                     rule_name=rule_name,
                     frame=frame,
                     condition=condition,
+                    display_field=node.display_field,
                 )
             )
 
@@ -1054,6 +1127,7 @@ def check_dual_composite_compare(
     reference_tag = _get_fixed_rule_param(rule, "reference_tag")
     key_check_mode = _get_fixed_rule_param(rule, "key_check_mode")
     rule_name = _get_fixed_rule_param(rule, "rule_name")
+    display_field = _get_display_field_param(rule)
     comparisons = _get_dual_composite_comparisons(rule)
 
     if key_check_mode not in {"baseline_only", "bidirectional"}:
@@ -1081,6 +1155,7 @@ def check_dual_composite_compare(
                 build_fixed_result(
                     row_index=int(row["_row_index"]),
                     raw_value=key,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=target_key_location,
                     message=f"目标组合变量中缺失该 Key ({key})。",
@@ -1099,6 +1174,7 @@ def check_dual_composite_compare(
                 target_row=target_row,
                 reference_row=reference_row,
                 comparisons=comparisons,
+                display_field=display_field,
             )
         )
 
@@ -1111,6 +1187,7 @@ def check_dual_composite_compare(
                 build_fixed_result(
                     row_index=int(row["_row_index"]),
                     raw_value=key,
+                    display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=reference_key_location,
                     message=f"基准组合变量中缺失该 Key ({key})。",
@@ -1129,6 +1206,7 @@ def _evaluate_dual_composite_key(
     target_row: pd.Series,
     reference_row: pd.Series,
     comparisons: list[DualCompositeComparison],
+    display_field: str | None,
 ) -> list[dict[str, Any]]:
     """执行单个 Key 上的全部字段比较。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -1148,6 +1226,7 @@ def _evaluate_dual_composite_key(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=key,
+                    display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=f"Key {key} 的基准变量缺少字段 {left_field}。",
@@ -1159,6 +1238,7 @@ def _evaluate_dual_composite_key(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=key,
+                    display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=f"Key {key} 的目标变量缺少字段 {right_field}。",
@@ -1177,6 +1257,7 @@ def _evaluate_dual_composite_key(
                     build_fixed_result(
                         row_index=row_index,
                         raw_value=left_value,
+                        display_value=_get_row_display_value(target_row, display_field),
                         rule_name=rule_name,
                         location=location,
                         message=(
@@ -1197,6 +1278,7 @@ def _evaluate_dual_composite_key(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=left_value,
+                    display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(
@@ -1212,6 +1294,7 @@ def _evaluate_dual_composite_key(
                 build_fixed_result(
                     row_index=row_index,
                     raw_value=left_value,
+                    display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
                     message=(

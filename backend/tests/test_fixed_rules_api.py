@@ -317,11 +317,13 @@ def _build_mapping_exclusion_range(
     end_row: int,
     *,
     range_id: str = "range-1",
+    expected_value: str = "0",
 ) -> dict[str, object]:
     return {
         "range_id": range_id,
         "start_row": start_row,
         "end_row": end_row,
+        "expected_value": expected_value,
     }
 
 
@@ -2431,6 +2433,7 @@ async def test_put_fixed_rules_config_accepts_multi_composite_mapping_round_trip
         "range_id": "range-3-4",
         "start_row": 3,
         "end_row": 4,
+        "expected_value": "0",
     }
 
 
@@ -2561,6 +2564,115 @@ async def test_execute_fixed_rules_multi_composite_mapping_excludes_single_row_r
                                 expected_value="1",
                                 exclusion_ranges=[
                                     _build_mapping_exclusion_range(3, 3, range_id="row-3"),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    assert execute_response.json()["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_keeps_row_when_exclusion_value_misses(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证排除范围行号命中但判定值未命中时仍输出异常。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_exclusion_value_miss.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 0, 1],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选失败判定值未命中",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(
+                                        3,
+                                        3,
+                                        range_id="row-3",
+                                        expected_value="9",
+                                    ),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        await client.put("/api/v1/fixed-rules/config", json=payload)
+        execute_response = await client.post("/api/v1/fixed-rules/execute")
+
+    assert execute_response.status_code == 200
+    abnormal_results = execute_response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["row_index"] == 3
+    assert "筛选失败排除行号范围或判定值" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_fixed_rules_multi_composite_mapping_exclusion_value_set_trims(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证排除范围判定值支持英文逗号多值并 trim 空格。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_exclusion_value_set.xlsx",
+        {
+            "INT_ID": [1, 2, 3],
+            "INT_Group": [1, 0, 1],
+            "INT_Faction": [0, 0, 0],
+        },
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                rule_name="筛选失败判定值集合命中",
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(
+                                        3,
+                                        3,
+                                        range_id="row-3",
+                                        expected_value="9, 0, 8",
+                                    ),
                                 ],
                             )
                         ],
@@ -3010,6 +3122,106 @@ async def test_put_fixed_rules_config_rejects_non_positive_mapping_exclusion_ran
 
     assert response.status_code == 400
     assert "行号必须大于 0" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_put_fixed_rules_config_rejects_empty_mapping_exclusion_expected_value(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    """验证排除范围判定值必须至少包含一个固定值。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_empty_exclusion_expected_value.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 0], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[
+                                    _build_mapping_exclusion_range(
+                                        3,
+                                        3,
+                                        expected_value=", ,",
+                                    ),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    async with _auth_client_ctx(auth_headers) as client:
+        response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert response.status_code == 400
+    assert "判定值至少需要一个固定值" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_get_fixed_rules_config_reports_legacy_mapping_exclusion_without_expected_value(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
+) -> None:
+    """验证历史排除范围缺少判定值时可读取并返回配置问题，但再次保存会被拦截。"""
+    workbook_path = _create_fixed_rules_workbook(
+        tmp_path / "multi_mapping_legacy_exclusion_expected_value.xlsx",
+        {"INT_ID": [1, 2], "INT_Group": [1, 0], "INT_Faction": [0, 0]},
+    )
+    composite_variable = _build_composite_variable()
+    legacy_range = _build_mapping_exclusion_range(3, 3)
+    legacy_range.pop("expected_value")
+    payload = _build_v4_payload(
+        workbook_path,
+        variables=[composite_variable],
+        rules=[
+            _build_multi_composite_mapping_rule(
+                composite_variable["tag"],
+                nodes=[
+                    _build_mapping_node(
+                        composite_variable["tag"],
+                        filters=[
+                            _build_mapping_filter(
+                                field="INT_Group",
+                                expected_value="1",
+                                exclusion_ranges=[legacy_range],
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    await seed_fixed_rules_config(payload, test_project_id)
+
+    async with _auth_client_ctx(auth_headers) as client:
+        get_response = await client.get("/api/v1/fixed-rules/config")
+        save_response = await client.put(
+            "/api/v1/fixed-rules/config",
+            json=get_response.json()["data"],
+        )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["meta"]["config_issues"]
+    saved_range = get_response.json()["data"]["rules"][0]["mapping_config"]["nodes"][0][
+        "filters"
+    ][0]["exclusion_ranges"][0]
+    assert saved_range == {"range_id": "range-1", "start_row": 3, "end_row": 3}
+    assert save_response.status_code == 400
+    assert "缺少判定值" in save_response.json()["detail"]
 
 
 @pytest.mark.anyio

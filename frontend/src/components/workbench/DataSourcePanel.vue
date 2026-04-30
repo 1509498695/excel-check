@@ -19,7 +19,7 @@ import { useWorkbenchStore } from '../../store/workbench'
 import type { SourceManagementStoreLike } from '../../types/panelStores'
 import type { DataSource, SourceType } from '../../types/workbench'
 import { extractSourceBasename } from '../../utils/sourcePathReplacement'
-import { getSourceTypeLabel, SOURCE_TYPE_OPTIONS } from '../../utils/workbenchMeta'
+import { DEFAULT_SOURCE_TYPE, getSourceTypeLabel, SOURCE_TYPE_OPTIONS } from '../../utils/workbenchMeta'
 
 const props = withDefaults(
   defineProps<{
@@ -54,7 +54,7 @@ const sourceIdTouched = ref(false)
 
 const draft = reactive<DataSource>({
   id: '',
-  type: 'local_excel',
+  type: DEFAULT_SOURCE_TYPE,
   pathOrUrl: '',
   token: '',
 })
@@ -106,7 +106,7 @@ const canSaveSource = computed(() => {
 
 function resetDraft(): void {
   draft.id = ''
-  draft.type = 'local_excel'
+  draft.type = DEFAULT_SOURCE_TYPE
   draft.pathOrUrl = ''
   draft.token = ''
   sourceIdTouched.value = false

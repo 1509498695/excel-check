@@ -58,7 +58,7 @@ def _write_summary_sheet(sheet: Any, payload: dict[str, Any], scope_label: str) 
 
 
 def _write_detail_sheet(sheet: Any, abnormal_results: list[dict[str, Any]]) -> None:
-    headers = ["级别", "规则名称", "定位", "行号", "原始值", "说明"]
+    headers = ["级别", "规则名称", "定位", "行号", "原始值", "显示字段", "说明"]
     sheet.append(headers)
     for item in abnormal_results:
         sheet.append(
@@ -68,6 +68,7 @@ def _write_detail_sheet(sheet: Any, abnormal_results: list[dict[str, Any]]) -> N
                 _format_cell_value(item.get("location")),
                 item.get("row_index", ""),
                 _format_cell_value(item.get("raw_value")),
+                _format_cell_value(item.get("display_value")),
                 _format_cell_value(item.get("message")),
             ]
         )

@@ -85,6 +85,7 @@ async def persist_execution_result(
                 location=str(item.get("location", "")),
                 row_index=int(item.get("row_index", 0)),
                 raw_value_json=_serialize_raw_value(item.get("raw_value")),
+                display_value_json=_serialize_raw_value(item.get("display_value")),
                 message=str(item.get("message", "")),
             )
         )
@@ -140,6 +141,7 @@ async def fetch_execution_result_page(
                 "location": row.location,
                 "row_index": row.row_index,
                 "raw_value": _deserialize_raw_value(row.raw_value_json),
+                "display_value": _deserialize_raw_value(row.display_value_json),
                 "message": row.message,
             }
             for row in rows
@@ -194,6 +196,7 @@ async def fetch_execution_result_export(
                 "location": row.location,
                 "row_index": row.row_index,
                 "raw_value": _deserialize_raw_value(row.raw_value_json),
+                "display_value": _deserialize_raw_value(row.display_value_json),
                 "message": row.message,
             }
             for row in rows

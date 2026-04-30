@@ -23,6 +23,7 @@ export interface AbnormalResult {
   location: string
   row_index: number
   raw_value: unknown
+  display_value?: unknown
   message: string
 }
 

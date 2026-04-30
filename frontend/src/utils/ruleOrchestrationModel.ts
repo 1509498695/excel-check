@@ -173,6 +173,7 @@ export function normalizeMultiCompositePipelineNode(
   return {
     node_id: node.node_id.trim() || createNodeId(),
     variable_tag: preserveNonBlankIdentifier(node.variable_tag),
+    display_field: preserveNonBlankIdentifier(node.display_field),
     filters: node.filters.map(normalizeCompositeCondition),
     assertions: node.assertions.map(normalizeCompositeCondition),
   }
@@ -210,6 +211,7 @@ export function normalizeMultiCompositeMappingExclusionRange(
     range_id: range.range_id.trim() || createRangeId(),
     start_row: Number(range.start_row),
     end_row: Number(range.end_row),
+    expected_value: range.expected_value?.trim() ?? '',
   }
 }
 
@@ -231,6 +233,7 @@ export function normalizeMultiCompositeMappingNode(
   return {
     node_id: node.node_id.trim() || createNodeId(),
     variable_tag: preserveNonBlankIdentifier(node.variable_tag),
+    display_field: preserveNonBlankIdentifier(node.display_field),
     filters: (node.filters ?? []).map(normalizeMultiCompositeMappingFilter),
   }
 }
@@ -349,13 +352,18 @@ export function isValidMultiCompositePipelineConfig(
 function isValidMappingExclusionRange(range: MultiCompositeMappingExclusionRange): boolean {
   const startRow = Number(range.start_row)
   const endRow = Number(range.end_row)
+  const expectedValues = (range.expected_value ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
   return (
     Boolean(range.range_id.trim()) &&
     Number.isInteger(startRow) &&
     Number.isInteger(endRow) &&
     startRow > 0 &&
     endRow > 0 &&
-    startRow <= endRow
+    startRow <= endRow &&
+    expectedValues.length > 0
   )
 }
 

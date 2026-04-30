@@ -34,6 +34,14 @@ def _get_rule_location(rule: ValidationRule, *, tag: str, column_name: str) -> s
     return f"{tag} -> {column_name}"
 
 
+def _get_display_value(rule: ValidationRule, row: Any, column_name: str) -> Any:
+    """单变量规则只允许展示当前关联列。"""
+    display_field = rule.params.get("display_field")
+    if not isinstance(display_field, str) or display_field.strip() != column_name:
+        return None
+    return row[column_name]
+
+
 @register_rule("not_null", dependent_tags=by_target_tags)
 def check_not_null(
     rule: ValidationRule, context: RuleExecutionContext
@@ -56,6 +64,7 @@ def check_not_null(
                     column_name=column_name,
                     row_index=row["_row_index"],
                     raw_value=row[column_name],
+                    display_value=_get_display_value(rule, row, column_name),
                     message="该字段不能为空。",
                     location=_get_rule_location(rule, tag=tag, column_name=column_name),
                 )
@@ -88,6 +97,7 @@ def check_unique(
                     column_name=column_name,
                     row_index=row["_row_index"],
                     raw_value=row[column_name],
+                    display_value=_get_display_value(rule, row, column_name),
                     message="该值存在重复项。",
                     location=_get_rule_location(rule, tag=tag, column_name=column_name),
                 )

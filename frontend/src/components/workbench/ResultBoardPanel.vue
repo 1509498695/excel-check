@@ -97,6 +97,16 @@ function displayRawValue(value: unknown): string {
   return String(value)
 }
 
+function displayOptionalValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return ''
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value)
+  }
+  return String(value)
+}
+
 function handlePageChange(page: number): void {
   void store.value.loadResultPage(page)
 }
@@ -198,13 +208,14 @@ function handleExportResults(): void {
             <th class="w-[20%]">定位</th>
             <th class="w-[80px]">行号</th>
             <th class="w-[120px]">原始值</th>
+            <th class="w-[120px]">显示字段</th>
             <th class="w-[120px]">级别</th>
             <th>说明</th>
           </tr>
         </template>
         <template #body>
           <tr v-if="store.isExecuting">
-            <td colspan="6" class="bg-card">
+            <td colspan="7" class="bg-card">
               <EmptyState
                 variant="table"
                 icon-tone="result"
@@ -221,7 +232,7 @@ function handleExportResults(): void {
             </td>
           </tr>
           <tr v-else-if="!store.executionMeta">
-            <td colspan="6" class="bg-card">
+            <td colspan="7" class="bg-card">
               <EmptyState
                 variant="table"
                 icon-tone="result"
@@ -232,7 +243,7 @@ function handleExportResults(): void {
             </td>
           </tr>
           <tr v-else-if="!store.abnormalResultTotal">
-            <td colspan="6" class="bg-card">
+            <td colspan="7" class="bg-card">
               <EmptyState
                 variant="table"
                 icon-tone="result"
@@ -259,6 +270,9 @@ function handleExportResults(): void {
               </td>
               <td class="align-top font-mono text-[12px] text-ink-700">
                 {{ displayRawValue(row.raw_value) }}
+              </td>
+              <td class="align-top font-mono text-[12px] text-ink-700">
+                {{ displayOptionalValue(row.display_value) }}
               </td>
               <td class="align-top">
                 <el-tag :type="getLevelType(row.level)" effect="light" round>

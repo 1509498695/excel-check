@@ -34,6 +34,14 @@ def _get_rule_location(rule: ValidationRule, *, tag: str, column_name: str) -> s
     return f"{tag} -> {column_name}"
 
 
+def _get_display_value(rule: ValidationRule, row: Any, column_name: str) -> Any:
+    """跨表映射展示目标变量当前列。"""
+    display_field = rule.params.get("display_field")
+    if not isinstance(display_field, str) or display_field.strip() != column_name:
+        return None
+    return row[column_name]
+
+
 @register_rule("cross_table_mapping", dependent_tags=by_dict_and_target_tag)
 def check_cross_table_mapping(
     rule: ValidationRule, context: RuleExecutionContext
@@ -68,6 +76,7 @@ def check_cross_table_mapping(
                     column_name=target_column,
                     row_index=row["_row_index"],
                     raw_value=row[target_column],
+                    display_value=_get_display_value(rule, row, target_column),
                     message="在基础字典中未命中该映射值。",
                     location=_get_rule_location(
                         rule,

@@ -53,11 +53,11 @@ frontend/src
 ├── components
 │   ├── shell/          # 共享 UI 组件：PageHeader / AppCard / SectionHeader / StatusBadge / Button / MetricCard / DataTable / EmptyState
 │   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
-├── router/             # vue-router：/login /register / /fixed-rules /admin /profile
+├── router/             # vue-router：/login /register / /fixed-rules /admin /profile /user-guide
 ├── store/              # Pinia：auth / workbench / fixedRules
 ├── types/              # TypeScript 类型：api / workbench / fixedRules / auth
 ├── utils/              # ruleOrchestrationModel / taskTree / workbenchMeta / apiFetch
-├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / LoginView / RegisterView
+├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / UserGuideView / LoginView / RegisterView
 ├── App.vue             # 应用壳：ec-* 左侧固定边栏 + 右侧独立滚动工作区
 ├── main.ts             # 入口
 └── style.css           # 全局 token 与共享 utility（统一收口在此）
@@ -82,7 +82,7 @@ frontend/src
 - 页面级视觉替换应优先复用这些组件，不直接复制卡片、按钮、状态标签和表格样式。
 - `style.css` 末尾保留 `Global UI Final Polish` 最终覆盖层，用于统一 Element Plus、旧 `ec-*` 类和新版 `ui-*` 组件的按钮、输入框、表格、标签、卡片、空态与链接细节。
 - 个人校验 `/` 使用 `personal-check-*` 专用类、项目校验 `/fixed-rules` 使用 `project-check-*` 专用类，对步骤条、统计卡、工作区表格、规则区和结果空态做参考稿级视觉精修；两者共享同一套 SaaS 工作台视觉基线。
-- 个人校验 `/` 与项目校验 `/fixed-rules` 共享 `ResultBoardPanel`：执行后可导出 Excel，文件包含 `统计摘要` 与 `异常明细` 两个页签，导出的是当前 `result_id` 的全量结果而不是当前分页。
+- 个人校验 `/` 与项目校验 `/fixed-rules` 共享 `ResultBoardPanel`：执行后可导出 Excel，文件包含 `统计摘要` 与 `异常明细` 两个页签，导出的是当前 `result_id` 的全量结果而不是当前分页；规则可选配置 `结果显示字段`，异常明细表和导出会展示该字段值。
 - 管理后台 `/admin` 使用 `admin-dashboard-*` 专用类，对页面头操作区、统计卡、项目列表卡片、详情表格和成员表格做新版后台视觉精修。
 - 个人设置 `/profile` 使用 `profile-settings-*` 专用类，对账号信息、横向密码表单、我的项目表格和状态标签做新版设置页视觉精修。
 
@@ -90,16 +90,22 @@ frontend/src
 
 详见根 [../README.md](../README.md) 第 4 节「最短联调」。
 
+系统使用说明入口：
+
+- `/user-guide` 面向新用户提供快速上手指南，按“个人校验首跑 -> 项目校验复用 -> 数据源 / 变量 / 规则 -> 结果查看 -> FAQ”组织内容。
+- 个人校验页和个人设置页均提供“系统使用说明”入口，可在新页签打开后按目录跳转章节。
+
 规则编排补充：
 
 - 个人校验步骤 3 的单变量规则弹窗现已支持 `包含 (in)`。
 - 个人校验步骤 3 与项目校验 `/fixed-rules` 的单变量规则弹窗都支持 `顺序校验`。
 - 个人校验步骤 3 与项目校验 `/fixed-rules` 的规则弹窗现统一支持 5 类入口：`单一变量校验`、`组合分支校验`、`跨组变量校验`、`多组串行校验`、`多组映射校验`。
 - 规则弹窗会先选择规则类型，再按类型过滤目标变量：单一变量校验只显示单变量，组合分支校验 / 跨组变量校验只显示组合变量；多组串行校验 / 多组映射校验不显示顶部目标变量，变量只在每个节点内选择。
+- 每条规则可选 `结果显示字段`：单变量规则只能选择当前列，组合类规则可选择当前组合变量的 Key 或组合列，多组串行 / 多组映射按节点选择；未选择时结果列为空。
 - `等于 / 不等于 + 固定值` 支持切换 `固定值 / 规则集`；选择规则集后用英文逗号配置多个值，例如 `0,1,2`，命中任一值即视为等于，命中任一值即触发不等于异常。
 - 单一变量校验新增 `正则校验`，输入正则表达式后会按完整匹配校验整格内容。
 - `多组串行校验` 支持 1..N 个组合变量节点：单节点时执行“前置过滤 + 最终判定”，多节点时按顺序串行执行；首个失败节点会输出该节点的全部异常并停止后续节点。
-- `多组映射校验` 支持 1..N 个组合变量节点：每个节点内的多条筛选条件都是独立检查项；某行未通过筛选时会先进入异常结果，再按该筛选的“筛选失败排除行号范围”判断是否移除。节点之间不短路，全部执行后汇总异常，适合“少数 Excel 行号不满足筛选但符合业务预期”的配置校验。
+- `多组映射校验` 支持 1..N 个组合变量节点：每个节点内的多条筛选条件都是独立检查项；某行未通过筛选时会先进入异常结果，再按该筛选的“筛选失败排除行号范围 + 判定值”判断是否移除。判定值固定比较当前筛选字段，支持英文逗号多值，例如 `0,1,2`；节点之间不短路，全部执行后汇总异常，适合“少数 Excel 行号不满足筛选但符合业务预期”的配置校验。
 - `顺序校验` 按原始表格行序逐行检查数值连续性，支持升序 / 降序、步长，以及自动首行 / 手动起始值。
 - `跨组变量校验` 会先按两个组合变量的外层 Key 关联，再按配置的多条字段比较规则做 AND 校验；当前支持 `等于 / 不等于 / 大于 / 小于 / 非空`，并可切换 `基准变量为准 / 双向检查` 两种 Key 校验方式。
 - 选择 `包含 (in)` 后，“比较值”会从文本输入切换为变量池中的单个变量下拉。
@@ -116,7 +122,7 @@ frontend/src
 
 SVN 数据源接入：
 
-- 在「新增数据源」弹窗里把类型切到 `SVN（推荐 HTTP 链接）`，默认进入「远端 URL」子模式；输入目录 URL（例如 `https://samosvn/data/project/samo/GameDatas/datas_qa88/`）后点「浏览此目录」即可在弹窗里挑选 `.xls/.xlsx` 文件。
+- 在「新增数据源」弹窗里默认选中 `SVN（推荐 HTTP 链接）`，并进入「远端 URL」子模式；输入目录 URL（例如 `https://samosvn/data/project/samo/GameDatas/datas_qa88/`）后点「浏览此目录」即可在弹窗里挑选 `.xls/.xlsx` 文件。
 - 本地 Excel 与 SVN Excel 现在都支持“先选文件，再自动回填数据源标识”；若当时标识为空，会按文件名自动生成一个只含字母、数字与下划线的标识。若自动生成值与现有数据源重复，页面会提示你手动修改后再保存。
 - 步骤 2 的字段映射与变量添加现同时支持本地 Excel 和 SVN Excel；CSV 与飞书入口当前显示为“占位”并禁用新增。
 - 步骤 1 头部的 `数据源路径管理` 现只管理远端 SVN 目录 URL；本地 Excel 推荐通过上传文件重新接入，不再提供本地路径替换管理。
@@ -126,4 +132,4 @@ SVN 数据源接入：
 - `samosvn` 的“测试目录 URL”默认回填为 `https://samosvn/data/project/samo/GameDatas/`；你也可以改成别的 SVN 目录并保存。系统会按当前登录用户与 host 记住这个目录，“测试连接”会先保存凭据，再对当前输入的目录执行一次 `svn list`。
 - 页面刷新后，步骤 1 的远端 SVN 数据源会主动拉取当前登录用户已保存的 SVN host 凭据列表；状态列会按 `检测中 → 已就绪 / 待授权 / 状态未知` 的真实加载结果更新，不再依赖手动打开弹窗后才纠正状态。
 - SVN 业务级鉴权失败用 HTTP 403 表达，不会让前端误以为登录态过期；首次拉取 `~400 文件目录` 通常需要 1–3 秒（取决于网络），后续命中本地缓存即时返回，60 秒 TTL 内重复执行不再访问 SVN。
-- 若需要强制刷新缓存或浏览到子目录的文件：picker 支持回到入口目录后再下钻 1 层；`/fixed-rules` 的 SVN 更新按钮会同时刷新本地工作副本和远端缓存目录。
+- 若需要强制刷新缓存或浏览到子目录的文件：picker 支持回到入口目录后再下钻 1 层；个人校验 `/` 与项目校验 `/fixed-rules` 的 SVN 更新按钮都会先保存当前配置，再刷新本地工作副本和远端缓存目录。

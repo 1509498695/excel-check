@@ -114,6 +114,7 @@ class MultiCompositePipelineNode(BaseModel):
 
     node_id: str
     variable_tag: str
+    display_field: str | None = None
     filters: list[CompositeCondition] = Field(default_factory=list)
     assertions: list[CompositeCondition] = Field(default_factory=list)
 
@@ -157,6 +158,7 @@ class MultiCompositeMappingExclusionRange(BaseModel):
     range_id: str
     start_row: int
     end_row: int
+    expected_value: str | None = None
 
 
 class MultiCompositeMappingFilter(CompositeCondition):
@@ -172,6 +174,7 @@ class MultiCompositeMappingNode(BaseModel):
 
     node_id: str
     variable_tag: str
+    display_field: str | None = None
     filters: list[MultiCompositeMappingFilter] = Field(default_factory=list)
     field_checks: list[MultiCompositeMappingFieldCheck] = Field(default_factory=list, exclude=True)
     field: str | None = Field(default=None, exclude=True)
@@ -206,6 +209,7 @@ class FixedRuleDefinition(BaseModel):
     group_id: str
     rule_name: str
     target_variable_tag: str | None = None
+    display_field: str | None = None
     binding: FixedRuleBinding | None = None
     rule_type: FixedRuleType = "fixed_value_compare"
     operator: FixedRuleOperator | None = None

@@ -1,5 +1,7 @@
 import type { ExpectedType, SourceType } from '../types/workbench'
 
+export const DEFAULT_SOURCE_TYPE: SourceType = 'svn'
+
 export const SOURCE_TYPE_OPTIONS: Array<{ label: string; value: SourceType; disabled?: boolean }> = [
   { label: 'SVN（推荐 HTTP 链接）', value: 'svn' },
   { label: '本地 Excel (.xlsx / .xls)', value: 'local_excel' },

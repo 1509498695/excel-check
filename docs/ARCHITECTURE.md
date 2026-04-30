@@ -48,12 +48,12 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 - 多用户认证：注册 / 登录 / 当前用户 / 修改密码 / 切换项目；JWT 携带；前端 `apiFetch` 统一注入与 `401` 跳登录。
 - 三级角色：超级管理员、项目管理员、普通用户；项目管理员可进入受限版 `/admin`。
 - 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
-- 个人校验四步工作流：数据源 → 变量池 → 规则编排 → 结果。
+- 个人校验四步工作流：数据源 → 变量池 → 规则编排 → 结果；可刷新当前用户个人配置中的 SVN 来源。
 - 项目校验页独立 `version=6` 配置：`sources / variables / groups / rules` 一体化保存，并兼容历史路径替换字段。
 - 10 类规则：`not_null / unique / regex_check / sequence_order_check / fixed_value_compare / cross_table_mapping / composite_condition_check / dual_composite_compare / multi_composite_pipeline_check / multi_composite_mapping_check`。
 - 组合变量：同一数据源同 Sheet 的多列组合，支持 `key_column` 与 JSON 映射。
 - 统一执行结果协议：4 字段 `meta` + N 行 `abnormal_results`。
-- SVN 数据源（HTTP）打通：用户在数据源弹窗里粘贴目录 URL，弹窗浏览选择 `.xls/.xlsx`，凭据按当前登录用户与 host 维度加密落盘；远端 URL 落到 `<runtime>/svn-cache/<host>/<key>/` 并复用统一执行引擎。`/api/v1/fixed-rules/svn-update` 同时支持本地工作副本与远端缓存目录。
+- SVN 数据源（HTTP）打通：用户在数据源弹窗里粘贴目录 URL，弹窗浏览选择 `.xls/.xlsx`，凭据按当前登录用户与 host 维度加密落盘；远端 URL 落到 `<runtime>/svn-cache/<host>/<key>/` 并复用统一执行引擎。`/api/v1/workbench/svn-update` 与 `/api/v1/fixed-rules/svn-update` 同时支持本地工作副本与远端缓存目录。
 - 全站统一视觉：`PageHeader / SectionHeader / StatPill / DataTable / EmptyState` 共享组件。
 
 ### 3.2 占位 / 未闭环
@@ -138,6 +138,7 @@ class TaskTree:
     "location": str,             # 形如 sheet -> column
     "row_index": int,            # Excel 实际行号 = pandas 索引 + 2
     "raw_value": Any,            # 原始单元格值
+    "display_value": Any,        # 可选结果显示字段值；未配置时为空或省略
     "message": str,
 }
 ```
@@ -218,6 +219,7 @@ class TaskTree:
 | `POST` | `/engine/execute` | 入参 `TaskTree`，出参统一响应协议。 |
 | `GET` | `/workbench/config` | 读取当前用户在当前项目下的个人校验配置。 |
 | `PUT` | `/workbench/config` | 保存个人校验配置（前端 2 秒防抖自动调用）。 |
+| `POST` | `/workbench/svn-update` | 刷新当前用户个人校验配置中的 SVN 来源，按目标去重并复用统一 SVN 更新逻辑。 |
 
 ### 5.5 项目校验 `/fixed-rules`
 

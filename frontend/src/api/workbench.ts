@@ -13,6 +13,7 @@ import type {
   SourceMetadataResponse,
   SourceUploadResponse,
   TaskTree,
+  WorkbenchSvnUpdateResponse,
 } from '../types/workbench'
 import { apiDownloadFile, apiFetch, type ApiFileResponse } from '../utils/apiFetch'
 
@@ -104,5 +105,11 @@ export async function saveWorkbenchConfig(
   return apiFetch('/api/v1/workbench/config', {
     method: 'PUT',
     body: JSON.stringify(config),
+  })
+}
+
+export async function triggerWorkbenchSvnUpdate(): Promise<WorkbenchSvnUpdateResponse> {
+  return apiFetch<WorkbenchSvnUpdateResponse>('/api/v1/workbench/svn-update', {
+    method: 'POST',
   })
 }

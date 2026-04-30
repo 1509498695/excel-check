@@ -1044,6 +1044,7 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         group_id: rule.group_id,
         rule_name: rule.rule_name.trim(),
         target_variable_tag: normalizedTargetTag.trim(),
+        display_field: rule.display_field?.trim() || undefined,
         rule_type: rule.rule_type,
         operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
         expected_value:

@@ -10,6 +10,7 @@ import {
   fetchSourceMetadata,
   fetchWorkbenchConfig,
   saveWorkbenchConfig,
+  triggerWorkbenchSvnUpdate,
 } from '../api/workbench'
 import type { FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
 import type {
@@ -22,6 +23,7 @@ import type {
   ValidationRule,
   VariablePreviewData,
   VariableTag,
+  WorkbenchSvnUpdateItem,
 } from '../types/workbench'
 import {
   collectVariableTagsBySourceIds,
@@ -69,6 +71,7 @@ interface WorkbenchState {
   isExecuting: boolean
   isResultPageLoading: boolean
   isResultExporting: boolean
+  isUpdatingSvn: boolean
   pageError: string
   abnormalResults: AbnormalResult[]
   abnormalResultTotal: number
@@ -76,6 +79,8 @@ interface WorkbenchState {
   resultId: number | null
   resultCurrentPage: number
   resultPageSize: number
+  svnUpdateResults: WorkbenchSvnUpdateItem[]
+  svnUpdateSummary: string
   activeTag: string | null
   preferredSourceId: string | null
   sourceMetadataMap: Record<string, SourceMetadata>
@@ -259,6 +264,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     isExecuting: false,
     isResultPageLoading: false,
     isResultExporting: false,
+    isUpdatingSvn: false,
     pageError: '',
     abnormalResults: [],
     abnormalResultTotal: 0,
@@ -266,6 +272,8 @@ export const useWorkbenchStore = defineStore('workbench', {
     resultId: null,
     resultCurrentPage: 1,
     resultPageSize: 20,
+    svnUpdateResults: [],
+    svnUpdateSummary: '',
     activeTag: null,
     preferredSourceId: null,
     sourceMetadataMap: {},
@@ -466,6 +474,10 @@ export const useWorkbenchStore = defineStore('workbench', {
       )
     },
 
+    canRunSvnUpdate(): boolean {
+      return this.sources.length > 0
+    },
+
     hasBlockingSourceIssues(state): boolean {
       return Object.keys(state.sourceIssues).length > 0
     },
@@ -496,6 +508,11 @@ export const useWorkbenchStore = defineStore('workbench', {
       this.resultCurrentPage = 1
       this.isResultPageLoading = false
       this.isResultExporting = false
+    },
+
+    clearSvnUpdateResult(): void {
+      this.svnUpdateResults = []
+      this.svnUpdateSummary = ''
     },
 
     setActiveTag(tag: string | null): void {
@@ -946,6 +963,7 @@ export const useWorkbenchStore = defineStore('workbench', {
         group_id: rule.group_id,
         rule_name: rule.rule_name.trim(),
         target_variable_tag: normalizedTargetTag.trim(),
+        display_field: rule.display_field?.trim() || undefined,
         rule_type: rule.rule_type,
         operator: rule.rule_type === 'fixed_value_compare' ? rule.operator : undefined,
         expected_value:
@@ -1136,6 +1154,23 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     async saveConfigNow(): Promise<void> {
       await saveWorkbenchConfig(this._getAutoSavePayload())
+    },
+
+    async runSvnUpdate(): Promise<void> {
+      this.isUpdatingSvn = true
+      this.pageError = ''
+
+      try {
+        await this.saveConfigNow()
+        const response = await triggerWorkbenchSvnUpdate()
+        this.svnUpdateResults = response.data.results
+        this.svnUpdateSummary = `已处理 ${response.data.total_paths} 个路径，成功更新 ${response.data.updated_paths} 个。`
+      } catch (error) {
+        this.pageError = error instanceof Error ? error.message : 'SVN 更新失败。'
+        throw error
+      } finally {
+        this.isUpdatingSvn = false
+      }
     },
 
     async replaceSourceBasePath(group: SourcePathReplacementGroup, baseDirectory: string): Promise<{
@@ -1343,6 +1378,9 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.resultCurrentPage = 1
         this.isResultPageLoading = false
         this.isResultExporting = false
+        this.isUpdatingSvn = false
+        this.svnUpdateResults = []
+        this.svnUpdateSummary = ''
         this.sourceMetadataMap = {}
         this.variablePreviewMap = {}
         this.sourceIssues = {}

@@ -59,6 +59,23 @@ export interface TaskTree {
 
 export type ExecuteResponse = ExecutionResponse
 
+export interface WorkbenchSvnUpdateItem {
+  kind?: 'working_copy' | 'remote_cache'
+  working_copy: string
+  source_id?: string
+  source_url?: string
+  status: 'success' | 'error'
+  output: string
+  used_executable: string
+  error?: string
+}
+
+export type WorkbenchSvnUpdateResponse = ApiResponse<{
+  total_paths: number
+  updated_paths: number
+  results: WorkbenchSvnUpdateItem[]
+}>
+
 export type SourceCapabilitiesResponse = ApiResponse<{
   source_types: SourceType[]
   implemented: boolean

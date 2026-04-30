@@ -464,6 +464,8 @@ def _validate_and_normalize_fixed_rules_config(
         group_ids={group.group_id for group in groups},
         variable_map=variable_map,
         allow_legacy_mapping_config=allow_legacy_mapping_config,
+        config_issues=config_issues if allow_runtime_issues else None,
+        issue_keys=issue_keys if allow_runtime_issues else None,
     )
 
     configured = bool(
@@ -601,6 +603,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
                     target_variable_tag=rule.target_variable_tag,
+                    display_field=rule.display_field,
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
@@ -626,6 +629,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     group_id=rule.group_id,
                     rule_name=rule.rule_name,
                     target_variable_tag=rule.target_variable_tag,
+                    display_field=rule.display_field,
                     rule_type=rule.rule_type,
                     operator=rule.operator,
                     expected_value=rule.expected_value,
@@ -697,6 +701,7 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 group_id=rule.group_id,
                 rule_name=rule.rule_name,
                 target_variable_tag=target_tag,
+                display_field=rule.display_field,
                 rule_type=rule.rule_type,
                 operator=rule.operator,
                 expected_value=rule.expected_value,
@@ -1064,6 +1069,8 @@ def _normalize_rules(
     group_ids: set[str],
     variable_map: dict[str, VariableTag],
     allow_legacy_mapping_config: bool = False,
+    config_issues: list[FixedRulesConfigIssue] | None = None,
+    issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None = None,
 ) -> list[FixedRuleDefinition]:
     """???????????????????????"""
     normalized_rules: list[FixedRuleDefinition] = []
@@ -1122,6 +1129,7 @@ def _normalize_rules(
         normalized_dual_comparisons: list[DualCompositeComparison] = []
         normalized_pipeline_config: MultiCompositePipelineConfig | None = None
         normalized_mapping_config: MultiCompositeMappingConfig | None = None
+        normalized_display_field: str | None = None
 
         if not is_node_driven_rule:
             if variable_kind == "single" and rule_type == "composite_condition_check":
@@ -1259,8 +1267,17 @@ def _normalize_rules(
                 mapping_config=rule.mapping_config,
                 variable_map=variable_map,
                 allow_legacy_mapping_config=allow_legacy_mapping_config,
+                config_issues=config_issues,
+                issue_keys=issue_keys,
             )
             target_variable_tag = normalized_mapping_config.nodes[0].variable_tag
+
+        if not is_node_driven_rule:
+            normalized_display_field = _normalize_display_field(
+                rule_id=rule_id,
+                variable=target_variable,
+                display_field=rule.display_field,
+            )
 
         normalized_rules.append(
             FixedRuleDefinition(
@@ -1268,6 +1285,7 @@ def _normalize_rules(
                 group_id=group_id,
                 rule_name=rule_name,
                 target_variable_tag=target_variable_tag,
+                display_field=normalized_display_field,
                 rule_type=rule_type,
                 operator=normalized_operator,
                 expected_value=normalized_expected_value,
@@ -1391,6 +1409,11 @@ def _normalize_multi_composite_pipeline_config(
             )
 
         available_fields = _collect_composite_available_fields(variable)
+        display_field = _normalize_display_field(
+            rule_id=rule_id,
+            variable=variable,
+            display_field=node.display_field,
+        )
         filters = _normalize_composite_conditions(
             rule_id=rule_id,
             conditions=node.filters,
@@ -1412,6 +1435,7 @@ def _normalize_multi_composite_pipeline_config(
             MultiCompositePipelineNode(
                 node_id=node_id,
                 variable_tag=variable_tag,
+                display_field=display_field,
                 filters=filters,
                 assertions=assertions,
             )
@@ -1427,6 +1451,8 @@ def _normalize_multi_composite_mapping_config(
     mapping_config: MultiCompositeMappingConfig | None,
     variable_map: dict[str, VariableTag],
     allow_legacy_mapping_config: bool = False,
+    config_issues: list[FixedRulesConfigIssue] | None = None,
+    issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None = None,
 ) -> MultiCompositeMappingConfig:
     """校验并规范多组映射校验配置。"""
     if mapping_config is None:
@@ -1461,11 +1487,19 @@ def _normalize_multi_composite_mapping_config(
             )
 
         available_fields = _collect_composite_available_fields(variable)
+        display_field = _normalize_display_field(
+            rule_id=rule_id,
+            variable=variable,
+            display_field=node.display_field,
+        )
         filters = _normalize_multi_composite_mapping_filters(
             rule_id=rule_id,
             conditions=node.filters,
             node_index=node_index,
             available_fields=available_fields,
+            allow_legacy_mapping_config=allow_legacy_mapping_config,
+            config_issues=config_issues,
+            issue_keys=issue_keys,
         )
         if not filters:
             if allow_legacy_mapping_config and _has_legacy_mapping_node_content(node):
@@ -1473,6 +1507,7 @@ def _normalize_multi_composite_mapping_config(
                     MultiCompositeMappingNode(
                         node_id=node_id,
                         variable_tag=variable_tag,
+                        display_field=display_field,
                         filters=[],
                     )
                 )
@@ -1484,6 +1519,7 @@ def _normalize_multi_composite_mapping_config(
             MultiCompositeMappingNode(
                 node_id=node_id,
                 variable_tag=variable_tag,
+                display_field=display_field,
                 filters=filters,
             )
         )
@@ -1503,6 +1539,9 @@ def _normalize_multi_composite_mapping_filters(
     conditions: list[MultiCompositeMappingFilter],
     node_index: int,
     available_fields: list[str],
+    allow_legacy_mapping_config: bool = False,
+    config_issues: list[FixedRulesConfigIssue] | None = None,
+    issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None = None,
 ) -> list[MultiCompositeMappingFilter]:
     """校验并规范单个映射节点下的筛选检查列表。"""
     normalized_conditions = _normalize_composite_conditions(
@@ -1521,6 +1560,9 @@ def _normalize_multi_composite_mapping_filters(
             node_index=node_index,
             filter_index=filter_index,
             ranges=condition.exclusion_ranges,
+            allow_legacy_mapping_config=allow_legacy_mapping_config,
+            config_issues=config_issues,
+            issue_keys=issue_keys,
         )
         normalized_filters.append(
             MultiCompositeMappingFilter(
@@ -1538,6 +1580,9 @@ def _normalize_multi_composite_mapping_exclusion_ranges(
     node_index: int,
     filter_index: int,
     ranges: list[MultiCompositeMappingExclusionRange],
+    allow_legacy_mapping_config: bool = False,
+    config_issues: list[FixedRulesConfigIssue] | None = None,
+    issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None = None,
 ) -> list[MultiCompositeMappingExclusionRange]:
     """校验并规范单条筛选失败后的排除行号范围。"""
     if not ranges:
@@ -1550,6 +1595,7 @@ def _normalize_multi_composite_mapping_exclusion_ranges(
         range_id = row_range.range_id.strip()
         start_row = row_range.start_row
         end_row = row_range.end_row
+        expected_value = (row_range.expected_value or "").strip()
 
         if not range_id:
             raise ValueError(
@@ -1571,6 +1617,28 @@ def _normalize_multi_composite_mapping_exclusion_ranges(
                 f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
                 f"第 {range_index} 段排除范围开始行不能大于结束行。"
             )
+        if not expected_value:
+            message = (
+                f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                f"第 {range_index} 段排除范围缺少判定值。"
+            )
+            if allow_legacy_mapping_config and config_issues is not None:
+                _append_config_issue(
+                    config_issues,
+                    issue_keys,
+                    rule_id=rule_id,
+                    message=f"{message} 请补齐后重新保存或执行。",
+                )
+            else:
+                raise ValueError(message)
+        else:
+            try:
+                parse_expected_value_set(expected_value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"规则 '{rule_id}' 的映射节点 {node_index} 筛选条件 {filter_index} "
+                    f"第 {range_index} 段排除范围判定值至少需要一个固定值。"
+                ) from exc
 
         seen_range_ids.add(range_id)
         normalized_ranges.append(
@@ -1578,6 +1646,7 @@ def _normalize_multi_composite_mapping_exclusion_ranges(
                 range_id=range_id,
                 start_row=start_row,
                 end_row=end_row,
+                expected_value=expected_value or None,
             )
         )
 
@@ -1850,6 +1919,29 @@ def _collect_composite_available_fields(variable: VariableTag) -> list[str]:
         if column and column.strip() and column != key_column
     )
     return available_fields
+
+
+def _normalize_display_field(
+    *,
+    rule_id: str,
+    variable: VariableTag,
+    display_field: str | None,
+) -> str | None:
+    """校验规则结果显示字段，并限制在当前关联变量内。"""
+    normalized_field = (display_field or "").strip()
+    if not normalized_field:
+        return None
+
+    if (variable.variable_kind or "single") == "composite":
+        available_fields = _collect_composite_available_fields(variable)
+    else:
+        available_fields = [variable.column] if variable.column else []
+
+    if normalized_field not in available_fields:
+        raise ValueError(
+            f"规则 '{rule_id}' 的结果显示字段 '{normalized_field}' 不属于当前关联变量。"
+        )
+    return normalized_field
 
 
 def _normalize_local_source_path(
@@ -2257,6 +2349,7 @@ def _build_fixed_rule_params(
         return {
             "target_tag": target_variable.tag,
             "rule_name": rule.rule_name,
+            "display_field": rule.display_field,
             "composite_config": rule.composite_config.model_dump(mode="json", exclude_none=True)
             if rule.composite_config
             else None,
@@ -2267,6 +2360,7 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "reference_tag": rule.reference_variable_tag,
             "key_check_mode": rule.key_check_mode,
+            "display_field": rule.display_field,
             "comparisons": [
                 comparison.model_dump(mode="json", exclude_none=True)
                 for comparison in rule.comparisons
@@ -2278,6 +2372,7 @@ def _build_fixed_rule_params(
         return {
             "target_tag": target_variable.tag,
             "rule_name": rule.rule_name,
+            "display_field": rule.display_field,
             "pipeline_config": rule.pipeline_config.model_dump(mode="json", exclude_none=True)
             if rule.pipeline_config
             else None,
@@ -2287,6 +2382,7 @@ def _build_fixed_rule_params(
         return {
             "target_tag": target_variable.tag,
             "rule_name": rule.rule_name,
+            "display_field": rule.display_field,
             "mapping_config": rule.mapping_config.model_dump(mode="json", exclude_none=True)
             if rule.mapping_config
             else None,
@@ -2302,6 +2398,7 @@ def _build_fixed_rule_params(
             "expected_value_mode": rule.expected_value_mode,
             "rule_name": rule.rule_name,
             "location": location,
+            "display_field": rule.display_field,
         }
 
     if rule.rule_type == "regex_check":
@@ -2310,6 +2407,7 @@ def _build_fixed_rule_params(
             "pattern": rule.expected_value,
             "rule_name": rule.rule_name,
             "location": location,
+            "display_field": rule.display_field,
         }
 
     if rule.rule_type == "cross_table_mapping":
@@ -2318,6 +2416,7 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "rule_name": rule.rule_name,
             "location": location,
+            "display_field": rule.display_field,
         }
 
     if rule.rule_type == "sequence_order_check":
@@ -2329,10 +2428,12 @@ def _build_fixed_rule_params(
             "start_value": rule.sequence_start_value,
             "rule_name": rule.rule_name,
             "location": location,
+            "display_field": rule.display_field,
         }
 
     return {
         "target_tags": [target_variable.tag],
         "rule_name": rule.rule_name,
         "location": location,
+        "display_field": rule.display_field,
     }

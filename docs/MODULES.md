@@ -6,7 +6,7 @@
 
 | 入口 | 视图 | 作用 |
 |:---|:---|:---|
-| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
+| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），支持 SVN 更新，构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
 | `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 项目校验：独立 `version=6` 配置（`sources / variables / groups / rules`），支持 SVN 更新、执行结果分页与 Excel 导出。 |
 | `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，保存后前端会自动切到新的当前项目；项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
 | `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
@@ -88,7 +88,7 @@
 | 模块 | 作用 |
 |:---|:---|
 | [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、浏览器上传、metadata、列预览、组合预览。 |
-| [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config`：个人校验配置按 `project_id + user_id` 隔离持久化。 |
+| [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config` 与 `/api/v1/workbench/svn-update`：个人校验配置按 `project_id + user_id` 隔离持久化，并刷新当前用户个人配置中的 SVN 来源。 |
 | [app/api/execute_api.py](../backend/app/api/execute_api.py) | `/api/v1/engine/execute`：消费 `TaskTree`，调用规则引擎，返回统一结果。 |
 | [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、SVN 更新、执行。 |
 | [app/api/schemas.py](../backend/app/api/schemas.py)、[app/api/fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py) | Pydantic 入参 / 出参模型。 |

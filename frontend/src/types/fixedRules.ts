@@ -75,6 +75,7 @@ export interface DualCompositeComparison {
 export interface MultiCompositePipelineNode {
   node_id: string
   variable_tag: string
+  display_field?: string
   filters: CompositeCondition[]
   assertions: CompositeCondition[]
 }
@@ -102,6 +103,7 @@ export interface MultiCompositeMappingExclusionRange {
   range_id: string
   start_row: number
   end_row: number
+  expected_value?: string
 }
 
 export interface MultiCompositeMappingFilter extends CompositeCondition {
@@ -111,6 +113,7 @@ export interface MultiCompositeMappingFilter extends CompositeCondition {
 export interface MultiCompositeMappingNode {
   node_id: string
   variable_tag: string
+  display_field?: string
   filters: MultiCompositeMappingFilter[]
   field_checks?: MultiCompositeMappingFieldCheck[]
   field?: string
@@ -132,6 +135,7 @@ export interface FixedRuleDefinition {
   group_id: string
   rule_name: string
   target_variable_tag: string
+  display_field?: string
   rule_type: FixedRuleType
   operator?: FixedRuleOperator
   expected_value?: string

@@ -23,10 +23,11 @@ class AbnormalResult:
     row_index: int
     raw_value: Any
     message: str
+    display_value: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         """导出为与历史接口字节级兼容的 dict。"""
-        return {
+        payload = {
             "level": self.level,
             "rule_name": self.rule_name,
             "location": self.location,
@@ -34,6 +35,9 @@ class AbnormalResult:
             "raw_value": self.raw_value,
             "message": self.message,
         }
+        if self.display_value is not None:
+            payload["display_value"] = self.display_value
+        return payload
 
 
 def build_basic_result(
@@ -46,6 +50,7 @@ def build_basic_result(
     raw_value: Any,
     message: str,
     location: str | None = None,
+    display_value: Any = None,
 ) -> dict[str, Any]:
     """对应原 ``rule_basics._build_abnormal_result``。
 
@@ -58,6 +63,7 @@ def build_basic_result(
         location=location or f"{tag} -> {column_name}",
         row_index=int(row_index),
         raw_value=unwrap_scalar(raw_value),
+        display_value=unwrap_scalar(display_value),
         message=message,
     ).to_dict()
 
@@ -70,6 +76,7 @@ def build_fixed_result(
     raw_value: Any,
     message: str,
     level: str = "error",
+    display_value: Any = None,
 ) -> dict[str, Any]:
     """对应原 ``rule_fixed._build_fixed_rule_result``。
 
@@ -82,5 +89,6 @@ def build_fixed_result(
         location=location,
         row_index=int(row_index),
         raw_value=unwrap_scalar(raw_value),
+        display_value=unwrap_scalar(display_value),
         message=message,
     ).to_dict()
