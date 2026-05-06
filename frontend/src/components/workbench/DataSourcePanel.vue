@@ -99,6 +99,7 @@ const canBrowseSvnDirectory = computed(
     svnSubMode.value === 'remote' &&
     isHttpDirUrl(draft.pathOrUrl?.trim() ?? ''),
 )
+const savedSvnDirectoryOptions = computed(() => store.svnPathReplacementPresets ?? [])
 const canSaveSource = computed(() => {
   const path = draft.pathOrUrl?.trim() ?? ''
   return !isPicking.value && draft.id.trim().length > 0 && path.length > 0 && validatePathByType(path)
@@ -170,6 +171,29 @@ function handleSourceTypeChange(nextType: SourceType): void {
 function handleSvnSubModeChange(value: 'remote' | 'working_copy'): void {
   svnSubMode.value = value
   draft.pathOrUrl = ''
+  draftErrors.pathOrUrl = ''
+}
+
+type SavedSvnDirectorySuggestion = {
+  value: string
+}
+
+function querySavedSvnDirectories(
+  queryString: string,
+  callback: (suggestions: SavedSvnDirectorySuggestion[]) => void,
+): void {
+  const normalizedQuery = queryString.trim().toLowerCase()
+  const matchedDirectories = normalizedQuery
+    ? savedSvnDirectoryOptions.value.filter((directoryUrl) =>
+        directoryUrl.toLowerCase().includes(normalizedQuery),
+      )
+    : savedSvnDirectoryOptions.value
+
+  callback(matchedDirectories.map((directoryUrl) => ({ value: directoryUrl })))
+}
+
+function handleSavedSvnDirectorySelect(item: SavedSvnDirectorySuggestion): void {
+  draft.pathOrUrl = item.value
   draftErrors.pathOrUrl = ''
 }
 
@@ -668,17 +692,28 @@ onMounted(() => {
         <div>
           <label class="mb-1.5 block text-[12px] font-medium text-ink-500">{{ getPathLabel(draft.type) }}</label>
           <div class="flex items-center gap-2">
+            <el-autocomplete
+              v-if="isSvnSource && svnSubMode === 'remote'"
+              v-model="draft.pathOrUrl"
+              class="flex-1"
+              :fetch-suggestions="querySavedSvnDirectories"
+              :trigger-on-focus="true"
+              clearable
+              placeholder="例如 https://samosvn/data/project/samo/GameDatas/datas_qa88/"
+              @input="draftErrors.pathOrUrl = ''"
+              @clear="draftErrors.pathOrUrl = ''"
+              @select="handleSavedSvnDirectorySelect"
+            />
             <el-input
+              v-else
               v-model="draft.pathOrUrl"
               class="flex-1"
               :placeholder="
                 localSource
                   ? '上传文件，或输入服务器本机/共享盘文件路径'
-                  : isSvnSource && svnSubMode === 'remote'
-                    ? '例如 https://samosvn/data/project/samo/GameDatas/datas_qa88/'
-                    : isSvnSource
-                      ? '请输入本地 SVN 工作副本路径，例如 D:\\svn\\datas\\quests.xls'
-                      : '请输入链接或目录路径'
+                  : isSvnSource
+                    ? '请输入本地 SVN 工作副本路径，例如 D:\\svn\\datas\\quests.xls'
+                    : '请输入链接或目录路径'
               "
               @input="draftErrors.pathOrUrl = ''"
             />
@@ -736,7 +771,7 @@ onMounted(() => {
             v-else-if="isSvnSource && svnSubMode === 'remote'"
             class="mt-1 flex items-center gap-3 text-[12px] text-ink-500"
           >
-            <span>支持目录 URL 浏览，选中文件后会自动写回完整文件 URL。</span>
+            <span>点击输入框可选择已保存 SVN 目录；选中文件后会自动写回完整文件 URL。</span>
             <button
               type="button"
               class="ec-action-link"

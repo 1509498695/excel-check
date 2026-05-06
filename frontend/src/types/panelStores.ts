@@ -11,6 +11,8 @@ export interface SourceManagementStoreLike {
   sources: DataSource[]
   capabilities: SourceType[]
   preferredSourceId: string | null
+  svnPathReplacementPresets?: string[]
+  selectedSvnPathReplacementPreset?: string | null
   upsertSource(source: DataSource, originalId?: string): void
   removeSource(sourceId: string): void
   useSampleSource(): void
