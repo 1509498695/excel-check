@@ -75,7 +75,7 @@ class Settings:
         or "svn"
     )
     supported_source_types: tuple[str, ...] = field(
-        default_factory=lambda: ("local_excel", "local_csv", "feishu", "svn")
+        default_factory=lambda: ("local_excel", "feishu", "svn")
     )
     svn_cache_dir: Path = field(
         default_factory=lambda: Path(__file__).resolve().parent

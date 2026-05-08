@@ -8,6 +8,7 @@ export type {
 } from './api'
 
 export type SourceType = 'local_excel' | 'local_csv' | 'feishu' | 'svn'
+export type CreatableSourceType = Exclude<SourceType, 'local_csv'>
 
 export type ExpectedType = 'int' | 'str' | 'json'
 
@@ -83,11 +84,11 @@ export type SourceCapabilitiesResponse = ApiResponse<{
 
 export type LocalPickResponse = ApiResponse<{
   selected_path: string
-  source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
+  source_type: Extract<SourceType, 'local_excel'>
 }>
 
 export type SourceUploadResponse = ApiResponse<{
-  source_type: Extract<SourceType, 'local_excel' | 'local_csv'>
+  source_type: Extract<SourceType, 'local_excel'>
   original_filename: string
   stored_filename: string
   selected_path: string

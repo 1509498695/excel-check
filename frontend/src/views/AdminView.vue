@@ -15,6 +15,7 @@ import {
   apiSetMemberRole,
   apiUpdateProject,
 } from '../api/admin'
+import FeishuBotConfigCard from '../components/admin/FeishuBotConfigCard.vue'
 import { useAuthStore } from '../store/auth'
 import type { ProjectDetail, ProjectMember } from '../types/auth'
 import DataTable from '../components/shell/DataTable.vue'
@@ -53,6 +54,7 @@ const moveProjectForm = reactive({
   username: '',
   targetProjectId: null as number | null,
 })
+let membersLoadRequestId = 0
 
 onMounted(async () => {
   // 保留原有业务逻辑：页面进入后仍先加载项目列表，再按原规则加载成员。
@@ -64,6 +66,9 @@ const projectDialogTitle = computed(() =>
 )
 
 const canCreateProject = computed(() => auth.isSuperAdmin)
+const canManageFeishuBot = computed(
+  () => auth.isProjectAdmin && selectedProject.value !== null,
+)
 const canSubmitProject = computed(() => Boolean(projectForm.name.trim()))
 const moveTargetProjects = computed(() =>
   projects.value.filter((project) => project.id !== selectedProject.value?.id),
@@ -164,7 +169,7 @@ async function loadProjects(): Promise<void> {
     }
 
     selectedProject.value = nextSelectedProject
-    await loadMembers(nextSelectedProject)
+    void loadMembers(nextSelectedProject)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载项目列表失败')
     projects.value = []
@@ -176,17 +181,24 @@ async function loadProjects(): Promise<void> {
 }
 
 async function loadMembers(project: ProjectDetail): Promise<void> {
+  const requestId = ++membersLoadRequestId
   selectedProject.value = project
   isLoadingMembers.value = true
   try {
     // 保留原有业务逻辑：成员列表继续消费原有项目成员接口。
     const response = await apiListProjectMembers(project.id)
-    members.value = response.data
+    if (requestId === membersLoadRequestId && selectedProject.value?.id === project.id) {
+      members.value = response.data
+    }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '加载成员列表失败')
-    members.value = []
+    if (requestId === membersLoadRequestId && selectedProject.value?.id === project.id) {
+      ElMessage.error(error instanceof Error ? error.message : '加载成员列表失败')
+      members.value = []
+    }
   } finally {
-    isLoadingMembers.value = false
+    if (requestId === membersLoadRequestId) {
+      isLoadingMembers.value = false
+    }
   }
 }
 
@@ -798,6 +810,13 @@ function getMemberRoleLabel(member: ProjectMember): string {
           </div>
         </div>
       </AppCard>
+
+      <!-- 04 飞书机器人 -->
+      <FeishuBotConfigCard
+        v-if="canManageFeishuBot && selectedProject"
+        :project-id="selectedProject.id"
+        :project-name="selectedProject.name"
+      />
     </div>
 
     <!-- 项目编辑弹窗 -->

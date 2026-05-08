@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from uuid import uuid4
 
 from backend.app.auth.service import create_access_token, hash_password
@@ -369,6 +369,97 @@ async def test_project_admin_list_projects_includes_default_project(
     returned_ids = [item["id"] for item in response.json()["data"]]
     assert returned_ids == [default_project_id, managed_project_id]
     assert other_project_id not in returned_ids
+
+
+@pytest.mark.anyio
+async def test_project_admin_list_projects_returns_aggregated_member_count(
+    test_db,
+) -> None:
+    """项目列表 member_count 应按项目聚合统计，并保持项目管理员可见范围。"""
+    default_project = await _seed_default_project()
+    async with async_session_factory() as session:
+        managed_project = Project(name="managed-count-project", description="可管理项目")
+        other_project = Project(name="hidden-count-project", description="其他项目")
+        session.add_all([managed_project, other_project])
+        await session.flush()
+
+        managed_member = User(
+            username="managed_count_member",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=managed_project.id,
+        )
+        default_member = User(
+            username="default_count_member",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=default_project.id,
+        )
+        hidden_member = User(
+            username="hidden_count_member",
+            hashed_password=hash_password("memberpass"),
+            is_super_admin=False,
+            primary_project_id=other_project.id,
+        )
+        session.add_all([managed_member, default_member, hidden_member])
+        await session.flush()
+
+        session.add_all(
+            [
+                UserProjectRole(
+                    user_id=managed_member.id,
+                    project_id=managed_project.id,
+                    role="user",
+                ),
+                UserProjectRole(
+                    user_id=default_member.id,
+                    project_id=default_project.id,
+                    role="user",
+                ),
+                UserProjectRole(
+                    user_id=hidden_member.id,
+                    project_id=other_project.id,
+                    role="user",
+                ),
+            ]
+        )
+        await session.commit()
+        default_project_id = default_project.id
+        managed_project_id = managed_project.id
+        other_project_id = other_project.id
+
+    headers = await _create_project_admin_headers(managed_project_id)
+    async with async_session_factory() as session:
+        expected_counts = dict(
+            (
+                await session.execute(
+                    select(
+                        UserProjectRole.project_id,
+                        func.count(UserProjectRole.user_id),
+                    )
+                    .where(
+                        UserProjectRole.project_id.in_(
+                            [default_project_id, managed_project_id]
+                        )
+                    )
+                    .group_by(UserProjectRole.project_id)
+                )
+            ).all()
+        )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    ) as client:
+        response = await client.get("/api/v1/admin/projects")
+
+    assert response.status_code == 200
+    data_by_id = {item["id"]: item for item in response.json()["data"]}
+    assert list(data_by_id) == [default_project_id, managed_project_id]
+    assert other_project_id not in data_by_id
+    assert data_by_id[default_project_id]["member_count"] == expected_counts[default_project_id]
+    assert data_by_id[managed_project_id]["member_count"] == expected_counts[managed_project_id]
 
 
 @pytest.mark.anyio

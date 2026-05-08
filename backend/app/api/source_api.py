@@ -46,12 +46,10 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 LOCAL_PICK_SUFFIXES: dict[str, tuple[str, ...]] = {
     "local_excel": (".xlsx", ".xls"),
-    "local_csv": (".csv",),
 }
 UPLOAD_SUFFIX_SOURCE_TYPES: dict[str, str] = {
     ".xlsx": "local_excel",
     ".xls": "local_excel",
-    ".csv": "local_csv",
 }
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
@@ -61,7 +59,7 @@ class LocalPickRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source_type: Literal["local_excel", "local_csv"]
+    source_type: Literal["local_excel"]
 
 
 class LocalDirectoryValidateRequest(BaseModel):
@@ -147,8 +145,6 @@ def _get_pick_filetypes(source_type: str) -> list[tuple[str, str]]:
     """返回 tkinter 文件对话框需要的文件类型。"""
     if source_type == "local_excel":
         return [("Excel 文件", "*.xlsx *.xls")]
-    if source_type == "local_csv":
-        return [("CSV 文件", "*.csv")]
     raise ValueError(f"暂不支持 {source_type} 的本地文件选择。")
 
 
@@ -384,7 +380,7 @@ async def upload_source_file(
     file: UploadFile = File(...),
     ctx: CurrentUserContext = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """接收浏览器上传的 Excel/CSV，并保存到 local_excel 下的项目/用户隔离目录。"""
+    """接收浏览器上传的 Excel，并保存到项目/用户隔离目录。"""
     project_id = ctx.require_project_member()
     saved_file = await _save_upload_file(
         file,

@@ -147,3 +147,32 @@ class ExecutionResultItemRecord(Base):
     message: Mapped[str] = mapped_column(Text, default="")
 
     run: Mapped[ExecutionRunRecord] = relationship(back_populates="items")
+
+
+class FeishuBotConfigRecord(Base):
+    """项目级飞书自建应用机器人配置（按 project_id 隔离，一项目一记录）。
+
+    长连接版本字段精简：只保留 app_id / app_secret_cipher / default_chat_id /
+    allowed_open_ids；事件回调期使用的 verification_token / encrypt_key 不再需要。
+    """
+
+    __tablename__ = "feishu_bot_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+    app_id: Mapped[str] = mapped_column(String(64), default="")
+    app_secret_cipher: Mapped[str] = mapped_column(Text, default="")
+    default_chat_id: Mapped[str] = mapped_column(String(128), default="")
+    # 触发权限白名单：飞书 open_id 列表，逗号分隔字符串落库；空串视为放开。
+    allowed_open_ids: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

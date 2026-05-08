@@ -6,6 +6,9 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.fixed_rules_schemas import (
     CompositeBranch,
@@ -28,8 +31,11 @@ from backend.app.api.fixed_rules_schemas import (
 )
 from backend.app.api.schemas import DataSource, TaskTree, ValidationRule, VariableTag
 from backend.app.execution_pipeline import run_execution_pipeline
+from backend.app.fixed_rules.db_service import load_fixed_rules_config_from_db
 from backend.app.loaders.local_reader import read_source_metadata
 from backend.app.loaders.svn_manager import update_svn_working_copy
+from backend.app.models import Project
+from backend.app.result_store import persist_execution_result
 from backend.app.rules.domain.operators import (
     normalize_expected_value_mode,
     parse_expected_value_set,
@@ -175,6 +181,7 @@ def load_fixed_rules_config_with_issues(
     config: FixedRulesConfig | None = None,
     *,
     allow_legacy_mapping_config: bool = False,
+    allow_unsupported_csv: bool = True,
 ) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
     """从文件或传入的配置加载并校验固定规则，返回配置与问题列表。"""
     if config is not None:
@@ -182,6 +189,7 @@ def load_fixed_rules_config_with_issues(
             _ensure_v4_config(config),
             allow_runtime_issues=True,
             allow_legacy_mapping_config=allow_legacy_mapping_config,
+            allow_unsupported_csv=allow_unsupported_csv,
         )
     return _load_fixed_rules_config_payload(
         allow_runtime_issues=True,
@@ -252,6 +260,69 @@ def execute_saved_fixed_rules(
         failed_sources=execution_artifacts["failed_sources"],
         msg="Execution Completed",
     )
+
+
+async def execute_fixed_rules_for_project(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    user_scope: str | None = None,
+    selected_rule_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """以项目级配置执行项目校验，落库后返回执行摘要。
+
+    供 ``/fixed-rules/execute`` 与飞书机器人事件入口共用，确保两者执行链路、
+    持久化、协议字段完全一致。
+
+    - 配置读取失败或不存在 → 抛 ``ValueError("当前项目尚未配置固定规则")``。
+    - 其余 ``FileNotFoundError`` / ``ValueError`` / ``ImportError`` /
+      ``NotImplementedError`` 由调用层翻译为 4xx；本函数不吞这些异常。
+    - ``user_scope`` 预留 SVN 凭据维度（与 ``run_saved_fixed_rules_svn_update``
+      保持一致），当前 ``run_execution_pipeline`` 还未消费该字段，本期保持透传。
+    """
+    raw = await load_fixed_rules_config_from_db(db, project_id)
+    if raw is None:
+        raise ValueError("当前项目尚未配置固定规则")
+
+    parsed = parse_raw_fixed_rules_config(raw)
+    config = validate_and_normalize_fixed_rules_config(parsed)
+    task_tree = build_fixed_rules_task_tree(
+        config,
+        selected_rule_ids=selected_rule_ids,
+    )
+
+    start = time.perf_counter()
+    execution_artifacts = run_execution_pipeline(task_tree)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    abnormal_results = execution_artifacts["abnormal_results"]
+    total_rows_scanned = sum(
+        len(frame) for frame in execution_artifacts["loaded_variables"].values()
+    )
+    failed_sources = execution_artifacts["failed_sources"]
+
+    result_id = await persist_execution_result(
+        db,
+        scope_type="fixed_rules",
+        project_id=project_id,
+        user_id=None,
+        abnormal_results=abnormal_results,
+        execution_time_ms=elapsed_ms,
+        total_rows_scanned=total_rows_scanned,
+        failed_sources=failed_sources,
+    )
+
+    project = await db.get(Project, project_id)
+    project_name = project.name if project is not None else f"项目 {project_id}"
+
+    return {
+        "result_id": result_id,
+        "total_rows_scanned": total_rows_scanned,
+        "failed_sources": failed_sources,
+        "abnormal_results": abnormal_results,
+        "execution_time_ms": elapsed_ms,
+        "project_name": project_name,
+    }
 
 
 def run_saved_fixed_rules_svn_update(
@@ -436,11 +507,16 @@ def _validate_and_normalize_fixed_rules_config(
     *,
     allow_runtime_issues: bool,
     allow_legacy_mapping_config: bool = False,
+    allow_unsupported_csv: bool | None = None,
 ) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
     """???????????????????????????"""
     migrated_config = _ensure_v4_config(config)
     groups = _normalize_groups(migrated_config.groups)
-    sources = _normalize_sources(migrated_config.sources)
+    allow_csv_compat = allow_runtime_issues if allow_unsupported_csv is None else allow_unsupported_csv
+    sources = _normalize_sources(
+        migrated_config.sources,
+        allow_unsupported_csv=allow_csv_compat,
+    )
     source_map = {source.id: source for source in sources}
     metadata_cache: dict[str, dict[str, object]] = {}
     config_issues: list[FixedRulesConfigIssue] = []
@@ -787,7 +863,11 @@ def _normalize_group_name(group_id: str, group_name: str) -> str:
     return group_name
 
 
-def _normalize_sources(sources: list[DataSource]) -> list[DataSource]:
+def _normalize_sources(
+    sources: list[DataSource],
+    *,
+    allow_unsupported_csv: bool = False,
+) -> list[DataSource]:
     """?????????????????"""
     normalized_sources: list[DataSource] = []
     seen_source_ids: set[str] = set()
@@ -816,6 +896,10 @@ def _normalize_sources(sources: list[DataSource]) -> list[DataSource]:
                 )
             )
         elif source_type in {"local_excel", "local_csv"}:
+            if source_type == "local_csv" and not allow_unsupported_csv:
+                raise ValueError(
+                    f"CSV 数据源“{source_id}”已不再支持，请删除后改用 Excel 或 SVN Excel。"
+                )
             normalized_path = _normalize_local_source_path(source_id, raw_locator, source_type)
             normalized_sources.append(
                 DataSource(
@@ -869,7 +953,20 @@ def _validate_source_runtime_bindings(
 ) -> None:
     """把数据源级别的运行时校验前置，确保空变量池场景也能捕获失效路径。"""
     for source in sources:
-        if source.type not in {"local_excel", "local_csv"}:
+        if source.type == "local_csv":
+            message = f"CSV 数据源“{source.id}”已不再支持，请删除后改用 Excel 或 SVN Excel。"
+            if config_issues is None:
+                raise ValueError(message)
+            _append_config_issue(
+                config_issues,
+                issue_keys,
+                source_id=source.id,
+                message=message,
+            )
+            metadata_cache[source.id] = {"sheets": [], "__unsupported_csv__": True}
+            continue
+
+        if source.type != "local_excel":
             continue
 
         raw_locator = (source.pathOrUrl or source.path or "").strip()
@@ -940,20 +1037,34 @@ def _normalize_variables(
             raise ValueError(f"?????? '{tag}' ?? Sheet?")
 
         source = source_map[source_id]
-        if source.type not in {"local_excel", "svn"}:
-            raise ValueError(
+        source_supports_variables = source.type in {"local_excel", "svn"}
+        if not source_supports_variables:
+            message = (
                 f"项目校验变量仅支持 Excel 数据源，变量“{tag}”引用的数据源类型为“{source.type}”。"
+            )
+            if config_issues is None:
+                raise ValueError(message)
+            _append_config_issue(
+                config_issues,
+                issue_keys,
+                source_id=source_id,
+                variable_tag=tag,
+                message=message,
             )
 
         resolved_sheet = sheet
         available_columns: list[str] | None = None
-        sheet_details = _load_sheet_columns(
-            source=source,
-            sheet_name=sheet,
-            metadata_cache=metadata_cache,
-            variable_tag=tag,
-            config_issues=config_issues,
-            issue_keys=issue_keys,
+        sheet_details = (
+            _load_sheet_columns(
+                source=source,
+                sheet_name=sheet,
+                metadata_cache=metadata_cache,
+                variable_tag=tag,
+                config_issues=config_issues,
+                issue_keys=issue_keys,
+            )
+            if source_supports_variables
+            else None
         )
         if sheet_details is not None:
             resolved_sheet, available_columns = sheet_details
@@ -2129,7 +2240,7 @@ def _load_sheet_columns(
             metadata_cache[source.id] = {"sheets": [], "__missing__": True}
             return None
         metadata_cache[source.id] = metadata
-    elif metadata.get("__missing__"):
+    elif metadata.get("__missing__") or metadata.get("__unsupported_csv__"):
         return None
 
     try:

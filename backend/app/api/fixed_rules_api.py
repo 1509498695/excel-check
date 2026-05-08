@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -12,14 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.api.fixed_rules_schemas import FixedRulesConfig, FixedRulesExecuteRequest
 from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.database import get_db
-from backend.app.execution_pipeline import run_execution_pipeline
 from backend.app.fixed_rules.db_service import (
     load_fixed_rules_config_from_db,
     save_fixed_rules_config_to_db,
 )
 from backend.app.fixed_rules.service import (
     build_default_fixed_rules_config,
-    build_fixed_rules_task_tree,
+    execute_fixed_rules_for_project,
     load_fixed_rules_config_with_issues,
     parse_raw_fixed_rules_config,
     run_saved_fixed_rules_svn_update,
@@ -30,7 +28,6 @@ from backend.app.result_store import (
     fetch_execution_result_page,
     normalize_result_page,
     paginate_abnormal_results,
-    persist_execution_result,
 )
 from backend.app.result_exporter import (
     RESULT_EXPORT_MIME_TYPE,
@@ -90,7 +87,10 @@ async def put_fixed_rules_config(
     project_id = ctx.require_project_member()
 
     try:
-        config, config_issues = load_fixed_rules_config_with_issues(payload)
+        config, config_issues = load_fixed_rules_config_with_issues(
+            payload,
+            allow_unsupported_csv=False,
+        )
     except (FileNotFoundError, ValueError, ImportError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -158,54 +158,34 @@ async def execute_fixed_rules_endpoint(
     """执行当前项目的固定规则配置。"""
     project_id = ctx.require_project_member()
 
-    raw = await load_fixed_rules_config_from_db(db, project_id)
-    if raw is None:
-        raise HTTPException(status_code=400, detail="当前项目尚未配置固定规则")
-
     page, size = normalize_result_page(
         payload.page if payload else None,
         payload.size if payload else None,
     )
 
     try:
-        parsed = parse_raw_fixed_rules_config(raw)
-        config = validate_and_normalize_fixed_rules_config(parsed)
-        task_tree = build_fixed_rules_task_tree(
-            config,
-            selected_rule_ids=payload.selected_rule_ids if payload else None,
-        )
-        start = time.perf_counter()
-        execution_artifacts = run_execution_pipeline(task_tree)
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        abnormal_results = execution_artifacts["abnormal_results"]
-        total_rows_scanned = sum(
-            len(frame) for frame in execution_artifacts["loaded_variables"].values()
-        )
-        failed_sources = execution_artifacts["failed_sources"]
-        result_id = await persist_execution_result(
+        execution_summary = await execute_fixed_rules_for_project(
             db,
-            scope_type="fixed_rules",
-            project_id=project_id,
-            user_id=None,
-            abnormal_results=abnormal_results,
-            execution_time_ms=elapsed_ms,
-            total_rows_scanned=total_rows_scanned,
-            failed_sources=failed_sources,
-        )
-        return build_execution_response(
-            abnormal_results=abnormal_results,
-            execution_time_ms=elapsed_ms,
-            total_rows_scanned=total_rows_scanned,
-            failed_sources=failed_sources,
-            msg="Execution Completed",
-            result_id=result_id,
-            page=page,
-            size=size,
-            total=len(abnormal_results),
-            result_list=paginate_abnormal_results(abnormal_results, page, size),
+            project_id,
+            user_scope=ctx.user.username,
+            selected_rule_ids=payload.selected_rule_ids if payload else None,
         )
     except (FileNotFoundError, ValueError, ImportError, NotImplementedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    abnormal_results = execution_summary["abnormal_results"]
+    return build_execution_response(
+        abnormal_results=abnormal_results,
+        execution_time_ms=execution_summary["execution_time_ms"],
+        total_rows_scanned=execution_summary["total_rows_scanned"],
+        failed_sources=execution_summary["failed_sources"],
+        msg="Execution Completed",
+        result_id=execution_summary["result_id"],
+        page=page,
+        size=size,
+        total=len(abnormal_results),
+        result_list=paginate_abnormal_results(abnormal_results, page, size),
+    )
 
 
 @router.get("/results/{result_id}")

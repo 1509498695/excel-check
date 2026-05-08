@@ -64,9 +64,10 @@ const draftErrors = reactive({
   pathOrUrl: '',
 })
 
-const localSource = computed(() => draft.type === 'local_excel' || draft.type === 'local_csv')
+const localSource = computed(() => draft.type === 'local_excel')
 const needsToken = computed(() => draft.type === 'feishu')
 const isSvnSource = computed(() => draft.type === 'svn')
+const isUnsupportedCsvSource = computed(() => draft.type === 'local_csv')
 
 // SVN 子模式：远端 URL（默认）或本地工作副本路径
 const svnSubMode = ref<'remote' | 'working_copy'>('remote')
@@ -84,7 +85,6 @@ const svnCredentialLoadState = ref<'loading' | 'ready' | 'error'>('loading')
 const panelCopy = computed(() => ({
   emptyText: isFixedRulesVariant.value ? '暂无数据源。' : '还没有录入数据源。',
   localExcelHelper: '远程访问时请用上传文件；服务器本机或共享盘路径可手动输入或选择。',
-  localCsvHelper: '远程访问时请用上传文件；CSV 仍不支持变量池字段下拉。',
 }))
 const canPickLocalFile = computed(
   () =>
@@ -102,7 +102,13 @@ const canBrowseSvnDirectory = computed(
 const savedSvnDirectoryOptions = computed(() => store.svnPathReplacementPresets ?? [])
 const canSaveSource = computed(() => {
   const path = draft.pathOrUrl?.trim() ?? ''
-  return !isPicking.value && draft.id.trim().length > 0 && path.length > 0 && validatePathByType(path)
+  return (
+    !isUnsupportedCsvSource.value &&
+    !isPicking.value &&
+    draft.id.trim().length > 0 &&
+    path.length > 0 &&
+    validatePathByType(path)
+  )
 })
 
 function resetDraft(): void {
@@ -154,7 +160,7 @@ function handleSourceTypeChange(nextType: SourceType): void {
   draft.type = nextType
   draftErrors.pathOrUrl = ''
 
-  if (nextType === 'local_excel' || nextType === 'local_csv') {
+  if (nextType === 'local_excel') {
     draft.pathOrUrl = ''
     return
   }
@@ -204,10 +210,6 @@ function validatePathByType(path: string): boolean {
     return lowerPath.endsWith('.xlsx') || lowerPath.endsWith('.xls')
   }
 
-  if (draft.type === 'local_csv') {
-    return lowerPath.endsWith('.csv')
-  }
-
   if (draft.type === 'svn' && svnSubMode.value === 'remote') {
     // 远端 URL 必须是 http(s) 且指向 .xls/.xlsx 单文件。
     if (!isHttpDirUrl(path)) {
@@ -232,7 +234,7 @@ function findDuplicateSourceId(sourceId: string): DataSource | undefined {
 
 function sanitizeSourceIdFromLocator(locator: string): string {
   const basename = extractSourceBasename(locator)
-  const withoutExtension = basename.replace(/\.(xlsx?|csv)$/i, '')
+  const withoutExtension = basename.replace(/\.xlsx?$/i, '')
   const normalized = withoutExtension
     .replace(/[^A-Za-z0-9_]+/g, '_')
     .replace(/_+/g, '_')
@@ -288,11 +290,10 @@ function validateDraft(): boolean {
 
   if (!draft.pathOrUrl?.trim()) {
     draftErrors.pathOrUrl = localSource.value ? '请选择或输入本地文件路径。' : '请输入链接或目录路径。'
+  } else if (isUnsupportedCsvSource.value) {
+    draftErrors.pathOrUrl = 'CSV 数据源已不再支持，请删除后改用 Excel 或 SVN Excel。'
   } else if (!validatePathByType(draft.pathOrUrl.trim())) {
-    draftErrors.pathOrUrl =
-      draft.type === 'local_csv'
-        ? '本地 CSV 数据源仅支持 .csv 文件。'
-        : '本地 Excel 数据源仅支持 .xls 或 .xlsx 文件。'
+    draftErrors.pathOrUrl = '本地 Excel 数据源仅支持 .xls 或 .xlsx 文件。'
   }
 
   return !draftErrors.id && !draftErrors.pathOrUrl
@@ -325,6 +326,10 @@ function getStatusTone(source: DataSource): 'success' | 'warning' | 'info' {
     return 'warning'
   }
 
+  if (source.type === 'local_csv') {
+    return 'warning'
+  }
+
   if (source.type === 'feishu' && !source.token) {
     return 'warning'
   }
@@ -351,6 +356,9 @@ function getStatusTone(source: DataSource): 'success' | 'warning' | 'info' {
 function getStatusLabel(source: DataSource): string {
   if (sourceIssueMap.value[source.id]) {
     return '路径失效'
+  }
+  if (source.type === 'local_csv') {
+    return '不支持'
   }
   if (source.type === 'feishu' && !source.token) {
     return '待授权'
@@ -494,7 +502,7 @@ async function chooseLocalFile(): Promise<void> {
   draftErrors.pathOrUrl = ''
 
   try {
-    const response = await pickLocalSourcePath(draft.type as 'local_excel' | 'local_csv')
+    const response = await pickLocalSourcePath('local_excel')
 
     if (response.code !== 200 || !response.data.selected_path) {
       ElMessage.info('已取消选择文件。')
@@ -502,9 +510,7 @@ async function chooseLocalFile(): Promise<void> {
     }
 
     draft.pathOrUrl = response.data.selected_path
-    if (draft.type === 'local_excel') {
-      autofillSourceIdFromLocator(response.data.selected_path)
-    }
+    autofillSourceIdFromLocator(response.data.selected_path)
     ElMessage.success('已记录真实本地路径。')
   } catch (error) {
     draftErrors.pathOrUrl = error instanceof Error ? error.message : '选择本地文件失败。'
@@ -722,7 +728,7 @@ onMounted(() => {
               ref="uploadInputRef"
               class="hidden"
               type="file"
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.xls"
               @change="handleUploadFile"
             />
             <button
@@ -765,7 +771,13 @@ onMounted(() => {
             v-else-if="localSource"
             class="mt-1 text-[12px] text-ink-500"
           >
-            {{ draft.type === 'local_excel' ? panelCopy.localExcelHelper : panelCopy.localCsvHelper }}
+            {{ panelCopy.localExcelHelper }}
+          </div>
+          <div
+            v-else-if="isUnsupportedCsvSource"
+            class="mt-1 text-[12px] text-warning-ink"
+          >
+            CSV 数据源已不再支持，请删除后改用 Excel 或 SVN Excel。
           </div>
           <div
             v-else-if="isSvnSource && svnSubMode === 'remote'"

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useAuthStore } from '../store/auth'
 
 // 保持原有逻辑不变：登录校验、鉴权调用与跳转链路保持现状。
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
@@ -24,7 +25,8 @@ async function handleLogin(): Promise<void> {
     // 保留原有业务逻辑：登录继续调用原 auth store 鉴权链路。
     await auth.login(username.value.trim(), password.value)
     ElMessage.success('登录成功')
-    router.push('/')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+    router.push(redirect.startsWith('/') ? redirect : '/')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '登录失败')
   } finally {

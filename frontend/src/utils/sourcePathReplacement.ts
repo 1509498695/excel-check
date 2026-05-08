@@ -2,7 +2,7 @@ import type { DataSource, VariableTag } from '../types/workbench'
 
 export type SourcePathReplacementGroup = 'local' | 'svn'
 
-const LOCAL_FILE_SOURCE_TYPES = new Set(['local_excel', 'local_csv'])
+const LOCAL_FILE_SOURCE_TYPES = new Set(['local_excel'])
 const REMOTE_SVN_PROTOCOL = /^https?:\/\//i
 
 export function isRemoteSvnSource(source: DataSource): boolean {

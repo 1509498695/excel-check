@@ -1,4 +1,4 @@
-"""本地 Excel/CSV 数据读取工具。"""
+"""本地 Excel 数据读取工具。"""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ import pandas as pd
 from backend.app.api.schemas import DataSource, VariableTag
 
 
-LOCAL_SOURCE_TYPES = {"local_excel", "local_csv"}
+LOCAL_SOURCE_TYPES = {"local_excel"}
 ItemT = TypeVar("ItemT")
 
 
 def load_local_variables(
     sources: list[DataSource], variables: list[VariableTag]
 ) -> dict[str, pd.DataFrame]:
-    """按变量标签聚合读取本地 Excel/CSV 数据切片。"""
+    """按变量标签聚合读取本地 Excel 数据切片。"""
     if not variables:
         return {}
 
@@ -270,17 +270,15 @@ def load_variables_by_source(
     if source.type == "local_excel":
         return read_local_excel(source, variables_for_source)
     if source.type == "local_csv":
-        return read_local_csv(source, variables_for_source)
+        raise ValueError("CSV 数据源已不再支持，请删除后改用 Excel 或 SVN Excel。")
     if source.type == "svn":
-        # 远端 URL → 缓存文件 / 本地工作副本路径 → 按后缀分发到 Excel/CSV 读取。
+        # 远端 URL → 缓存文件 / 本地工作副本路径 → 按后缀分发到 Excel 读取。
         resolved_path = _resolve_source_path(source)
         suffix = resolved_path.suffix.lower()
         if suffix in {".xls", ".xlsx"}:
             return read_local_excel(source, variables_for_source)
-        if suffix == ".csv":
-            return read_local_csv(source, variables_for_source)
         raise ValueError(
-            f"SVN 数据源 '{source.id}' 文件后缀 '{suffix}' 暂不支持，仅支持 .xls / .xlsx / .csv。"
+            f"SVN 数据源 '{source.id}' 文件后缀 '{suffix}' 暂不支持，仅支持 .xls / .xlsx。"
         )
     raise ValueError(
         f"Source '{source.id}' has unsupported local loader type '{source.type}'."
@@ -346,60 +344,6 @@ def read_local_excel(
             group_label=f"sheet '{resolved_sheet_name}'",
         )
 
-    return loaded_variables
-
-
-def read_local_csv(
-    source: DataSource, variables_for_source: list[VariableTag]
-) -> dict[str, pd.DataFrame]:
-    """读取 CSV 中指定列，并按 tag 返回结果。"""
-    if not variables_for_source:
-        return {}
-
-    if any(_get_variable_kind(variable) == "composite" for variable in variables_for_source):
-        raise ValueError("组合变量当前仅支持本地 Excel 数据源。")
-
-    source_path = _resolve_source_path(source)
-    requested_columns = _collect_requested_columns(variables_for_source)
-
-    try:
-        header_frame = pd.read_csv(source_path, nrows=0)
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            f"CSV source '{source.id}' file not found: '{source_path}'."
-        ) from exc
-    except ValueError as exc:
-        raise ValueError(
-            f"Failed to read CSV source '{source.id}' headers: {exc}"
-        ) from exc
-
-    resolved_columns = _resolve_identifiers_from_available(
-        requested_columns,
-        [str(column) for column in header_frame.columns.tolist()],
-        identifier_label="列名",
-        context=f"CSV source '{source.id}'",
-    )
-
-    try:
-        dataframe = pd.read_csv(source_path, usecols=resolved_columns)
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            f"CSV source '{source.id}' file not found: '{source_path}'."
-        ) from exc
-    except ValueError as exc:
-        raise ValueError(
-            f"Failed to read CSV source '{source.id}', columns "
-            f"{resolved_columns}: {exc}"
-        ) from exc
-
-    loaded_variables: dict[str, pd.DataFrame] = {}
-    _merge_loaded_variables(
-        loaded_variables,
-        dataframe=dataframe,
-        variables_for_group=variables_for_source,
-        source_id=source.id,
-        group_label="csv",
-    )
     return loaded_variables
 
 
@@ -481,7 +425,7 @@ def _resolve_source_path(
 ) -> Path:
     """解析数据源真实文件路径。
 
-    - 本地 Excel/CSV 源：直接展开 path/pathOrUrl。
+    - 本地 Excel 源：直接展开 path/pathOrUrl。
     - SVN 源：远端 URL 走 svn_cache 落到本地缓存文件；本地工作副本路径透传。
     """
     if source.type == "svn":

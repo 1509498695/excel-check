@@ -1,5 +1,6 @@
 """FastAPI 服务启动入口。"""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
@@ -17,17 +18,42 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.app.api.router import api_router
-from backend.app.database import init_db
+from backend.app.database import async_session_factory, init_db
+from backend.app.integrations.feishu_long_conn import long_conn_supervisor
 from backend.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """应用生命周期：启动时初始化数据库表。"""
+    """应用生命周期：初始化数据库后拉起飞书长连接 supervisor。
+
+    启停 supervisor 的异常都仅记日志，避免飞书侧问题阻塞 FastAPI 自身的
+    启动 / 关闭：项目校验机器人不可用时，其它接口仍应正常对外服务。
+    """
     settings.runtime_dir.mkdir(parents=True, exist_ok=True)
     settings.runtime_upload_dir.mkdir(parents=True, exist_ok=True)
     await init_db()
-    yield
+
+    long_conn_supervisor.set_session_factory(async_session_factory)
+    try:
+        await long_conn_supervisor.start_all()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "飞书长连接 supervisor 启动失败，FastAPI 仍正常对外服务"
+        )
+
+    try:
+        yield
+    finally:
+        try:
+            await long_conn_supervisor.stop_all()
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "飞书长连接 supervisor 关闭异常，已忽略以保证服务退出"
+            )
 
 
 def create_app() -> FastAPI:

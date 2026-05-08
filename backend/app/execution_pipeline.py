@@ -157,8 +157,11 @@ def _load_sources_concurrently(
 def _load_single_source(
     source: DataSource, variables_for_source: list[VariableTag]
 ) -> dict[str, pd.DataFrame]:
-    if source.type in {"local_excel", "local_csv"}:
+    if source.type == "local_excel":
         return load_variables_by_source(source, variables_for_source)
+
+    if source.type == "local_csv":
+        raise ValueError("CSV 数据源已不再支持，请删除后改用 Excel 或 SVN Excel。")
 
     if source.type == "feishu":
         read_feishu_sheet(source=source, variables_for_source=variables_for_source)

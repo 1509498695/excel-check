@@ -2891,7 +2891,7 @@ async function handleSvnUpdate(): Promise<void> {
         <CollapsibleSection
           step="01"
           title="数据源"
-          description="接入 Excel、CSV、飞书或 SVN 来源"
+          description="接入 Excel 或 SVN 来源，飞书暂为占位"
           :status-label="getSectionStatusLabel(1)"
           :status-tone="getSectionStatusTone(1)"
           :active="activeGuideStep === 1"

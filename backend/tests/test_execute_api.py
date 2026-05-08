@@ -688,7 +688,7 @@ def test_show_local_file_dialog_returns_empty_when_user_cancelled(
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
 
-    assert source_api._show_local_file_dialog("local_csv") == ""
+    assert source_api._show_local_file_dialog("local_excel") == ""
 
 
 def test_show_local_file_dialog_raises_runtime_error_on_subprocess_timeout(

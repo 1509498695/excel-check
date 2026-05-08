@@ -104,7 +104,7 @@
 
 | 模块 | 作用 |
 |:---|:---|
-| [app/loaders/local_reader.py](../backend/app/loaders/local_reader.py) | 本地 Excel（openpyxl/xlrd）/ CSV 读取、Sheet/列元数据、列预览。 |
+| [app/loaders/local_reader.py](../backend/app/loaders/local_reader.py) | 本地 Excel（openpyxl/xlrd）读取、Sheet/列元数据、列预览。 |
 | [app/loaders/svn_manager.py](../backend/app/loaders/svn_manager.py) | SVN CLI 调用与工作副本更新（含 Windows TortoiseSVN 自动探测）。 |
 | [app/loaders/feishu_reader.py](../backend/app/loaders/feishu_reader.py) | 飞书读取占位实现（未闭环）。 |
 

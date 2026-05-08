@@ -155,7 +155,7 @@ export const userGuideSections: UserGuideSection[] = [
     id: 'sources',
     title: '7. 数据源使用说明',
     paragraphs: [
-      '数据源是系统读取配置表的入口。首次使用建议优先选择 Excel 文件，CSV 和飞书入口当前主要作为占位或有限能力入口。',
+      '数据源是系统读取配置表的入口。当前支持本地 Excel 与 SVN Excel，飞书入口暂为占位。',
     ],
     subsections: [
       {
@@ -166,13 +166,7 @@ export const userGuideSections: UserGuideSection[] = [
         ],
       },
       {
-        title: '7.2 本地 CSV',
-        paragraphs: [
-          'CSV 当前不是推荐首选。若页面提示 CSV 不能提取字段或不能完成变量映射，请改用 Excel 数据源。',
-        ],
-      },
-      {
-        title: '7.3 SVN 来源',
+        title: '7.2 SVN 来源',
         paragraphs: ['SVN 来源适合团队共用配置表文件。'],
         items: [
           '输入 SVN 目录地址后，浏览目录下的 Excel 文件。',
@@ -322,7 +316,6 @@ export const userGuideSections: UserGuideSection[] = [
       '规则为空：先保存变量，再进入规则模块新建规则。规则必须绑定已有变量。',
       '执行校验不可用或失败：检查是否已配置数据源、变量和规则，同时确认数据源路径、SVN 权限和文件可访问。',
       'SVN 数据源报错：检查 SVN 地址、账号密码、网络连接和目标文件是否存在。',
-      'CSV 无法正常提取字段：请根据页面提示处理；如需要完整字段映射和规则编排，建议优先使用 Excel 数据源。',
       '异常结果里的显示字段为空：该规则没有配置结果显示字段，或该字段在当前规则关联变量中不可用。',
       '修改密码失败：确认原密码正确，新密码和确认密码一致，且新密码不少于 4 个字符。',
       '项目切换后数据变化：这是正常现象，页面会按当前项目展示对应数据和权限。',

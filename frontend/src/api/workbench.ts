@@ -22,7 +22,7 @@ export async function fetchSourceCapabilities(): Promise<SourceCapabilitiesRespo
 }
 
 export async function pickLocalSourcePath(
-  sourceType: 'local_excel' | 'local_csv',
+  sourceType: 'local_excel',
 ): Promise<LocalPickResponse> {
   return apiFetch<LocalPickResponse>('/api/v1/sources/local-pick', {
     method: 'POST',

@@ -26,7 +26,7 @@ def _patch_upload_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, max_
             runtime_upload_dir=upload_root,
             max_upload_bytes=max_bytes,
             max_upload_mb=max(1, max_bytes // 1024 // 1024),
-            supported_source_types=("local_excel", "local_csv", "feishu", "svn"),
+            supported_source_types=("local_excel", "feishu", "svn"),
         ),
     )
 
@@ -81,10 +81,23 @@ async def test_upload_source_file_requires_login(tmp_path: Path) -> None:
     ) as client:
         response = await client.post(
             "/api/v1/sources/upload",
-            files={"file": ("sample.csv", b"id\n1\n", "text/csv")},
+            files={"file": ("sample.xlsx", b"not-authenticated", "application/octet-stream")},
         )
 
     assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_source_capabilities_omit_csv() -> None:
+    """能力声明不再暴露 CSV 数据源。"""
+    async with AsyncClient(
+        transport=ASGITransport(app=main_app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/api/v1/sources/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["source_types"] == ["local_excel", "feishu", "svn"]
 
 
 @pytest.mark.anyio
@@ -93,12 +106,30 @@ async def test_upload_source_file_rejects_unsupported_suffix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """仅允许上传 Excel/CSV。"""
+    """仅允许上传 Excel。"""
     _patch_upload_settings(monkeypatch, tmp_path, max_bytes=1024)
 
     response = await auth_client.post(
         "/api/v1/sources/upload",
         files={"file": ("sample.txt", b"hello", "text/plain")},
+    )
+
+    assert response.status_code == 400
+    assert "仅支持上传" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_upload_source_file_rejects_csv(
+    auth_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CSV 已不再作为可接入数据源。"""
+    _patch_upload_settings(monkeypatch, tmp_path, max_bytes=1024)
+
+    response = await auth_client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("sample.csv", b"id\n1\n", "text/csv")},
     )
 
     assert response.status_code == 400
@@ -116,11 +147,11 @@ async def test_upload_source_file_rejects_oversized_file(
 
     response = await auth_client.post(
         "/api/v1/sources/upload",
-        files={"file": ("sample.csv", b"id\n123\n", "text/csv")},
+        files={"file": ("sample.xlsx", b"id\n123\n", "application/octet-stream")},
     )
 
     assert response.status_code == 413
-    assert not list(tmp_path.rglob("*.csv"))
+    assert not list(tmp_path.rglob("*.xlsx"))
 
 
 @pytest.mark.anyio

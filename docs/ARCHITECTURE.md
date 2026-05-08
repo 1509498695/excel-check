@@ -37,7 +37,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 - 接口前缀统一 `/api/v1`；OpenAPI 在 `/docs`。
 - 本地文件选择经后端 `tkinter` 弹窗拿到真实绝对路径写回前端，不走浏览器 `<input type="file">`。
 - 本机共享部署支持前端生产包由 FastAPI 托管：`frontend/dist` 存在时，`/api/v1/*`、`/health`、`/docs` 保持后端路由，其余路径回退到 `index.html`。
-- 远程浏览器可通过 `/api/v1/sources/upload` 上传 `.xlsx/.xls/.csv`，文件按 `<runtime_uploads>/local_excel/<project_id>/<user_id>/` 隔离保存，再复用现有 `DataSource.pathOrUrl` 与统一执行引擎。
+- 远程浏览器可通过 `/api/v1/sources/upload` 上传 `.xlsx/.xls`，文件按 `<runtime_uploads>/local_excel/<project_id>/<user_id>/` 隔离保存，再复用现有 `DataSource.pathOrUrl` 与统一执行引擎。
 - SQLite 运行时数据库由后端启动时自动建表与播种默认数据，无需手工迁移脚本。
 - 本机共享部署通过 `APP_HOST / APP_PORT / FRONTEND_DIST_DIR / CORS_ALLOW_ORIGINS / MAX_UPLOAD_MB / JWT_SECRET_KEY / DEFAULT_SUPER_ADMIN_PASSWORD / DB_URL` 预留后续内网部署配置入口；本轮不引入容器、反代、HTTPS 或外部数据库。
 
@@ -59,7 +59,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 ### 3.2 占位 / 未闭环
 
 - `feishu` 数据源：仅返回 `NotImplementedError` 占位。
-- CSV 数据源的变量池下拉提取：未开放（CSV 仍可参与执行）。
+- CSV 数据源已不再支持，历史 CSV 配置会提示改用 Excel 或 SVN Excel。
 - 多配置集切换：未开放。
 - SVN 远端 URL 仅支持单文件 `.xls/.xlsx`（不做目录级 svn 数据源、不做分支切换）。
 
@@ -71,7 +71,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 # backend/app/api/schemas.py
 class DataSource:
     id: str
-    type: Literal["local_excel", "local_csv", "feishu", "svn"]
+    type: Literal["local_excel", "feishu", "svn"]  # local_csv 仅作为历史配置读取兼容
     path: str | None
     url: str | None
     pathOrUrl: str | None
@@ -200,7 +200,7 @@ class TaskTree:
 |:---|:---|:---|
 | `GET` | `/sources/capabilities` | 当前后端能力声明。 |
 | `POST` | `/sources/local-pick` | 调起本机 tkinter 弹窗，返回真实绝对路径。 |
-| `POST` | `/sources/upload` | 浏览器上传 `.xlsx/.xls/.csv` 到服务端运行目录，返回可复用为数据源路径的绝对路径。 |
+| `POST` | `/sources/upload` | 浏览器上传 `.xlsx/.xls` 到服务端运行目录，返回可复用为数据源路径的绝对路径。 |
 | `POST` | `/sources/metadata` | 读取 Excel 数据源的 Sheet/列名结构（local_excel + svn HTTP）。 |
 | `POST` | `/sources/column-preview` | 读取指定列的预览数据。 |
 | `POST` | `/sources/composite-preview` | 同 Sheet 多列组合的 JSON 映射预览。 |
@@ -351,7 +351,7 @@ def handle_composite(ctx): ...
 
 ### 9.2 性能策略
 
-- Excel / CSV 读取优先 `usecols`，按列裁剪。
+- Excel 读取优先 `usecols`，按列裁剪。
 - 多数据源读取使用线程池并发。
 - 规则执行采用 pandas 列级运算。
 - 统一响应结构避免重复转换成本。
@@ -371,7 +371,7 @@ def handle_composite(ctx): ...
 ## 10. 已知遗留与不支持
 
 - `feishu` 数据源真实接入未实现。
-- CSV 数据源的变量池元数据下拉未开放（CSV 仍可参与执行）。
+- CSV 数据源已不再支持，历史 CSV 配置会提示删除后改用 Excel 或 SVN Excel。
 - 固定规则模块多配置集切换未实现。
 - 多用户协同编辑冲突处理未实现（按防抖最后写入胜出）。
 - 暂无 Alembic / Liquibase 数据库迁移脚本，数据库 schema 演进依赖启动时 `init_db()`。

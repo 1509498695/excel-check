@@ -14,7 +14,7 @@
 - 个人设置 `/profile`：账号信息、密码修改、项目切换。
 - 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`regex_check`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`、`dual_composite_compare`、`multi_composite_pipeline_check`、`multi_composite_mapping_check`；其中个人校验与项目校验的规则弹窗现支持 5 类入口：单一变量校验、组合分支校验、跨组变量校验、多组串行校验、多组映射校验。弹窗会先选规则类型，再按类型过滤目标变量；多组串行 / 多组映射的变量只在节点内选择。单一变量校验新增 `正则校验`，组合分支校验的分支校验条件也支持 `正则校验`，两者都按完整匹配校验整格内容。`composite_condition_check` 的全局筛选和分支筛选已支持字符串 `包含 / 不包含`，`dual_composite_compare` 会先按两个组合变量的外层 Key 关联，再按多条字段比对规则执行 AND 校验。`multi_composite_pipeline_check` 支持 1..N 个组合变量节点：单节点时退化为“前置过滤 + 最终判定”，多节点时按顺序执行，首个失败节点会输出全部异常并短路后续节点。`multi_composite_mapping_check` 支持多个组合变量节点，每个节点下多条筛选条件独立作为检查项；筛选失败的数据可按 Excel 行号闭区间配置“筛选失败排除行号范围”，只有命中范围且当前筛选字段值命中判定值集合的数据才会从异常结果中移除。添加组合变量时还可按原始行序生成 `原值_序号` 的唯一键；只有当前 Key 列存在重复值，才会显示“Key 后追加序号”。
 - 项目校验 `/fixed-rules` 的 `组合分支校验` 保存链路已修复：当全局筛选或分支筛选使用字符串 `包含` 时，前端会保留比较值并按正确协议提交，不再误报“缺少比较值”。
-- 数据源能力：本地 Excel（`.xlsx` / `.xls`）、SVN Excel（远端 URL / 工作副本）；CSV 与飞书入口当前显示为“占位”并禁用新增，步骤 2 的字段映射与变量提取支持本地 Excel / SVN Excel。
+- 数据源能力：本地 Excel（`.xlsx` / `.xls`）、SVN Excel（远端 URL / 工作副本）；CSV 数据源已不再支持，飞书入口当前显示为“占位”并禁用新增，步骤 2 的字段映射与变量提取支持本地 Excel / SVN Excel。
 - 数据源弹窗支持“先选文件，再自动回填数据源标识”：本地 Excel 与 SVN Excel 选中文件后，若标识为空，会按文件名自动生成仅含字母、数字与下划线的标识；若与已有标识重复，则需手动修改后再保存。
 
 ## 2. 技术栈与默认地址
@@ -66,7 +66,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 .\scripts\start-local-deploy.ps1
 ```
 
-脚本默认监听 `0.0.0.0:8000`，启动后会打印本机局域网访问地址。远程用户添加 Excel 数据源时应使用「上传文件」，上传文件会落到 `backend/.runtime_uploads/local_excel/<project_id>/<user_id>/`；CSV 与飞书当前仍为占位入口，新增数据源下拉中会禁用选择；「服务器选择」与手动路径只适合服务所在机器或共享盘路径。
+脚本默认监听 `0.0.0.0:8000`，启动后会打印本机局域网访问地址。远程用户添加 Excel 数据源时应使用「上传文件」，上传文件会落到 `backend/.runtime_uploads/local_excel/<project_id>/<user_id>/`；CSV 数据源已不再支持，飞书当前仍为占位入口且禁用选择；「服务器选择」与手动路径只适合服务所在机器或共享盘路径。
 
 建议首次共享前固定设置：
 

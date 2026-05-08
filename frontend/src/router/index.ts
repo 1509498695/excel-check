@@ -1,8 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '../store/auth'
-import FixedRulesBoard from '../views/FixedRulesBoard.vue'
-import MainBoard from '../views/MainBoard.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -22,13 +20,13 @@ export const router = createRouter({
     {
       path: '/',
       name: 'main-board',
-      component: MainBoard,
+      component: () => import('../views/MainBoard.vue'),
       meta: { auth: true },
     },
     {
       path: '/fixed-rules',
       name: 'fixed-rules-board',
-      component: FixedRulesBoard,
+      component: () => import('../views/FixedRulesBoard.vue'),
       meta: { auth: true },
     },
     {

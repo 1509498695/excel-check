@@ -584,6 +584,39 @@ async def test_get_fixed_rules_config_returns_source_issue_without_variables(
 
 
 @pytest.mark.anyio
+async def test_get_fixed_rules_config_reports_legacy_csv_as_unsupported(
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+    test_project_id: int,
+) -> None:
+    """历史 CSV 配置可读取，但会提示不再支持。"""
+    csv_path = tmp_path / "legacy.csv"
+    csv_path.write_text("INT_ID,DESC\n1,ok\n", encoding="utf-8")
+    payload = _build_v4_payload(
+        csv_path,
+        variables=[],
+        rules=[],
+        groups=[{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+    )
+    payload["sources"][0]["type"] = "local_csv"
+    await seed_fixed_rules_config(payload, test_project_id)
+
+    async with _auth_client_ctx(auth_headers) as client:
+        get_response = await client.get("/api/v1/fixed-rules/config")
+        save_response = await client.put("/api/v1/fixed-rules/config", json=payload)
+
+    assert get_response.status_code == 200
+    response_payload = get_response.json()
+    assert response_payload["data"]["sources"][0]["type"] == "local_csv"
+    assert any(
+        issue["source_id"] == "items-source" and "CSV 数据源" in issue["message"]
+        for issue in response_payload["meta"]["config_issues"]
+    )
+    assert save_response.status_code == 400
+    assert "CSV 数据源" in save_response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_put_and_execute_fixed_rules_still_fail_when_source_path_missing(
     tmp_path: Path,
     auth_headers: dict[str, str],

@@ -41,6 +41,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_user_primary_project_column()
     await _ensure_execution_result_display_value_column()
+    await _ensure_feishu_bot_app_id_unique_index()
     await ensure_default_auth_bootstrap()
 
 
@@ -82,6 +83,21 @@ async def _ensure_execution_result_display_value_column() -> None:
                     "ADD COLUMN display_value_json TEXT DEFAULT 'null'"
                 )
             )
+
+
+async def _ensure_feishu_bot_app_id_unique_index() -> None:
+    """为 feishu_bot_configs.app_id 建立 partial unique index（仅对非空值生效）。
+
+    使用 partial index 是为了允许多行 app_id='' 共存（未配置时的初始空值），
+    同时强制已配置的 app_id 全局唯一，避免不同项目复用同一个飞书自建应用。
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_feishu_bot_configs_app_id "
+                "ON feishu_bot_configs(app_id) WHERE app_id <> ''"
+            )
+        )
 
 
 async def _seed_default_project():

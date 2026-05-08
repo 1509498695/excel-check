@@ -1,3 +1,9 @@
+import type {
+  FeishuBotConfig,
+  FeishuBotConfigPayload,
+  FeishuBotTestSendPayload,
+  FeishuBotTestSendResult,
+} from '../types/admin'
 import type { ProjectDetail, ProjectMember } from '../types/auth'
 import { apiFetch } from '../utils/apiFetch'
 
@@ -90,4 +96,55 @@ export async function apiResetUserPassword(
     method: 'POST',
     body: JSON.stringify({ new_password: newPassword }),
   })
+}
+
+export async function apiGetFeishuBotConfig(
+  projectId: number,
+): Promise<SingleResponse<FeishuBotConfig>> {
+  return apiFetch<SingleResponse<FeishuBotConfig>>(
+    `/api/v1/admin/projects/${projectId}/feishu-bot`,
+  )
+}
+
+export async function apiUpsertFeishuBotConfig(
+  projectId: number,
+  payload: FeishuBotConfigPayload,
+): Promise<SingleResponse<FeishuBotConfig>> {
+  // 仅按 null 语义条件加入可选字段，避免把空串透传到后端引发 400 校验失败。
+  const body: Record<string, unknown> = { app_id: payload.app_id }
+  if (payload.app_secret !== undefined && payload.app_secret !== null) {
+    body.app_secret = payload.app_secret
+  }
+  if (payload.default_chat_id !== undefined && payload.default_chat_id !== null) {
+    body.default_chat_id = payload.default_chat_id
+  }
+  if (payload.allowed_open_ids !== undefined && payload.allowed_open_ids !== null) {
+    body.allowed_open_ids = payload.allowed_open_ids
+  }
+  return apiFetch<SingleResponse<FeishuBotConfig>>(
+    `/api/v1/admin/projects/${projectId}/feishu-bot`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
+export async function apiDeleteFeishuBotConfig(projectId: number): Promise<void> {
+  await apiFetch(`/api/v1/admin/projects/${projectId}/feishu-bot`, {
+    method: 'DELETE',
+  })
+}
+
+export async function apiTestSendFeishuBot(
+  projectId: number,
+  payload: FeishuBotTestSendPayload,
+): Promise<SingleResponse<FeishuBotTestSendResult>> {
+  return apiFetch<SingleResponse<FeishuBotTestSendResult>>(
+    `/api/v1/admin/projects/${projectId}/feishu-bot/test-send`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
 }

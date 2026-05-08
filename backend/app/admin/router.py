@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.admin.schemas import (
+    FeishuBotConfigUpdateRequest,
+    FeishuBotTestSendRequest,
     MoveMemberProjectRequest,
     ProjectCreateRequest,
     ProjectUpdateRequest,
@@ -19,13 +23,26 @@ from backend.app.admin.schemas import (
 from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.auth.service import hash_password
 from backend.app.database import get_db
+from backend.app.integrations.feishu_bot import (
+    FeishuApiError,
+    invalidate_token_cache,
+    send_card_to_chat,
+    send_text_to_chat,
+)
+from backend.app.integrations.feishu_long_conn import long_conn_supervisor
 from backend.app.models import (
+    FeishuBotConfigRecord,
     FixedRulesConfigRecord,
     Project,
     User,
     UserProjectRole,
     WorkbenchConfigRecord,
 )
+from backend.app.security.crypto import encrypt_secret
+
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -94,35 +111,64 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """列出所有项目（仅管理员可用）。"""
+    member_count_subquery = (
+        select(
+            UserProjectRole.project_id.label("project_id"),
+            func.count(UserProjectRole.user_id).label("member_count"),
+        )
+        .group_by(UserProjectRole.project_id)
+        .subquery()
+    )
+    member_count_column = func.coalesce(
+        member_count_subquery.c.member_count,
+        0,
+    ).label("member_count")
+
     if ctx.is_super_admin:
-        stmt = select(Project).options(selectinload(Project.members)).order_by(Project.id)
+        stmt = (
+            select(Project, member_count_column)
+            .outerjoin(
+                member_count_subquery,
+                member_count_subquery.c.project_id == Project.id,
+            )
+            .order_by(Project.id)
+        )
     else:
         stmt = (
-            select(Project)
+            select(Project, member_count_column)
             .join(UserProjectRole, UserProjectRole.project_id == Project.id)
+            .outerjoin(
+                member_count_subquery,
+                member_count_subquery.c.project_id == Project.id,
+            )
             .where(
                 UserProjectRole.user_id == ctx.user_id,
                 UserProjectRole.role == "admin",
             )
-            .options(selectinload(Project.members))
             .order_by(Project.id)
         )
     result = await db.execute(stmt)
-    projects = result.scalars().all()
+    project_rows = [
+        (project, int(member_count or 0))
+        for project, member_count in result.all()
+    ]
 
     if not ctx.is_super_admin and _has_any_project_admin_role(ctx):
         default_project_result = await db.execute(
-            select(Project)
+            select(Project, member_count_column)
+            .outerjoin(
+                member_count_subquery,
+                member_count_subquery.c.project_id == Project.id,
+            )
             .where(Project.name == DEFAULT_PROJECT_NAME)
-            .options(selectinload(Project.members))
         )
-        default_project = default_project_result.scalar_one_or_none()
-        if default_project is not None and all(
-            project.id != default_project.id for project in projects
-        ):
-            projects.append(default_project)
+        default_project_row = default_project_result.one_or_none()
+        if default_project_row is not None:
+            default_project, member_count = default_project_row
+            if all(project.id != default_project.id for project, _ in project_rows):
+                project_rows.append((default_project, int(member_count or 0)))
 
-    projects.sort(key=lambda project: project.id)
+    project_rows.sort(key=lambda row: row[0].id)
     return {
         "code": 200,
         "msg": "ok",
@@ -132,9 +178,9 @@ async def list_projects(
                 "name": p.name,
                 "description": p.description,
                 "created_at": p.created_at.isoformat() if p.created_at else None,
-                "member_count": len(p.members),
+                "member_count": member_count,
             }
-            for p in projects
+            for p, member_count in project_rows
         ],
     }
 
@@ -550,4 +596,272 @@ async def list_projects_public(
         "code": 200,
         "msg": "ok",
         "data": [{"id": p.id, "name": p.name} for p in projects],
+    }
+
+
+@router.get("/projects/{project_id}/feishu-bot")
+async def get_feishu_bot_config(
+    project_id: int,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """读取项目级飞书机器人配置（脱敏）。"""
+    _require_project_management_access(ctx, project_id)
+    await _get_project_or_404(db, project_id)
+
+    result = await db.execute(
+        select(FeishuBotConfigRecord).where(
+            FeishuBotConfigRecord.project_id == project_id
+        )
+    )
+    record = result.scalar_one_or_none()
+    data = _serialize_feishu_bot_config(record)
+    # connection_state 由长连接 supervisor 实时维护（inactive/active/error/...）；
+    # _serialize_feishu_bot_config 写死的 "inactive" 仅作未配置时的兜底，这里覆写为真实值。
+    data["connection_state"] = long_conn_supervisor.get_state(project_id)
+    return {"code": 200, "msg": "ok", "data": data}
+
+
+@router.put("/projects/{project_id}/feishu-bot")
+async def upsert_feishu_bot_config(
+    project_id: int,
+    payload: FeishuBotConfigUpdateRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """创建或更新项目级飞书机器人配置；密钥落库前用 Fernet 加密。"""
+    _require_project_management_access(ctx, project_id)
+    await _get_project_or_404(db, project_id)
+
+    normalized_app_id = payload.app_id.strip()
+    if not normalized_app_id:
+        raise HTTPException(status_code=400, detail="app_id 不能为空")
+    if len(normalized_app_id) > 64:
+        raise HTTPException(status_code=400, detail="app_id 长度超过限制")
+
+    # 路由层先做一次跨项目唯一性查询，命中则直接 400，避免下沉到 DB 层抛 IntegrityError。
+    conflict_result = await db.execute(
+        select(FeishuBotConfigRecord.id).where(
+            FeishuBotConfigRecord.app_id == normalized_app_id,
+            FeishuBotConfigRecord.project_id != project_id,
+        )
+    )
+    if conflict_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=400, detail="该 app_id 已被其它项目占用"
+        )
+
+    record_result = await db.execute(
+        select(FeishuBotConfigRecord).where(
+            FeishuBotConfigRecord.project_id == project_id
+        )
+    )
+    record = record_result.scalar_one_or_none()
+    is_create = record is None
+
+    if payload.app_secret is None:
+        if is_create:
+            raise HTTPException(
+                status_code=400, detail="首次配置时必须提供 app_secret"
+            )
+        new_app_secret_cipher = record.app_secret_cipher  # type: ignore[union-attr]
+    else:
+        if payload.app_secret == "":
+            raise HTTPException(
+                status_code=400,
+                detail="app_secret 不允许传空串清空，请走 DELETE 整体清除",
+            )
+        new_app_secret_cipher = encrypt_secret(payload.app_secret)
+
+    if payload.default_chat_id is None:
+        new_default_chat_id = "" if is_create else record.default_chat_id  # type: ignore[union-attr]
+    else:
+        new_default_chat_id = payload.default_chat_id.strip()
+
+    if payload.allowed_open_ids is None:
+        new_allowed_open_ids = "" if is_create else record.allowed_open_ids  # type: ignore[union-attr]
+    else:
+        new_allowed_open_ids = _normalize_allowed_open_ids_input(
+            payload.allowed_open_ids
+        )
+
+    if record is None:
+        record = FeishuBotConfigRecord(
+            project_id=project_id,
+            app_id=normalized_app_id,
+            app_secret_cipher=new_app_secret_cipher,
+            default_chat_id=new_default_chat_id,
+            allowed_open_ids=new_allowed_open_ids,
+        )
+        db.add(record)
+    else:
+        record.app_id = normalized_app_id
+        record.app_secret_cipher = new_app_secret_cipher
+        record.default_chat_id = new_default_chat_id
+        record.allowed_open_ids = new_allowed_open_ids
+        db.add(record)
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # partial unique index 兜底，处理与上面查询之间的并发竞争。
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, detail="该 app_id 已被其它项目占用"
+        ) from exc
+    await db.refresh(record)
+
+    # app_secret 可能已变更或刚刚配置，先把进程内缓存清理掉，避免 token 残留。
+    invalidate_token_cache(project_id)
+
+    # 通知长连接 supervisor 重新拉起对应项目的客户端；reload 内部已对失败做了
+    # state=error 兜底，这里只防御 set_session_factory 未初始化等极端场景，避免
+    # admin 接口被 supervisor 异常拖成 500。
+    try:
+        await long_conn_supervisor.reload(project_id, db)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "飞书长连接 reload 失败 project_id=%s", project_id
+        )
+
+    return {
+        "code": 200,
+        "msg": "保存成功",
+        "data": _serialize_feishu_bot_config(record),
+    }
+
+
+@router.delete("/projects/{project_id}/feishu-bot", status_code=204)
+async def delete_feishu_bot_config(
+    project_id: int,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """删除项目级飞书机器人配置；幂等：未配置也返回 204。"""
+    _require_project_management_access(ctx, project_id)
+    await _get_project_or_404(db, project_id)
+
+    result = await db.execute(
+        select(FeishuBotConfigRecord).where(
+            FeishuBotConfigRecord.project_id == project_id
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is not None:
+        await db.delete(record)
+        await db.commit()
+    invalidate_token_cache(project_id)
+
+    # 不论原本是否存在配置，都通知 supervisor 停掉对应项目的客户端，幂等。
+    try:
+        await long_conn_supervisor.stop_one(project_id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "飞书长连接 stop_one 失败 project_id=%s", project_id
+        )
+    return Response(status_code=204)
+
+
+@router.post("/projects/{project_id}/feishu-bot/test-send")
+async def test_send_feishu_bot(
+    project_id: int,
+    payload: FeishuBotTestSendRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """向指定 chat_id 发送一条测试消息，便于配置完后立即联调。"""
+    _require_project_management_access(ctx, project_id)
+    await _get_project_or_404(db, project_id)
+
+    chat_id = payload.chat_id.strip()
+    if not chat_id:
+        raise HTTPException(status_code=400, detail="chat_id 不能为空")
+    text_content = payload.text
+
+    try:
+        if payload.use_card:
+            result = await send_card_to_chat(
+                db=db,
+                project_id=project_id,
+                chat_id=chat_id,
+                card=_build_test_card(text_content),
+            )
+        else:
+            result = await send_text_to_chat(
+                db=db,
+                project_id=project_id,
+                chat_id=chat_id,
+                text=text_content,
+            )
+    except FeishuApiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "code": 200,
+        "msg": "发送成功",
+        "data": {"message_id": result.get("message_id", "")},
+    }
+
+
+def _serialize_feishu_bot_config(
+    record: FeishuBotConfigRecord | None,
+) -> dict[str, Any]:
+    """把 ORM 转成 GET / PUT 返回的脱敏 data 结构；密文不外露。"""
+    if record is None:
+        return {
+            "configured": False,
+            "app_id": "",
+            "has_app_secret": False,
+            "default_chat_id": "",
+            "allowed_open_ids": [],
+            "connection_state": "inactive",
+            "updated_at": None,
+        }
+
+    return {
+        "configured": bool(record.app_id),
+        "app_id": record.app_id or "",
+        "has_app_secret": bool(record.app_secret_cipher),
+        "default_chat_id": record.default_chat_id or "",
+        "allowed_open_ids": _parse_allowed_open_ids(record.allowed_open_ids or ""),
+        # Step 1 阶段尚未引入 supervisor，状态先固定 inactive，
+        # 后续 step 接入长连接后再回填真实状态。
+        "connection_state": "inactive",
+        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+    }
+
+
+def _normalize_allowed_open_ids_input(raw: str) -> str:
+    """前端原文（多行 / 逗号混合）→ 规范化后的逗号分隔字符串。
+
+    步骤：按 ``,`` 与换行符切分 → strip → 去空 → 去重保序 → 用 ``,`` 拼接落库。
+    """
+    if not raw:
+        return ""
+    pieces: list[str] = []
+    seen: set[str] = set()
+    for chunk in raw.replace("\r", "\n").split("\n"):
+        for piece in chunk.split(","):
+            normalized = piece.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            pieces.append(normalized)
+    return ",".join(pieces)
+
+
+def _parse_allowed_open_ids(raw: str) -> list[str]:
+    """落库的逗号分隔字符串 → 列表，便于前端按 tag 渲染。"""
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _build_test_card(text_content: str) -> dict[str, Any]:
+    """构造 test-send 接口使用的飞书富文本卡片体（最简版本）。"""
+    return {
+        "header": {"title": {"tag": "plain_text", "content": "测试消息"}},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": text_content}},
+        ],
     }
