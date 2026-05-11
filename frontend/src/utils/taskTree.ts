@@ -255,7 +255,17 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
       typeof rule.params.reference_tag === 'string' ? rule.params.reference_tag.trim() : ''
     const keyCheckMode =
       typeof rule.params.key_check_mode === 'string' ? rule.params.key_check_mode.trim() : ''
+    const leftKeyField =
+      typeof rule.params.left_key_field === 'string' && rule.params.left_key_field.trim()
+        ? rule.params.left_key_field.trim()
+        : '__key__'
+    const rightKeyField =
+      typeof rule.params.right_key_field === 'string' && rule.params.right_key_field.trim()
+        ? rule.params.right_key_field.trim()
+        : '__key__'
     const comparisons = Array.isArray(rule.params.comparisons) ? rule.params.comparisons : []
+    const leftFilters = Array.isArray(rule.params.left_filters) ? rule.params.left_filters : []
+    const rightFilters = Array.isArray(rule.params.right_filters) ? rule.params.right_filters : []
     const ruleName = typeof rule.params.rule_name === 'string' ? rule.params.rule_name.trim() : ''
 
     if (!targetTag) {
@@ -287,7 +297,11 @@ function normalizeKnownRule(rule: ValidationRule, availableTags: Set<string>): V
         target_tag: targetTag,
         reference_tag: referenceTag,
         key_check_mode: keyCheckMode,
+        left_key_field: leftKeyField,
+        right_key_field: rightKeyField,
         comparisons,
+        left_filters: leftFilters,
+        right_filters: rightFilters,
         rule_name: ruleName,
       },
     }

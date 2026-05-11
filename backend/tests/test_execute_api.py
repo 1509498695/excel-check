@@ -348,6 +348,153 @@ async def test_execute_engine_supports_expected_value_set_in_composite_condition
 
 
 @pytest.mark.anyio
+async def test_execute_engine_composite_branch_not_null_reports_excel_empty_cells(
+    tmp_path: Path,
+) -> None:
+    """验证组合分支非空断言能报告 Excel 空单元格。"""
+    workbook_path = tmp_path / "composite_not_null_empty_cells.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1, 2, 3, 4, 5],
+                "STR_ABSwitch": [None, None, None, "GreenServer:0", "   "],
+                "DESC": ["设置名字", "给自己设置头像", "城墙升级到3级", "正常值", "空白字符串"],
+            }
+        ).to_excel(writer, sheet_name="Quest", index=False)
+
+    payload = {
+        "sources": [
+            {
+                "id": "quests",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[quests-Quest-composite]",
+                "source_id": "quests",
+                "sheet": "Quest",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "STR_ABSwitch", "DESC"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "composite_condition_check",
+                "params": {
+                    "target_tag": "[quests-Quest-composite]",
+                    "rule_name": "ABSwitch 非空校验",
+                    "composite_config": {
+                        "global_filters": [],
+                        "branches": [
+                            {
+                                "branch_id": "branch-not-null",
+                                "filters": [],
+                                "assertions": [
+                                    {
+                                        "condition_id": "assert-abswitch-not-null",
+                                        "field": "STR_ABSwitch",
+                                        "operator": "not_null",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert [item["row_index"] for item in abnormal_results] == [2, 3, 4, 6]
+    assert {item["location"] for item in abnormal_results} == {"Quest -> STR_ABSwitch"}
+    assert all("不能为空" in item["message"] for item in abnormal_results)
+
+
+@pytest.mark.anyio
+async def test_execute_engine_composite_branch_not_null_reports_empty_key_column(
+    tmp_path: Path,
+) -> None:
+    """验证组合变量 Key 列为空时也可被组合分支非空断言报告。"""
+    workbook_path = tmp_path / "composite_not_null_empty_key_column.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "STR_ABSwitch": [None, None, "GreenServer:0", "   "],
+                "DESC": ["设置名字", "给自己设置头像", "正常值", "空白字符串"],
+            }
+        ).to_excel(writer, sheet_name="Quest", index=False)
+
+    payload = {
+        "sources": [
+            {
+                "id": "quests",
+                "type": "local_excel",
+                "path": str(workbook_path),
+            }
+        ],
+        "variables": [
+            {
+                "tag": "[quests-Quest-composite]",
+                "source_id": "quests",
+                "sheet": "Quest",
+                "variable_kind": "composite",
+                "columns": ["STR_ABSwitch", "DESC"],
+                "key_column": "STR_ABSwitch",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_type": "composite_condition_check",
+                "params": {
+                    "target_tag": "[quests-Quest-composite]",
+                    "rule_name": "ABSwitch Key 非空校验",
+                    "composite_config": {
+                        "global_filters": [],
+                        "branches": [
+                            {
+                                "branch_id": "branch-not-null",
+                                "filters": [],
+                                "assertions": [
+                                    {
+                                        "condition_id": "assert-abswitch-key-not-null",
+                                        "field": "STR_ABSwitch",
+                                        "operator": "not_null",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert [item["row_index"] for item in abnormal_results] == [2, 3, 5]
+    assert {item["location"] for item in abnormal_results} == {"Quest -> STR_ABSwitch"}
+    assert all("不能为空" in item["message"] for item in abnormal_results)
+
+
+@pytest.mark.anyio
 async def test_execute_engine_multi_composite_mapping_exclusion_requires_expected_value_hit(
     tmp_path: Path,
 ) -> None:
@@ -1123,8 +1270,15 @@ def test_load_local_variables_preserves_raw_excel_identifiers(
     assert single_frame["STR_ABSwitch  "].tolist() == ["on", "off"]
 
     composite_frame = loaded_variables["[quest-switch-composite]"]
-    assert composite_frame.columns.tolist() == ["__key__", "STR_ABSwitch  ", "DESC3", "_row_index"]
+    assert composite_frame.columns.tolist() == [
+        "__key__",
+        "INT_ID",
+        "STR_ABSwitch  ",
+        "DESC3",
+        "_row_index",
+    ]
     assert composite_frame["__key__"].tolist() == ["1001", "1002"]
+    assert composite_frame["INT_ID"].tolist() == [1001, 1002]
 
 
 @pytest.mark.anyio
@@ -1276,6 +1430,509 @@ async def test_execute_engine_supports_dual_composite_compare(tmp_path: Path) ->
     assert len(abnormal_results) == 1
     assert abnormal_results[0]["rule_name"] == "双组合变量比对"
     assert "Key 10001" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_supports_same_dual_composite_filtered_compare(
+    tmp_path: Path,
+) -> None:
+    """验证同一组合变量可拆成左右筛选子集后按 Key 比对。"""
+    workbook_path = tmp_path / "same_dual_composite_filters.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [10001, 10001, 10002, 10002],
+                "SIDE": ["left", "right", "left", "right"],
+                "VALUE": [1, 2, 3, 3],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_same_dual", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-same-json]",
+                "source_id": "src_same_dual",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "SIDE", "VALUE"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-same-dual",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-same-json]",
+                    "reference_tag": "[items-same-json]",
+                    "key_check_mode": "baseline_only",
+                    "rule_name": "同变量筛选比对",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "left",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "right",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "VALUE",
+                            "operator": "eq",
+                            "right_field": "VALUE",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert "Key 10001" in abnormal_results[0]["message"]
+    assert "左侧筛选" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_same_dual_compare_uses_explicit_business_key(
+    tmp_path: Path,
+) -> None:
+    """验证 append_index_to_key 开启时同变量筛选可按业务字段对齐。"""
+    workbook_path = tmp_path / "same_dual_business_key.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1, 1, 2, 2],
+                "INT_Index": [1012, 1010, 1012, 1010],
+                "INT_Level": [1, 1, 2, 2],
+                "INT_FreeRewardSubType": [7, 7, 8, 8],
+                "INT_FreeRewardValue": [100, 100, 200, 200],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_business_key", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-reward-json]",
+                "source_id": "src_business_key",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": [
+                    "INT_ID",
+                    "INT_Index",
+                    "INT_Level",
+                    "INT_FreeRewardSubType",
+                    "INT_FreeRewardValue",
+                ],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-business-key",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-reward-json]",
+                    "reference_tag": "[items-reward-json]",
+                    "key_check_mode": "baseline_only",
+                    "left_key_field": "INT_Level",
+                    "right_key_field": "INT_Level",
+                    "rule_name": "奖励配置按等级对齐",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1012",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1010",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-subtype",
+                            "left_field": "INT_FreeRewardSubType",
+                            "operator": "eq",
+                            "right_field": "INT_FreeRewardSubType",
+                        },
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "INT_FreeRewardValue",
+                            "operator": "eq",
+                            "right_field": "INT_FreeRewardValue",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["abnormal_results"] == []
+
+
+@pytest.mark.anyio
+async def test_execute_engine_dual_compare_rejects_duplicate_explicit_key_after_filter(
+    tmp_path: Path,
+) -> None:
+    """验证显式关联 Key 字段在筛选后仍要求唯一。"""
+    workbook_path = tmp_path / "same_dual_duplicate_business_key.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1, 2, 3],
+                "INT_Index": [1012, 1012, 1010],
+                "INT_Level": [1, 1, 1],
+                "VALUE": [100, 100, 100],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_dup_business_key", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-dup-business-key]",
+                "source_id": "src_dup_business_key",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_Index", "INT_Level", "VALUE"],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-duplicate-business-key",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-dup-business-key]",
+                    "reference_tag": "[items-dup-business-key]",
+                    "key_check_mode": "baseline_only",
+                    "left_key_field": "INT_Level",
+                    "right_key_field": "INT_Level",
+                    "rule_name": "显式 Key 重复",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1012",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1010",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "VALUE",
+                            "operator": "eq",
+                            "right_field": "VALUE",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 400
+    assert "关联 Key 字段 INT_Level 存在重复值" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_dual_bidirectional_checks_filtered_right_keys(
+    tmp_path: Path,
+) -> None:
+    """验证双向缺失 Key 只基于筛选后的右侧 Key 集合。"""
+    workbook_path = tmp_path / "same_dual_bidirectional_business_key.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [1, 2, 3],
+                "INT_Index": [1012, 1010, 9999],
+                "INT_Level": [1, 2, 99],
+                "VALUE": [100, 200, 999],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_bidir_key", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-bidir-business-key]",
+                "source_id": "src_bidir_key",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "INT_Index", "INT_Level", "VALUE"],
+                "key_column": "INT_ID",
+                "append_index_to_key": True,
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-bidir-business-key",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-bidir-business-key]",
+                    "reference_tag": "[items-bidir-business-key]",
+                    "key_check_mode": "bidirectional",
+                    "left_key_field": "INT_Level",
+                    "right_key_field": "INT_Level",
+                    "rule_name": "双向筛选 Key",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1012",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-index",
+                            "field": "INT_Index",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "1010",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "VALUE",
+                            "operator": "eq",
+                            "right_field": "VALUE",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 2
+    assert {item["raw_value"] for item in abnormal_results} == {1, 2}
+    assert all(item["raw_value"] != 99 for item in abnormal_results)
+
+
+@pytest.mark.anyio
+async def test_execute_engine_dual_composite_empty_filter_returns_warning(
+    tmp_path: Path,
+) -> None:
+    """验证双组合变量筛选为空时返回 warning 而不是静默通过。"""
+    workbook_path = tmp_path / "dual_empty_filter_warning.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [10001],
+                "SIDE": ["left"],
+                "VALUE": [1],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_empty_dual", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-empty-json]",
+                "source_id": "src_empty_dual",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "SIDE", "VALUE"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-empty-dual",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-empty-json]",
+                    "reference_tag": "[items-empty-json]",
+                    "key_check_mode": "baseline_only",
+                    "rule_name": "同变量空筛选",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "missing",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "left",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "VALUE",
+                            "operator": "eq",
+                            "right_field": "VALUE",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 200
+    abnormal_results = response.json()["data"]["abnormal_results"]
+    assert len(abnormal_results) == 1
+    assert abnormal_results[0]["level"] == "warning"
+    assert "左侧筛选后无数据" in abnormal_results[0]["message"]
+
+
+@pytest.mark.anyio
+async def test_execute_engine_dual_composite_duplicate_key_after_filter_returns_400(
+    tmp_path: Path,
+) -> None:
+    """验证筛选后的重复 Key 会阻断双组合变量比对。"""
+    workbook_path = tmp_path / "dual_duplicate_key_after_filter.xlsx"
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame(
+            {
+                "INT_ID": [10001, 10001, 10002],
+                "SIDE": ["left", "left", "right"],
+                "VALUE": [1, 1, 1],
+            }
+        ).to_excel(writer, sheet_name="items", index=False)
+
+    payload = {
+        "sources": [{"id": "src_duplicate_dual", "type": "local_excel", "path": str(workbook_path)}],
+        "variables": [
+            {
+                "tag": "[items-duplicate-json]",
+                "source_id": "src_duplicate_dual",
+                "sheet": "items",
+                "variable_kind": "composite",
+                "columns": ["INT_ID", "SIDE", "VALUE"],
+                "key_column": "INT_ID",
+                "expected_type": "json",
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": "rule-duplicate-dual",
+                "rule_type": "dual_composite_compare",
+                "params": {
+                    "target_tag": "[items-duplicate-json]",
+                    "reference_tag": "[items-duplicate-json]",
+                    "key_check_mode": "baseline_only",
+                    "rule_name": "同变量重复 Key",
+                    "left_filters": [
+                        {
+                            "condition_id": "left-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "left",
+                        }
+                    ],
+                    "right_filters": [
+                        {
+                            "condition_id": "right-side",
+                            "field": "SIDE",
+                            "operator": "eq",
+                            "value_source": "literal",
+                            "expected_value": "right",
+                        }
+                    ],
+                    "comparisons": [
+                        {
+                            "comparison_id": "compare-value",
+                            "left_field": "VALUE",
+                            "operator": "eq",
+                            "right_field": "VALUE",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post("/api/v1/engine/execute", json=payload)
+
+    assert response.status_code == 400
+    assert "Key" in response.json()["detail"]
+    assert "10001" in response.json()["detail"]
 
 
 @pytest.mark.anyio

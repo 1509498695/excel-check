@@ -147,7 +147,11 @@ export interface FixedRuleDefinition {
   sequence_start_value?: string
   composite_config?: CompositeRuleConfig
   key_check_mode?: DualCompositeKeyCheckMode
+  left_key_field?: string
+  right_key_field?: string
   comparisons?: DualCompositeComparison[]
+  left_filters?: CompositeCondition[]
+  right_filters?: CompositeCondition[]
   pipeline_config?: MultiCompositePipelineConfig
   mapping_config?: MultiCompositeMappingConfig
 }

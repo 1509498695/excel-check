@@ -222,7 +222,11 @@ class FixedRuleDefinition(BaseModel):
     sequence_start_value: str | None = None
     composite_config: CompositeRuleConfig | None = None
     key_check_mode: DualCompositeKeyCheckMode | None = None
+    left_key_field: str | None = None
+    right_key_field: str | None = None
     comparisons: list[DualCompositeComparison] = Field(default_factory=list)
+    left_filters: list[CompositeCondition] = Field(default_factory=list)
+    right_filters: list[CompositeCondition] = Field(default_factory=list)
     pipeline_config: MultiCompositePipelineConfig | None = None
     mapping_config: MultiCompositeMappingConfig | None = None
 

@@ -88,6 +88,8 @@ export function orchestrationRulesToValidationRules(
           target_tag: variable.tag,
           reference_tag: rule.reference_variable_tag?.trim() ?? '',
           key_check_mode: rule.key_check_mode ?? 'baseline_only',
+          left_key_field: rule.left_key_field ?? '__key__',
+          right_key_field: rule.right_key_field ?? '__key__',
           display_field: rule.display_field,
           comparisons: (rule.comparisons ?? []).map((comparison) => ({
             comparison_id: comparison.comparison_id,
@@ -95,6 +97,8 @@ export function orchestrationRulesToValidationRules(
             operator: comparison.operator,
             right_field: comparison.right_field,
           })),
+          left_filters: JSON.parse(JSON.stringify(rule.left_filters ?? [])),
+          right_filters: JSON.parse(JSON.stringify(rule.right_filters ?? [])),
           rule_name: rule.rule_name,
         },
       }

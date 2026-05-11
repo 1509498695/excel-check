@@ -151,6 +151,8 @@ def _get_composite_variable_frame(
     frame = context.loaded_variables.get(tag)
     if frame is None:
         raise ValueError(f"Rule '{rule_type}' references unknown tag '{tag}'.")
+    if rule_type != "composite_condition_check" and COMPOSITE_KEY_FIELD in frame.columns:
+        frame = frame.loc[frame[COMPOSITE_KEY_FIELD].notna()].copy()
     return variable, frame
 
 
@@ -214,6 +216,53 @@ def _get_dual_composite_comparisons(rule: ValidationRule) -> list[DualCompositeC
                 f"Rule '{rule.rule_type}' provides invalid comparison config: {exc}"
             ) from exc
     return comparisons
+
+
+def _get_dual_composite_filters(
+    rule: ValidationRule,
+    param_name: str,
+) -> list[CompositeCondition]:
+    """读取双组合变量比对的可选筛选条件。"""
+    payload = rule.params.get(param_name, [])
+    if payload is None:
+        return []
+    if not isinstance(payload, list):
+        raise ValueError(f"Rule '{rule.rule_type}' requires params.{param_name} to be a list.")
+
+    filters: list[CompositeCondition] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"Rule '{rule.rule_type}' provides invalid params.{param_name}.")
+        try:
+            condition = CompositeCondition.model_validate(item)
+        except Exception as exc:  # pragma: no cover
+            raise ValueError(
+                f"Rule '{rule.rule_type}' provides invalid {param_name} config: {exc}"
+            ) from exc
+        if condition.operator not in {
+            "eq",
+            "ne",
+            "gt",
+            "lt",
+            "not_null",
+            "contains",
+            "not_contains",
+        }:
+            raise ValueError(
+                f"Rule '{rule.rule_type}' params.{param_name} only supports filter operators."
+            )
+        filters.append(condition)
+    return filters
+
+
+def _get_dual_key_field(rule: ValidationRule, param_name: str) -> str:
+    """读取双组合变量比对的关联 Key 字段，缺省按历史 `__key__` 对齐。"""
+    value = rule.params.get(param_name)
+    if value is None:
+        return COMPOSITE_KEY_FIELD
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Rule '{rule.rule_type}' requires params.{param_name} to be a string.")
+    return value.strip()
 
 
 def _get_multi_composite_pipeline_config(
@@ -750,6 +799,102 @@ def _evaluate_mapping_filter_check(
     return abnormal_results
 
 
+def _format_dual_filter_summary(
+    *,
+    variable: VariableTag,
+    filters: list[CompositeCondition],
+) -> str:
+    """生成同变量筛选对比时用于结果文案的筛选摘要。"""
+    if not filters:
+        return "全量"
+
+    operator_text = {
+        "eq": "=",
+        "ne": "!=",
+        "gt": ">",
+        "lt": "<",
+        "not_null": "非空",
+        "contains": "包含",
+        "not_contains": "不包含",
+    }
+    parts: list[str] = []
+    for condition in filters:
+        field_label = _get_field_display_name(variable, condition.field)
+        operator = operator_text.get(condition.operator, condition.operator)
+        if condition.operator == "not_null":
+            parts.append(f"{field_label} 非空")
+            continue
+        expected = (
+            _get_field_display_name(variable, condition.expected_field or "")
+            if condition.value_source == "field"
+            else condition.expected_value or ""
+        )
+        parts.append(f"{field_label} {operator} {expected}")
+    return "；".join(parts)
+
+
+def _build_dual_filter_context(
+    *,
+    target_variable: VariableTag,
+    reference_variable: VariableTag,
+    left_filters: list[CompositeCondition],
+    right_filters: list[CompositeCondition],
+) -> str:
+    """同变量模式下为异常文案追加左右筛选说明。"""
+    if target_variable.tag != reference_variable.tag:
+        return ""
+    return (
+        f" [左侧筛选: {_format_dual_filter_summary(variable=target_variable, filters=left_filters)}; "
+        f"右侧筛选: {_format_dual_filter_summary(variable=reference_variable, filters=right_filters)}]"
+    )
+
+
+def _append_empty_dual_filter_warning(
+    abnormal_results: list[dict[str, Any]],
+    *,
+    rule_name: str,
+    location: str,
+    side_label: str,
+    filter_context: str,
+) -> None:
+    """筛选后无数据时输出非阻断提醒，避免静默通过。"""
+    abnormal_results.append(
+        build_fixed_result(
+            row_index=0,
+            raw_value="",
+            rule_name=rule_name,
+            location=location,
+            level="warning",
+            message=f"{side_label}筛选后无数据，未执行字段比对。{filter_context}",
+        )
+    )
+
+
+def _raise_duplicate_dual_keys(
+    frame: pd.DataFrame,
+    *,
+    side_label: str,
+    key_field: str,
+    variable: VariableTag,
+) -> None:
+    """双组合变量比对要求筛选后 Key 唯一，避免一对多比较语义不清。"""
+    if key_field not in frame.columns:
+        raise ValueError(
+            f"{side_label}组合变量 '{variable.tag}' 缺少关联 Key 字段 '{key_field}'。"
+        )
+    duplicate_mask = frame[key_field].duplicated(keep=False)
+    if not duplicate_mask.any():
+        return
+    duplicate_keys = [str(key) for key in frame.loc[duplicate_mask, key_field].drop_duplicates().tolist()]
+    preview = "、".join(duplicate_keys[:10])
+    suffix = "..." if len(duplicate_keys) > 10 else ""
+    key_label = _get_field_display_name(variable, key_field)
+    raise ValueError(
+        f"{side_label}筛选后关联 Key 字段 {key_label} 存在重复值 {preview}{suffix}，无法对齐比较；"
+        "请检查关联 Key 字段或筛选条件。"
+    )
+
+
 @register_rule("regex_check", dependent_tags=by_target_tag)
 def check_regex_check(
     rule: ValidationRule,
@@ -1122,13 +1267,17 @@ def check_dual_composite_compare(
     rule: ValidationRule,
     context: RuleExecutionContext,
 ) -> list[dict[str, Any]]:
-    """按外层 Key 关联两个组合变量，并逐项比较 Value 字段。"""
+    """按外层 Key 关联两个组合变量或同变量筛选子集，并逐项比较 Value 字段。"""
     target_tag = _get_fixed_rule_param(rule, "target_tag")
     reference_tag = _get_fixed_rule_param(rule, "reference_tag")
     key_check_mode = _get_fixed_rule_param(rule, "key_check_mode")
     rule_name = _get_fixed_rule_param(rule, "rule_name")
     display_field = _get_display_field_param(rule)
     comparisons = _get_dual_composite_comparisons(rule)
+    left_filters = _get_dual_composite_filters(rule, "left_filters")
+    right_filters = _get_dual_composite_filters(rule, "right_filters")
+    left_key_field = _get_dual_key_field(rule, "left_key_field")
+    right_key_field = _get_dual_key_field(rule, "right_key_field")
 
     if key_check_mode not in {"baseline_only", "bidirectional"}:
         raise ValueError(
@@ -1141,12 +1290,66 @@ def check_dual_composite_compare(
         reference_tag,
         rule.rule_type,
     )
+    if target_tag == reference_tag and (not left_filters or not right_filters):
+        raise ValueError(
+            "Rule 'dual_composite_compare' requires both left_filters and right_filters "
+            "when target_tag equals reference_tag."
+        )
 
-    target_by_key = target_frame.set_index(COMPOSITE_KEY_FIELD, drop=False)
-    reference_by_key = reference_frame.set_index(COMPOSITE_KEY_FIELD, drop=False)
+    filtered_target_frame = _apply_composite_filters(
+        target_frame.copy(),
+        target_variable,
+        left_filters,
+    )
+    filtered_reference_frame = _apply_composite_filters(
+        reference_frame.copy(),
+        reference_variable,
+        right_filters,
+    )
     abnormal_results: list[dict[str, Any]] = []
-    target_key_location = _build_rule_location(target_variable, COMPOSITE_KEY_FIELD)
-    reference_key_location = _build_rule_location(reference_variable, COMPOSITE_KEY_FIELD)
+    target_key_location = _build_rule_location(target_variable, left_key_field)
+    reference_key_location = _build_rule_location(reference_variable, right_key_field)
+    filter_context = _build_dual_filter_context(
+        target_variable=target_variable,
+        reference_variable=reference_variable,
+        left_filters=left_filters,
+        right_filters=right_filters,
+    )
+
+    if filtered_target_frame.empty:
+        _append_empty_dual_filter_warning(
+            abnormal_results,
+            rule_name=rule_name,
+            location=target_key_location,
+            side_label="左侧",
+            filter_context=filter_context,
+        )
+    if filtered_reference_frame.empty:
+        _append_empty_dual_filter_warning(
+            abnormal_results,
+            rule_name=rule_name,
+            location=reference_key_location,
+            side_label="右侧",
+            filter_context=filter_context,
+        )
+    if abnormal_results:
+        return abnormal_results
+
+    _raise_duplicate_dual_keys(
+        filtered_target_frame,
+        side_label="左侧",
+        key_field=left_key_field,
+        variable=target_variable,
+    )
+    _raise_duplicate_dual_keys(
+        filtered_reference_frame,
+        side_label="右侧",
+        key_field=right_key_field,
+        variable=reference_variable,
+    )
+
+    target_by_key = filtered_target_frame.set_index(left_key_field, drop=False)
+    reference_by_key = filtered_reference_frame.set_index(right_key_field, drop=False)
 
     for key in target_by_key.index.tolist():
         if key not in reference_by_key.index:
@@ -1158,13 +1361,18 @@ def check_dual_composite_compare(
                     display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=target_key_location,
-                    message=f"目标组合变量中缺失该 Key ({key})。",
+                    message=f"目标组合变量中缺失该 Key ({key})。{filter_context}",
                 )
             )
             continue
 
         target_row = target_by_key.loc[key]
         reference_row = reference_by_key.loc[key]
+        if (
+            target_tag == reference_tag
+            and int(target_row["_row_index"]) == int(reference_row["_row_index"])
+        ):
+            continue
         abnormal_results.extend(
             _evaluate_dual_composite_key(
                 rule_name=rule_name,
@@ -1175,6 +1383,7 @@ def check_dual_composite_compare(
                 reference_row=reference_row,
                 comparisons=comparisons,
                 display_field=display_field,
+                filter_context=filter_context,
             )
         )
 
@@ -1190,7 +1399,7 @@ def check_dual_composite_compare(
                     display_value=_get_row_display_value(row, display_field),
                     rule_name=rule_name,
                     location=reference_key_location,
-                    message=f"基准组合变量中缺失该 Key ({key})。",
+                    message=f"基准组合变量中缺失该 Key ({key})。{filter_context}",
                 )
             )
 
@@ -1207,6 +1416,7 @@ def _evaluate_dual_composite_key(
     reference_row: pd.Series,
     comparisons: list[DualCompositeComparison],
     display_field: str | None,
+    filter_context: str = "",
 ) -> list[dict[str, Any]]:
     """执行单个 Key 上的全部字段比较。"""
     abnormal_results: list[dict[str, Any]] = []
@@ -1229,7 +1439,7 @@ def _evaluate_dual_composite_key(
                     display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
-                    message=f"Key {key} 的基准变量缺少字段 {left_field}。",
+                    message=f"Key {key} 的基准变量缺少字段 {left_field}。{filter_context}",
                 )
             )
             continue
@@ -1241,7 +1451,7 @@ def _evaluate_dual_composite_key(
                     display_value=_get_row_display_value(target_row, display_field),
                     rule_name=rule_name,
                     location=location,
-                    message=f"Key {key} 的目标变量缺少字段 {right_field}。",
+                    message=f"Key {key} 的目标变量缺少字段 {right_field}。{filter_context}",
                 )
             )
             continue
@@ -1262,7 +1472,7 @@ def _evaluate_dual_composite_key(
                         location=location,
                         message=(
                             f"Key {key} 字段非空失败：基准变量({left_label}={left_value}) / "
-                            f"目标变量({right_label}={right_value}) 不能为空。"
+                            f"目标变量({right_label}={right_value}) 不能为空。{filter_context}"
                         ),
                     )
                 )
@@ -1283,7 +1493,7 @@ def _evaluate_dual_composite_key(
                     location=location,
                     message=(
                         f"Key {key} 字段比对失败：基准变量({left_label}={left_value}) 与 "
-                        f"目标变量({right_label}={right_value}) 无法按数值比较。"
+                        f"目标变量({right_label}={right_value}) 无法按数值比较。{filter_context}"
                     ),
                 )
             )
@@ -1299,7 +1509,7 @@ def _evaluate_dual_composite_key(
                     location=location,
                     message=(
                         f"字段比对失败：Key {key} 下，基准变量({left_label}={left_value}) "
-                        f"{operator_text} 目标变量({right_label}={right_value}) 不成立。"
+                        f"{operator_text} 目标变量({right_label}={right_value}) 不成立。{filter_context}"
                     ),
                 )
             )

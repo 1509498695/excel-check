@@ -635,14 +635,8 @@ def _build_composite_variable_frame(
         frame[key_column],
         append_index_to_key=append_index_to_key,
     )
-    frame = frame.loc[frame["__key__"].notna()].copy()
-    frame = frame.drop(columns=[key_column])
     frame["_row_index"] = frame.index + 2
-    ordered_columns = [
-        "__key__",
-        *[column for column in columns if column != key_column],
-        "_row_index",
-    ]
+    ordered_columns = _unique_preserve_order(["__key__", *columns, "_row_index"])
     return frame[ordered_columns].reset_index(drop=True)
 
 

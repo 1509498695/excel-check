@@ -15,6 +15,7 @@ import {
   fetchSourceMetadata,
 } from '../api/workbench'
 import type {
+  CompositeCondition,
   FixedRuleDefinition,
   FixedRuleGroup,
   FixedRulesConfig,
@@ -39,7 +40,9 @@ import {
   isValidMultiCompositePipelineConfig,
   isSingleVariable,
   isValidCompositeConfig,
+  isValidCompositeCondition,
   normalizeCompositeConfig,
+  normalizeCompositeCondition,
   normalizeExpectedValueMode,
   normalizeMultiCompositeMappingConfig,
   normalizeMultiCompositePipelineConfig,
@@ -179,13 +182,66 @@ function resolveFieldAgainstAvailable(
   return matchedFields.length === 1 ? matchedFields[0] : null
 }
 
+function collectCompositeAvailableFields(variable: VariableTag | undefined): string[] {
+  const fields = new Set<string>(['__key__'])
+  const keyColumn = variable?.key_column
+  if (keyColumn?.trim()) {
+    fields.add(keyColumn)
+  }
+  ;(variable?.columns ?? []).forEach((column) => {
+    if (column?.trim()) {
+      fields.add(column)
+    }
+  })
+  return [...fields]
+}
+
+function isValidDualCompositeFilters(
+  filters: CompositeCondition[] | undefined,
+  availableFields: string[],
+): boolean {
+  return (filters ?? []).every((condition) => {
+    if (!isValidCompositeCondition(condition, 'filter')) {
+      return false
+    }
+    if (!resolveFieldAgainstAvailable(condition.field, availableFields)) {
+      return false
+    }
+    if (
+      condition.value_source === 'field' &&
+      !resolveFieldAgainstAvailable(condition.expected_field, availableFields)
+    ) {
+      return false
+    }
+    return true
+  })
+}
+
+function normalizeDualCompositeFilters(
+  filters: CompositeCondition[] | undefined,
+  availableFields: string[],
+): CompositeCondition[] {
+  return (filters ?? []).map((condition) => {
+    const normalized = normalizeCompositeCondition(condition)
+    return {
+      ...normalized,
+      field: resolveFieldAgainstAvailable(normalized.field, availableFields) ?? normalized.field,
+      expected_field:
+        normalized.value_source === 'field'
+          ? resolveFieldAgainstAvailable(normalized.expected_field, availableFields) ??
+            normalized.expected_field
+          : normalized.expected_field,
+    }
+  })
+}
+
 function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<string, VariableTag>): boolean {
   const targetTag = rule.target_variable_tag.trim()
   const referenceTag = rule.reference_variable_tag?.trim() ?? ''
   const targetVariable = variableMap.get(targetTag)
   const referenceVariable = variableMap.get(referenceTag)
 
-  if (!targetTag || !referenceTag || targetTag === referenceTag) {
+  if (!targetTag || !referenceTag) {
     return false
   }
   if (!isCompositeVariable(targetVariable) || !isCompositeVariable(referenceVariable)) {
@@ -198,17 +254,32 @@ function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<st
     return false
   }
 
-  const leftFields = new Set(['__key__', ...((targetVariable.columns ?? []).filter(Boolean))])
-  const rightFields = new Set(['__key__', ...((referenceVariable.columns ?? []).filter(Boolean))])
+  const leftFieldList = collectCompositeAvailableFields(targetVariable)
+  const rightFieldList = collectCompositeAvailableFields(referenceVariable)
+  if (!resolveFieldAgainstAvailable(rule.left_key_field ?? '__key__', leftFieldList)) {
+    return false
+  }
+  if (!resolveFieldAgainstAvailable(rule.right_key_field ?? '__key__', rightFieldList)) {
+    return false
+  }
+  if (targetTag === referenceTag && (!rule.left_filters?.length || !rule.right_filters?.length)) {
+    return false
+  }
+  if (!isValidDualCompositeFilters(rule.left_filters, leftFieldList)) {
+    return false
+  }
+  if (!isValidDualCompositeFilters(rule.right_filters, rightFieldList)) {
+    return false
+  }
 
   return rule.comparisons.every((comparison) => {
     if (!comparison.comparison_id?.trim()) {
       return false
     }
-    if (!resolveFieldAgainstAvailable(comparison.left_field, [...leftFields])) {
+    if (!resolveFieldAgainstAvailable(comparison.left_field, leftFieldList)) {
       return false
     }
-    if (!resolveFieldAgainstAvailable(comparison.right_field, [...rightFields])) {
+    if (!resolveFieldAgainstAvailable(comparison.right_field, rightFieldList)) {
       return false
     }
     return ['eq', 'ne', 'gt', 'lt', 'not_null'].includes(comparison.operator)
@@ -1030,14 +1101,8 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
         rule.rule_type === 'dual_composite_compare'
           ? variableMap.get(rule.reference_variable_tag?.trim() ?? '')
           : undefined
-      const targetFields = [
-        '__key__',
-        ...((targetVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
-      ]
-      const referenceFields = [
-        '__key__',
-        ...((referenceVariable?.columns ?? []).filter((column) => Boolean(column && column.trim()))),
-      ]
+      const targetFields = collectCompositeAvailableFields(targetVariable)
+      const referenceFields = collectCompositeAvailableFields(referenceVariable)
 
       const nextRule: FixedRuleDefinition = {
         rule_id: rule.rule_id ?? createEntityId('fixed-rule'),
@@ -1078,6 +1143,14 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
           rule.rule_type === 'dual_composite_compare'
             ? rule.key_check_mode ?? 'baseline_only'
             : undefined,
+        left_key_field:
+          rule.rule_type === 'dual_composite_compare'
+            ? resolveFieldAgainstAvailable(rule.left_key_field ?? '__key__', targetFields) ?? '__key__'
+            : undefined,
+        right_key_field:
+          rule.rule_type === 'dual_composite_compare'
+            ? resolveFieldAgainstAvailable(rule.right_key_field ?? '__key__', referenceFields) ?? '__key__'
+            : undefined,
         comparisons:
           rule.rule_type === 'dual_composite_compare'
             ? (rule.comparisons ?? []).map((comparison) => ({
@@ -1090,6 +1163,14 @@ export const useFixedRulesStore = defineStore('fixed-rules', {
                   resolveFieldAgainstAvailable(comparison.right_field, referenceFields) ??
                   comparison.right_field.trim(),
               }))
+            : [],
+        left_filters:
+          rule.rule_type === 'dual_composite_compare'
+            ? normalizeDualCompositeFilters(rule.left_filters, targetFields)
+            : [],
+        right_filters:
+          rule.rule_type === 'dual_composite_compare'
+            ? normalizeDualCompositeFilters(rule.right_filters, referenceFields)
             : [],
       }
 

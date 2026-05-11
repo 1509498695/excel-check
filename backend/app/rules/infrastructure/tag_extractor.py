@@ -44,7 +44,7 @@ def by_dict_and_target_tag(rule: ValidationRule) -> list[str]:
 
 
 def by_reference_and_target_tag(rule: ValidationRule) -> list[str]:
-    """``dual_composite_compare``：从 ``params.reference_tag`` / ``target_tag`` 中提取双 tag。"""
+    """``dual_composite_compare``：提取左右 tag；同变量模式允许返回重复 tag。"""
     reference_tag = rule.params.get("reference_tag")
     target_tag = rule.params.get("target_tag")
     if not isinstance(reference_tag, str) or not reference_tag:

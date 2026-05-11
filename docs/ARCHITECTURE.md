@@ -119,6 +119,10 @@ class TaskTree:
     expected_value?: str,                      # 仅 fixed_value_compare
     reference_variable_tag?: str,             # 仅 cross_table_mapping，前端“包含 (in)”引用的基础字典变量
     composite_config?: CompositeRuleConfig,    # 仅 composite_condition_check
+    left_key_field?: str,                      # 仅 dual_composite_compare，默认 "__key__"
+    right_key_field?: str,                     # 仅 dual_composite_compare，默认 "__key__"
+    left_filters?: CompositeCondition[],       # 仅 dual_composite_compare，作用于左侧/基准组合变量
+    right_filters?: CompositeCondition[],      # 仅 dual_composite_compare，作用于右侧/目标组合变量
     pipeline_config?: MultiCompositePipelineConfig,
     mapping_config?: MultiCompositeMappingConfig
   }, ...]
@@ -300,8 +304,8 @@ def handle_composite(ctx): ...
 | `sequence_order_check` | 单变量 | 按原始行序检查数值连续性 |
 | `fixed_value_compare` | 单变量 | 与常量值的 `eq / ne / gt / lt` 比较 |
 | `cross_table_mapping` | 单变量 | 跨表映射（值需在另一变量集合中）；个人校验规则弹窗中的 `包含 (in)` 前端保存时复用该规则 |
-| `composite_condition_check` | 组合变量 | 全局筛选 + 分支筛选 + 分支校验，校验操作符覆盖 `eq / ne / gt / lt / not_null / regex / unique / duplicate_required` |
-| `dual_composite_compare` | 组合变量 | 按外层 Key 关联两个组合变量，再执行多字段 AND 比较 |
+| `composite_condition_check` | 组合变量 | 全局筛选 + 分支筛选 + 分支校验，校验操作符覆盖 `eq / ne / gt / lt / not_null / regex / unique / duplicate_required`；分支 `not_null` 会识别 Excel 空单元格、`NaN`、空字符串和纯空白字符串，且空 `key_column` 行仍参与组合分支断言 |
+| `dual_composite_compare` | 组合变量 | 对左右组合变量分别应用可选筛选后按 `left_key_field / right_key_field` 对齐，再执行多字段 AND 比较；缺省按 `__key__` 兼容旧规则，同一组合变量模式要求左右筛选都非空 |
 | `multi_composite_pipeline_check` | 组合变量 | 1..N 个组合变量节点串行执行，首个失败节点短路后续节点 |
 | `multi_composite_mapping_check` | 组合变量 | 1..N 个组合变量节点独立执行；每条筛选条件独立检查失败行，并可按筛选失败排除行号范围移除预期异常 |
 

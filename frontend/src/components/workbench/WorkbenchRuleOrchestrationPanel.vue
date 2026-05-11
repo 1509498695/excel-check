@@ -71,6 +71,8 @@ const ruleForm = reactive<{
   sequence_start_mode: 'auto' | 'manual'
   sequence_start_value: string
   key_check_mode: 'baseline_only' | 'bidirectional'
+  left_key_field: string
+  right_key_field: string
 }>({
   rule_id: '',
   group_id: 'ungrouped',
@@ -87,6 +89,8 @@ const ruleForm = reactive<{
   sequence_start_mode: 'auto',
   sequence_start_value: '',
   key_check_mode: 'baseline_only',
+  left_key_field: KEY_FIELD,
+  right_key_field: KEY_FIELD,
 })
 
 const compositeRuleForm = reactive<CompositeRuleConfig>({
@@ -94,6 +98,8 @@ const compositeRuleForm = reactive<CompositeRuleConfig>({
   branches: [],
 })
 const dualCompositeComparisons = ref<DualCompositeComparison[]>([])
+const dualCompositeLeftFilters = ref<CompositeCondition[]>([])
+const dualCompositeRightFilters = ref<CompositeCondition[]>([])
 const pipelineRuleForm = reactive<MultiCompositePipelineConfig>({
   nodes: [],
 })
@@ -228,14 +234,15 @@ const filteredTargetVariableOptions = computed(() =>
 const referenceVariableOptions = computed(() =>
   singleVariableOptions.value.filter((variable) => variable.tag !== ruleForm.target_variable_tag),
 )
-const compositeReferenceVariableOptions = computed(() =>
-  compositeVariableOptions.value.filter(
-    (variable) =>
-      variable.tag !== ruleForm.target_variable_tag,
-  ),
-)
+const compositeReferenceVariableOptions = computed(() => compositeVariableOptions.value)
 const selectedReferenceVariable = computed<VariableTag | null>(
   () => variableMap.value.get(ruleForm.reference_variable_tag) ?? null,
+)
+const isSameDualCompositeVariable = computed(
+  () =>
+    isDualCompositeRule.value &&
+    ruleForm.target_variable_tag.trim() !== '' &&
+    ruleForm.target_variable_tag === ruleForm.reference_variable_tag,
 )
 
 function buildCompositeFieldOptions(variable: VariableTag | null): Array<{ label: string; value: string }> {
@@ -244,15 +251,21 @@ function buildCompositeFieldOptions(variable: VariableTag | null): Array<{ label
   }
 
   const keyColumn = variable.key_column ?? ''
-  return [
+  const options: Array<{ label: string; value: string }> = [
     {
-      label: keyColumn ? `${keyColumn} (Key)` : 'Key(映射键)',
+      label: keyColumn ? `${keyColumn} (内部 Key)` : 'Key(映射键)',
       value: KEY_FIELD,
     },
-    ...(variable.columns ?? [])
-      .filter((column) => column && column.trim() && column !== keyColumn)
-      .map((column) => ({ label: column, value: column })),
   ]
+  if (keyColumn.trim()) {
+    options.push({ label: `${keyColumn} (原始字段)`, value: keyColumn })
+  }
+  ;(variable.columns ?? [])
+    .filter((column) => column && column.trim() && column !== keyColumn)
+    .forEach((column) => {
+      options.push({ label: column, value: column })
+    })
+  return options
 }
 
 function buildDisplayFieldOptions(variable: VariableTag | null): Array<{ label: string; value: string }> {
@@ -399,8 +412,10 @@ watch(
       ruleForm.expected_value = ''
       ruleForm.reference_variable_tag = ''
       ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeKeyFields()
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetMappingConfig()
       if (!pipelineRuleForm.nodes.length) {
         resetPipelineConfig()
@@ -415,6 +430,7 @@ watch(
       ruleForm.key_check_mode = 'baseline_only'
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       if (!mappingRuleForm.nodes.length) {
         resetMappingConfig()
@@ -493,6 +509,7 @@ watch(
       ruleForm.key_check_mode = 'baseline_only'
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       resetMappingConfig()
     } else if (entryType === 'composite') {
@@ -500,7 +517,9 @@ watch(
       ruleForm.expected_value = ''
       ruleForm.reference_variable_tag = ''
       ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeKeyFields()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       resetMappingConfig()
       resetCompositeConfig()
@@ -508,8 +527,10 @@ watch(
       ruleForm.selected_rule = 'dual_composite_compare'
       ruleForm.expected_value = ''
       ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeKeyFields()
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       resetMappingConfig()
     } else if (entryType === 'multi_composite_pipeline') {
@@ -517,8 +538,10 @@ watch(
       ruleForm.expected_value = ''
       ruleForm.reference_variable_tag = ''
       ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeKeyFields()
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       resetMappingConfig()
     } else {
@@ -526,8 +549,10 @@ watch(
       ruleForm.expected_value = ''
       ruleForm.reference_variable_tag = ''
       ruleForm.key_check_mode = 'baseline_only'
+      resetDualCompositeKeyFields()
       resetCompositeConfig()
       resetDualCompositeComparisons()
+      resetDualCompositeFilters()
       resetPipelineConfig()
       resetMappingConfig()
     }
@@ -565,7 +590,11 @@ watch(
     () => ruleForm.sequence_start_mode,
     () => ruleForm.sequence_start_value,
     () => ruleForm.key_check_mode,
+    () => ruleForm.left_key_field,
+    () => ruleForm.right_key_field,
     () => dualCompositeComparisons.value.length,
+    () => dualCompositeLeftFilters.value.length,
+    () => dualCompositeRightFilters.value.length,
     () => pipelineRuleForm.nodes.length,
     () => pipelineRuleForm.nodes.map((node) => `${node.node_id}:${node.variable_tag}`).join('|'),
     () => mappingRuleForm.nodes.length,
@@ -829,6 +858,13 @@ function normalizeDualCompositeComparisons(
   return nextComparisons.length ? nextComparisons : [createDualCompositeComparison()]
 }
 
+function normalizeDualCompositeFilters(filters?: CompositeCondition[]): CompositeCondition[] {
+  return (filters ?? []).map((condition) => ({
+    ...condition,
+    condition_id: condition.condition_id || createId('condition'),
+  }))
+}
+
 function getRuleEntryTypeBySelection(selection: FixedRuleSelection): RuleEntryType {
   if (selection === 'dual_composite_compare') {
     return 'dual_composite'
@@ -851,6 +887,23 @@ function applyDualCompositeComparisons(comparisons?: DualCompositeComparison[]):
 
 function resetDualCompositeComparisons(): void {
   applyDualCompositeComparisons(undefined)
+}
+
+function applyDualCompositeFilters(
+  leftFilters?: CompositeCondition[],
+  rightFilters?: CompositeCondition[],
+): void {
+  dualCompositeLeftFilters.value = normalizeDualCompositeFilters(leftFilters)
+  dualCompositeRightFilters.value = normalizeDualCompositeFilters(rightFilters)
+}
+
+function resetDualCompositeFilters(): void {
+  applyDualCompositeFilters()
+}
+
+function resetDualCompositeKeyFields(): void {
+  ruleForm.left_key_field = KEY_FIELD
+  ruleForm.right_key_field = KEY_FIELD
 }
 
 function normalizePipelineConfig(
@@ -1108,6 +1161,26 @@ function removeDualCompositeComparison(comparisonId: string): void {
   )
 }
 
+function addDualCompositeFilter(side: 'left' | 'right'): void {
+  if (side === 'left') {
+    dualCompositeLeftFilters.value.push(createCondition())
+    return
+  }
+  dualCompositeRightFilters.value.push(createCondition())
+}
+
+function removeDualCompositeFilter(side: 'left' | 'right', conditionId: string): void {
+  if (side === 'left') {
+    dualCompositeLeftFilters.value = dualCompositeLeftFilters.value.filter(
+      (condition) => condition.condition_id !== conditionId,
+    )
+    return
+  }
+  dualCompositeRightFilters.value = dualCompositeRightFilters.value.filter(
+    (condition) => condition.condition_id !== conditionId,
+  )
+}
+
 function setConditionOperator(
   condition: CompositeCondition,
   operator: CompositeFilterOperator | CompositeAssertionOperator,
@@ -1312,6 +1385,39 @@ function isKnownReferenceCompositeField(field: string): boolean {
   return resolveFieldOptionValue(referenceCompositeFieldOptions.value, field) !== null
 }
 
+function validateDualCompositeKeyField(
+  field: string,
+  sideLabel: string,
+  options: Array<{ label: string; value: string }>,
+): string | null {
+  if (!field.trim()) {
+    return `${sideLabel}关联 Key 字段不能为空。`
+  }
+  if (resolveFieldOptionValue(options, field) === null) {
+    return `${sideLabel}关联 Key 字段不属于对应组合变量。`
+  }
+  return null
+}
+
+function validateDualCompositeFilters(
+  filters: CompositeCondition[],
+  sideLabel: string,
+  options: Array<{ label: string; value: string }>,
+): string | null {
+  for (let index = 0; index < filters.length; index += 1) {
+    const error = validateCompositeCondition(
+      filters[index],
+      'filter',
+      `${sideLabel}筛选条件 ${index + 1}`,
+      options,
+    )
+    if (error) {
+      return error
+    }
+  }
+  return null
+}
+
 function validateDualCompositeComparison(
   comparison: DualCompositeComparison,
   label: string,
@@ -1498,6 +1604,16 @@ function buildDefaultRuleName(
   const normalizedSheet = variable.sheet.trim()
   if ((variable.variable_kind ?? 'single') === 'composite') {
     if (selectedRule === 'dual_composite_compare') {
+      if (referenceVariableTag.trim() === variable.tag) {
+        const firstComparison = dualCompositeComparisons.value[0]
+        const leftField = firstComparison?.left_field
+          ? getCompositeFieldLabel(firstComparison.left_field, variable)
+          : '字段A'
+        const rightField = firstComparison?.right_field
+          ? getCompositeFieldLabel(firstComparison.right_field, variable)
+          : '字段B'
+        return `同变量筛选对比-${variable.tag}-${leftField} vs ${rightField}`
+      }
       return `${normalizedSheet}-${variable.tag}-跨组变量校验`
     }
     if (selectedRule === 'multi_composite_pipeline_check') {
@@ -1621,7 +1737,19 @@ function buildRuleCondition(rule: FixedRuleDefinition): string {
       }
       return `${leftField} ${getDualCompositeOperatorLabel(comparison.operator)} ${rightField}`
     })
-    return `${columnName} 对比 ${referenceVariable?.tag ?? rule.reference_variable_tag ?? '未绑定目标变量'}（${getDualCompositeKeyCheckModeLabel(rule.key_check_mode)}）${comparisons.length ? `：${comparisons.join('；')}` : ''}`
+    const leftFilterSummary = rule.left_filters?.length
+      ? `左侧筛选：${rule.left_filters.map((condition) => summarizeCondition(condition, variable)).join(' 且 ')}`
+      : ''
+    const rightFilterSummary = rule.right_filters?.length
+      ? `右侧筛选：${rule.right_filters
+          .map((condition) => summarizeCondition(condition, referenceVariable ?? null))
+          .join(' 且 ')}`
+      : ''
+    const leftKey = getCompositeFieldLabel(rule.left_key_field ?? KEY_FIELD, variable)
+    const rightKey = getCompositeFieldLabel(rule.right_key_field ?? KEY_FIELD, referenceVariable ?? null)
+    const keySummary = `按 ${leftKey} ⇄ ${rightKey} 关联`
+    const filterSummary = [leftFilterSummary, rightFilterSummary].filter(Boolean).join('；')
+    return `${columnName} 对比 ${referenceVariable?.tag ?? rule.reference_variable_tag ?? '未绑定目标变量'}（${getDualCompositeKeyCheckModeLabel(rule.key_check_mode)}，${keySummary}）${filterSummary ? `；${filterSummary}` : ''}${comparisons.length ? `：${comparisons.join('；')}` : ''}`
   }
   if (rule.rule_type === 'composite_condition_check') {
     const segments: string[] = []
@@ -1860,8 +1988,10 @@ async function openCreateRuleDialog(): Promise<void> {
   ruleForm.sequence_start_mode = 'auto'
   ruleForm.sequence_start_value = ''
   ruleForm.key_check_mode = 'baseline_only'
+  resetDualCompositeKeyFields()
   resetCompositeConfig()
   resetDualCompositeComparisons()
+  resetDualCompositeFilters()
   resetPipelineConfig()
   resetMappingConfig()
   isRuleNameManuallyEdited.value = false
@@ -1888,6 +2018,7 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
     ruleForm.key_check_mode = 'baseline_only'
     applyCompositeConfig(rule.composite_config)
     resetDualCompositeComparisons()
+    resetDualCompositeFilters()
     resetPipelineConfig(rule.target_variable_tag ?? '')
     resetMappingConfig(rule.target_variable_tag ?? '')
   } else if (rule.rule_type === 'dual_composite_compare') {
@@ -1899,8 +2030,11 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
     ruleForm.sequence_start_mode = 'auto'
     ruleForm.sequence_start_value = ''
     ruleForm.key_check_mode = rule.key_check_mode ?? 'baseline_only'
+    ruleForm.left_key_field = rule.left_key_field ?? KEY_FIELD
+    ruleForm.right_key_field = rule.right_key_field ?? KEY_FIELD
     resetCompositeConfig()
     applyDualCompositeComparisons(rule.comparisons)
+    applyDualCompositeFilters(rule.left_filters, rule.right_filters)
     resetPipelineConfig(rule.target_variable_tag ?? '')
     resetMappingConfig(rule.target_variable_tag ?? '')
   } else if (rule.rule_type === 'multi_composite_pipeline_check') {
@@ -1912,8 +2046,10 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
     ruleForm.sequence_start_mode = 'auto'
     ruleForm.sequence_start_value = ''
     ruleForm.key_check_mode = 'baseline_only'
+    resetDualCompositeKeyFields()
     resetCompositeConfig()
     resetDualCompositeComparisons()
+    resetDualCompositeFilters()
     applyPipelineConfig(rule.pipeline_config, rule.target_variable_tag ?? '')
     resetMappingConfig(rule.target_variable_tag ?? '')
   } else if (rule.rule_type === 'multi_composite_mapping_check') {
@@ -1925,8 +2061,10 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
     ruleForm.sequence_start_mode = 'auto'
     ruleForm.sequence_start_value = ''
     ruleForm.key_check_mode = 'baseline_only'
+    resetDualCompositeKeyFields()
     resetCompositeConfig()
     resetDualCompositeComparisons()
+    resetDualCompositeFilters()
     resetPipelineConfig(rule.target_variable_tag ?? '')
     applyMappingConfig(rule.mapping_config, rule.target_variable_tag ?? '')
   } else {
@@ -1948,8 +2086,10 @@ async function openEditRuleDialog(rule: FixedRuleDefinition): Promise<void> {
     ruleForm.sequence_start_value =
       rule.rule_type === 'sequence_order_check' ? rule.sequence_start_value ?? '' : ''
     ruleForm.key_check_mode = 'baseline_only'
+    resetDualCompositeKeyFields()
     resetCompositeConfig()
     resetDualCompositeComparisons()
+    resetDualCompositeFilters()
     resetPipelineConfig(rule.target_variable_tag ?? '')
     resetMappingConfig(rule.target_variable_tag ?? '')
   }
@@ -1980,12 +2120,16 @@ function validateRuleForm(): boolean {
   const variable = selectedRuleVariable.value
   if (shouldShowTopTargetVariable.value) {
     if (!ruleForm.target_variable_tag.trim()) {
-      ElMessage.warning('请先选择目标变量。')
+      ElMessage.warning(isDualCompositeRule.value ? '请先选择基准变量。' : '请先选择目标变量。')
       return false
     }
 
     if (!variable) {
-      ElMessage.warning('当前目标变量不存在，请重新选择。')
+      ElMessage.warning(
+        isDualCompositeRule.value
+          ? '当前基准变量不存在，请重新选择。'
+          : '当前目标变量不存在，请重新选择。',
+      )
       return false
     }
 
@@ -2007,6 +2151,49 @@ function validateRuleForm(): boolean {
       }
       if (!selectedReferenceVariable.value) {
         ElMessage.warning('当前目标变量（变量 2）不存在，请重新选择。')
+        return false
+      }
+      const leftKeyError = validateDualCompositeKeyField(
+        ruleForm.left_key_field,
+        '左侧',
+        compositeFieldOptions.value,
+      )
+      if (leftKeyError) {
+        ElMessage.warning(leftKeyError)
+        return false
+      }
+      const rightKeyError = validateDualCompositeKeyField(
+        ruleForm.right_key_field,
+        '右侧',
+        referenceCompositeFieldOptions.value,
+      )
+      if (rightKeyError) {
+        ElMessage.warning(rightKeyError)
+        return false
+      }
+      if (
+        isSameDualCompositeVariable.value &&
+        (!dualCompositeLeftFilters.value.length || !dualCompositeRightFilters.value.length)
+      ) {
+        ElMessage.warning('同一组合变量筛选对比时，左右筛选条件都不能为空。')
+        return false
+      }
+      const leftFilterError = validateDualCompositeFilters(
+        dualCompositeLeftFilters.value,
+        '左侧',
+        compositeFieldOptions.value,
+      )
+      if (leftFilterError) {
+        ElMessage.warning(leftFilterError)
+        return false
+      }
+      const rightFilterError = validateDualCompositeFilters(
+        dualCompositeRightFilters.value,
+        '右侧',
+        referenceCompositeFieldOptions.value,
+      )
+      if (rightFilterError) {
+        ElMessage.warning(rightFilterError)
         return false
       }
       if (!dualCompositeComparisons.value.length) {
@@ -2260,7 +2447,12 @@ async function handleSaveRule(): Promise<void> {
         reference_variable_tag: ruleForm.reference_variable_tag,
         rule_type: 'dual_composite_compare',
         key_check_mode: ruleForm.key_check_mode,
+        left_key_field: resolveFieldOptionValue(compositeFieldOptions.value, ruleForm.left_key_field) ?? KEY_FIELD,
+        right_key_field:
+          resolveFieldOptionValue(referenceCompositeFieldOptions.value, ruleForm.right_key_field) ?? KEY_FIELD,
         comparisons: normalizeDualCompositeComparisons(dualCompositeComparisons.value),
+        left_filters: normalizeDualCompositeFilters(dualCompositeLeftFilters.value),
+        right_filters: normalizeDualCompositeFilters(dualCompositeRightFilters.value),
       })
     } else if (ruleForm.rule_entry_type === 'composite') {
       store.upsertOrchestrationRule({
@@ -2678,7 +2870,13 @@ function handleToggleSingleSelection(ruleId: string): void {
             <div>
               <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">基本信息</h3>
               <p class="mt-0.5 text-[12px] text-ink-500">
-                {{ shouldShowTopTargetVariable ? '规则归属、命名与目标变量' : '规则归属、命名与节点变量' }}
+                {{
+                  isDualCompositeRule
+                    ? '规则归属、命名'
+                    : shouldShowTopTargetVariable
+                      ? '规则归属、命名与目标变量'
+                      : '规则归属、命名与节点变量'
+                }}
               </p>
             </div>
           </div>
@@ -2713,7 +2911,7 @@ function handleToggleSingleSelection(ruleId: string): void {
               />
             </el-select>
           </div>
-          <div v-if="shouldShowTopTargetVariable">
+          <div v-if="shouldShowTopTargetVariable && !isDualCompositeRule">
             <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标变量</label>
             <el-select
               v-model="ruleForm.target_variable_tag"
@@ -2766,31 +2964,17 @@ function handleToggleSingleSelection(ruleId: string): void {
         </section>
 
         <!-- 段 2：校验配置（仅单变量） -->
-        <section
-          class="flex flex-col gap-3"
-          :class="!isSingleRuleEntry ? 'opacity-50 pointer-events-none' : ''"
-        >
+        <section v-if="isSingleRuleEntry" class="flex flex-col gap-3">
           <div class="flex items-end justify-between border-b border-line pb-2">
             <div>
               <h3 class="text-[14px] font-semibold tracking-tight text-ink-900">校验配置</h3>
               <p class="mt-0.5 text-[12px] text-ink-500">仅当规则类型为单一变量校验时显示</p>
             </div>
-            <span
-              v-if="!isSingleRuleEntry"
-              class="inline-flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[12px] font-medium text-ink-500"
-            >
-              <span class="h-1.5 w-1.5 rounded-full bg-ink-300"></span>
-              当前不适用
-            </span>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="mb-1.5 block text-[12px] font-medium text-ink-500">规则选择</label>
-              <el-select
-                v-model="ruleForm.selected_rule"
-                class="w-full"
-                :disabled="!isSingleRuleEntry"
-              >
+              <el-select v-model="ruleForm.selected_rule" class="w-full">
                 <el-option
                   v-for="option in ruleSelectionOptions"
                   :key="option.value"
@@ -2889,9 +3073,19 @@ function handleToggleSingleSelection(ruleId: string): void {
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <label class="mb-1.5 block text-[12px] font-medium text-ink-500">基准变量</label>
-                  <div class="rounded-field border border-line bg-card px-3 py-2 text-[13px] text-ink-900">
-                    {{ selectedRuleVariable ? buildVariableOptionLabel(selectedRuleVariable) : '请先选择基准变量' }}
-                  </div>
+                  <el-select
+                    v-model="ruleForm.target_variable_tag"
+                    class="w-full"
+                    filterable
+                    placeholder="选择基准变量"
+                  >
+                    <el-option
+                      v-for="variable in filteredTargetVariableOptions"
+                      :key="variable.tag"
+                      :label="buildVariableOptionLabel(variable)"
+                      :value="variable.tag"
+                    />
+                  </el-select>
                 </div>
                 <div>
                   <label class="mb-1.5 block text-[12px] font-medium text-ink-500">目标变量（变量 2）</label>
@@ -2916,6 +3110,225 @@ function handleToggleSingleSelection(ruleId: string): void {
                     <el-option label="基准变量为准" value="baseline_only" />
                     <el-option label="双向检查" value="bidirectional" />
                   </el-select>
+                </div>
+                <div>
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">左侧关联 Key 字段</label>
+                  <el-select v-model="ruleForm.left_key_field" class="w-full" filterable>
+                    <el-option
+                      v-for="field in compositeFieldOptions"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                </div>
+                <div>
+                  <label class="mb-1.5 block text-[12px] font-medium text-ink-500">右侧关联 Key 字段</label>
+                  <el-select v-model="ruleForm.right_key_field" class="w-full" filterable>
+                    <el-option
+                      v-for="field in referenceCompositeFieldOptions"
+                      :key="field.value"
+                      :label="field.label"
+                      :value="field.value"
+                    />
+                  </el-select>
+                </div>
+              </div>
+              <div class="mt-3 text-[12px] text-ink-500">
+                默认按内部 <span class="font-mono">__key__</span> 关联；如需忽略追加行号，可选择
+                INT_Level 这类业务字段作为左右关联 Key。
+              </div>
+            </div>
+
+            <div
+              v-if="isSameDualCompositeVariable"
+              class="rounded-field border border-warning bg-warning-soft/40 px-4 py-3 text-[12px] text-warning-ink"
+            >
+              同变量模式：左右两侧筛选条件都必须配置，用于把同一个组合变量拆成两个子集后再按 Key 对比。
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div class="rounded-field bg-subtle p-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-[13px] font-medium text-ink-900">左侧筛选条件</div>
+                    <div class="mt-1 text-[12px] text-ink-500">作用于基准变量；多条条件按 AND 过滤</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    @click="addDualCompositeFilter('left')"
+                  >
+                    <Plus class="h-3 w-3" /> 添加筛选
+                  </button>
+                </div>
+                <div v-if="!dualCompositeLeftFilters.length" class="mt-3 text-[12px] text-ink-500">
+                  未配置左侧筛选
+                </div>
+                <div
+                  v-for="(condition, index) in dualCompositeLeftFilters"
+                  :key="condition.condition_id"
+                  class="mt-3 rounded-field border border-line bg-card p-3"
+                >
+                  <div class="mb-3 flex items-center justify-between">
+                    <span class="text-[12px] font-medium text-ink-700">左侧筛选 {{ index + 1 }}</span>
+                    <button
+                      type="button"
+                      class="ec-btn-danger-outline-compact"
+                      @click="removeDualCompositeFilter('left', condition.condition_id)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                      <el-select v-model="condition.field" class="w-full" filterable>
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">操作符</label>
+                      <el-select
+                        :model-value="condition.operator"
+                        class="w-full"
+                        @update:model-value="handleFilterOperatorChange(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in compositeFilterOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionValueSource(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
+                      <el-select
+                        :model-value="condition.value_source ?? 'literal'"
+                        class="w-full"
+                        @update:model-value="handleConditionValueSourceChange(condition, String($event))"
+                      >
+                        <el-option label="固定值" value="literal" />
+                        <el-option label="同侧字段" value="field" />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionExpectedValue(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                      <el-input
+                        v-model="condition.expected_value"
+                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      />
+                    </div>
+                    <div v-if="shouldShowConditionExpectedField(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                      <el-select v-model="condition.expected_field" class="w-full" filterable>
+                        <el-option
+                          v-for="field in compositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-field bg-subtle p-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-[13px] font-medium text-ink-900">右侧筛选条件</div>
+                    <div class="mt-1 text-[12px] text-ink-500">作用于目标变量；多条条件按 AND 过滤</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="ec-btn ec-btn-secondary ec-btn-sm"
+                    @click="addDualCompositeFilter('right')"
+                  >
+                    <Plus class="h-3 w-3" /> 添加筛选
+                  </button>
+                </div>
+                <div v-if="!dualCompositeRightFilters.length" class="mt-3 text-[12px] text-ink-500">
+                  未配置右侧筛选
+                </div>
+                <div
+                  v-for="(condition, index) in dualCompositeRightFilters"
+                  :key="condition.condition_id"
+                  class="mt-3 rounded-field border border-line bg-card p-3"
+                >
+                  <div class="mb-3 flex items-center justify-between">
+                    <span class="text-[12px] font-medium text-ink-700">右侧筛选 {{ index + 1 }}</span>
+                    <button
+                      type="button"
+                      class="ec-btn-danger-outline-compact"
+                      @click="removeDualCompositeFilter('right', condition.condition_id)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">字段</label>
+                      <el-select v-model="condition.field" class="w-full" filterable>
+                        <el-option
+                          v-for="field in referenceCompositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-[12px] text-ink-500">操作符</label>
+                      <el-select
+                        :model-value="condition.operator"
+                        class="w-full"
+                        @update:model-value="handleFilterOperatorChange(condition, String($event))"
+                      >
+                        <el-option
+                          v-for="option in compositeFilterOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionValueSource(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右值来源</label>
+                      <el-select
+                        :model-value="condition.value_source ?? 'literal'"
+                        class="w-full"
+                        @update:model-value="handleConditionValueSourceChange(condition, String($event))"
+                      >
+                        <el-option label="固定值" value="literal" />
+                        <el-option label="同侧字段" value="field" />
+                      </el-select>
+                    </div>
+                    <div v-if="shouldShowConditionExpectedValue(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">比较值</label>
+                      <el-input
+                        v-model="condition.expected_value"
+                        :placeholder="getConditionExpectedValuePlaceholder(condition)"
+                      />
+                    </div>
+                    <div v-if="shouldShowConditionExpectedField(condition)">
+                      <label class="mb-1 block text-[12px] text-ink-500">右侧字段</label>
+                      <el-select v-model="condition.expected_field" class="w-full" filterable>
+                        <el-option
+                          v-for="field in referenceCompositeFieldOptions"
+                          :key="field.value"
+                          :label="field.label"
+                          :value="field.value"
+                        />
+                      </el-select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

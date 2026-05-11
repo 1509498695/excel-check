@@ -691,7 +691,11 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     sequence_start_value=rule.sequence_start_value,
                     composite_config=rule.composite_config,
                     key_check_mode=rule.key_check_mode,
+                    left_key_field=rule.left_key_field,
+                    right_key_field=rule.right_key_field,
                     comparisons=rule.comparisons,
+                    left_filters=rule.left_filters,
+                    right_filters=rule.right_filters,
                     pipeline_config=rule.pipeline_config,
                     mapping_config=rule.mapping_config,
                 )
@@ -717,7 +721,11 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                     sequence_start_value=rule.sequence_start_value,
                     composite_config=rule.composite_config,
                     key_check_mode=rule.key_check_mode,
+                    left_key_field=rule.left_key_field,
+                    right_key_field=rule.right_key_field,
                     comparisons=rule.comparisons,
+                    left_filters=rule.left_filters,
+                    right_filters=rule.right_filters,
                     pipeline_config=rule.pipeline_config,
                     mapping_config=rule.mapping_config,
                 )
@@ -789,7 +797,11 @@ def _ensure_v4_config(config: FixedRulesConfig) -> FixedRulesConfig:
                 sequence_start_value=rule.sequence_start_value,
                 composite_config=rule.composite_config,
                 key_check_mode=rule.key_check_mode,
+                left_key_field=rule.left_key_field,
+                right_key_field=rule.right_key_field,
                 comparisons=rule.comparisons,
+                left_filters=rule.left_filters,
+                right_filters=rule.right_filters,
                 pipeline_config=rule.pipeline_config,
                 mapping_config=rule.mapping_config,
             )
@@ -1237,7 +1249,11 @@ def _normalize_rules(
         normalized_sequence_start_value: str | None = None
         normalized_composite_config: CompositeRuleConfig | None = None
         normalized_key_check_mode: DualCompositeKeyCheckMode | None = None
+        normalized_left_key_field: str | None = None
+        normalized_right_key_field: str | None = None
         normalized_dual_comparisons: list[DualCompositeComparison] = []
+        normalized_left_filters: list[CompositeCondition] = []
+        normalized_right_filters: list[CompositeCondition] = []
         normalized_pipeline_config: MultiCompositePipelineConfig | None = None
         normalized_mapping_config: MultiCompositeMappingConfig | None = None
         normalized_display_field: str | None = None
@@ -1355,14 +1371,22 @@ def _normalize_rules(
             (
                 normalized_reference_variable_tag,
                 normalized_key_check_mode,
+                normalized_left_key_field,
+                normalized_right_key_field,
                 normalized_dual_comparisons,
+                normalized_left_filters,
+                normalized_right_filters,
             ) = _normalize_dual_composite_rule(
                 rule_id=rule_id,
                 target_variable=target_variable,
                 target_variable_tag=target_variable_tag,
                 reference_variable_tag=reference_variable_tag,
                 key_check_mode=rule.key_check_mode,
+                left_key_field=rule.left_key_field,
+                right_key_field=rule.right_key_field,
                 comparisons=rule.comparisons,
+                left_filters=rule.left_filters,
+                right_filters=rule.right_filters,
                 variable_map=variable_map,
             )
         elif rule_type == "multi_composite_pipeline_check":
@@ -1408,7 +1432,11 @@ def _normalize_rules(
                 sequence_start_value=normalized_sequence_start_value,
                 composite_config=normalized_composite_config,
                 key_check_mode=normalized_key_check_mode,
+                left_key_field=normalized_left_key_field,
+                right_key_field=normalized_right_key_field,
                 comparisons=normalized_dual_comparisons,
+                left_filters=normalized_left_filters,
+                right_filters=normalized_right_filters,
                 pipeline_config=normalized_pipeline_config,
                 mapping_config=normalized_mapping_config,
             )
@@ -1771,14 +1799,24 @@ def _normalize_dual_composite_rule(
     target_variable_tag: str,
     reference_variable_tag: str,
     key_check_mode: DualCompositeKeyCheckMode | None,
+    left_key_field: str | None,
+    right_key_field: str | None,
     comparisons: list[DualCompositeComparison],
+    left_filters: list[CompositeCondition],
+    right_filters: list[CompositeCondition],
     variable_map: dict[str, VariableTag],
-) -> tuple[str, DualCompositeKeyCheckMode, list[DualCompositeComparison]]:
+) -> tuple[
+    str,
+    DualCompositeKeyCheckMode,
+    str,
+    str,
+    list[DualCompositeComparison],
+    list[CompositeCondition],
+    list[CompositeCondition],
+]:
     """校验并规范双组合变量比对规则。"""
     if not reference_variable_tag:
         raise ValueError(f"规则 '{rule_id}' 缺少 reference_variable_tag。")
-    if reference_variable_tag == target_variable_tag:
-        raise ValueError(f"规则 '{rule_id}' 的目标变量不能与基准变量相同。")
     if reference_variable_tag not in variable_map:
         raise ValueError(
             f"规则 '{rule_id}' 引用了不存在的目标组合变量 '{reference_variable_tag}'。"
@@ -1801,6 +1839,39 @@ def _normalize_dual_composite_rule(
 
     left_fields = _collect_composite_available_fields(target_variable)
     right_fields = _collect_composite_available_fields(reference_variable)
+    normalized_left_key_field = _normalize_dual_key_field(
+        rule_id=rule_id,
+        field=left_key_field,
+        available_fields=left_fields,
+        section_label="左侧关联 Key 字段",
+    )
+    normalized_right_key_field = _normalize_dual_key_field(
+        rule_id=rule_id,
+        field=right_key_field,
+        available_fields=right_fields,
+        section_label="右侧关联 Key 字段",
+    )
+    normalized_left_filters = _normalize_composite_conditions(
+        rule_id=rule_id,
+        conditions=left_filters,
+        section_label="左侧筛选条件",
+        available_fields=left_fields,
+        allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+    )
+    normalized_right_filters = _normalize_composite_conditions(
+        rule_id=rule_id,
+        conditions=right_filters,
+        section_label="右侧筛选条件",
+        available_fields=right_fields,
+        allowed_operators=SUPPORTED_COMPOSITE_FILTER_OPERATORS,
+    )
+    if reference_variable_tag == target_variable_tag and (
+        not normalized_left_filters or not normalized_right_filters
+    ):
+        raise ValueError(
+            f"规则 '{rule_id}' 同一组合变量进行筛选对比时，左右筛选条件都不能为空。"
+        )
+
     normalized_comparisons: list[DualCompositeComparison] = []
     seen_comparison_ids: set[str] = set()
 
@@ -1860,8 +1931,34 @@ def _normalize_dual_composite_rule(
     return (
         reference_variable_tag,
         normalized_key_check_mode,
+        normalized_left_key_field,
+        normalized_right_key_field,
         normalized_comparisons,
+        normalized_left_filters,
+        normalized_right_filters,
     )
+
+
+def _normalize_dual_key_field(
+    *,
+    rule_id: str,
+    field: str | None,
+    available_fields: list[str],
+    section_label: str,
+) -> str:
+    """规范跨组变量比对的显式关联 Key 字段，缺省兼容内部 `__key__`。"""
+    normalized_field = (field or COMPOSITE_KEY_FIELD).strip() or COMPOSITE_KEY_FIELD
+    try:
+        return _resolve_identifier_against_available(
+            normalized_field,
+            available_fields,
+            identifier_label=section_label,
+            context=f"规则 '{rule_id}'",
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"规则 '{rule_id}' 的{section_label} '{normalized_field}' 不属于对应组合变量。"
+        ) from exc
 
 
 def _normalize_composite_conditions(
@@ -2024,11 +2121,14 @@ def _collect_composite_available_fields(variable: VariableTag) -> list[str]:
     """??????????????????"""
     available_fields = [COMPOSITE_KEY_FIELD]
     key_column = variable.key_column or ""
+    if key_column.strip():
+        available_fields.append(key_column)
     available_fields.extend(
         column
         for column in (variable.columns or [])
-        if column and column.strip() and column != key_column
+        if column and column.strip()
     )
+    available_fields = list(dict.fromkeys(available_fields))
     return available_fields
 
 
@@ -2471,10 +2571,20 @@ def _build_fixed_rule_params(
             "target_tag": target_variable.tag,
             "reference_tag": rule.reference_variable_tag,
             "key_check_mode": rule.key_check_mode,
+            "left_key_field": rule.left_key_field or COMPOSITE_KEY_FIELD,
+            "right_key_field": rule.right_key_field or COMPOSITE_KEY_FIELD,
             "display_field": rule.display_field,
             "comparisons": [
                 comparison.model_dump(mode="json", exclude_none=True)
                 for comparison in rule.comparisons
+            ],
+            "left_filters": [
+                condition.model_dump(mode="json", exclude_none=True)
+                for condition in rule.left_filters
+            ],
+            "right_filters": [
+                condition.model_dump(mode="json", exclude_none=True)
+                for condition in rule.right_filters
             ],
             "rule_name": rule.rule_name,
         }
