@@ -21,6 +21,13 @@ import type { DataSource, SourceType } from '../../types/workbench'
 import { extractSourceBasename } from '../../utils/sourcePathReplacement'
 import { DEFAULT_SOURCE_TYPE, getSourceTypeLabel, SOURCE_TYPE_OPTIONS } from '../../utils/workbenchMeta'
 
+export interface DataSourceDialogPrefill {
+  id?: string
+  type?: SourceType
+  pathOrUrl?: string
+  token?: string
+}
+
 const props = withDefaults(
   defineProps<{
     store?: SourceManagementStoreLike
@@ -125,10 +132,18 @@ function clearDraftErrors(): void {
   draftErrors.pathOrUrl = ''
 }
 
-function openCreateDialog(): void {
+function openCreateDialog(prefill?: DataSourceDialogPrefill): void {
   editingId.value = null
   resetDraft()
+  if (prefill) {
+    draft.id = prefill.id?.trim() ?? ''
+    draft.type = prefill.type ?? DEFAULT_SOURCE_TYPE
+    draft.pathOrUrl = prefill.pathOrUrl?.trim() ?? ''
+    draft.token = prefill.token?.trim() ?? ''
+    sourceIdTouched.value = Boolean(draft.id)
+  }
   svnSubMode.value = 'remote'
+  syncDraftIdError()
   dialogVisible.value = true
   void refreshSvnCredentialItems()
 }
@@ -554,6 +569,7 @@ async function handleUploadFile(event: Event): Promise<void> {
 
 defineExpose({
   openCreateDialog,
+  openEditDialog,
 })
 
 onMounted(() => {
@@ -568,7 +584,7 @@ onMounted(() => {
         <button
           type="button"
           class="ec-btn ec-btn-primary ec-btn-sm"
-          @click="openCreateDialog"
+          @click="() => openCreateDialog()"
         >
           <svg class="ec-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14" />

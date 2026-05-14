@@ -8,10 +8,11 @@
 
 - JWT 认证 + 三级角色（超级管理员 / 项目管理员 / 普通用户），默认超级管理员 `admin / 123456`。
 - 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
-- 个人校验 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`，支持 `SVN 更新` 刷新当前用户个人配置中的 SVN 来源。
+- 个人校验 `/`：四步工作流（数据源 → 变量池 → 规则编排 → 结果），构建 `TaskTree` 走 `POST /api/v1/engine/execute`，支持 `SVN 更新` 刷新当前用户个人配置中的 SVN 来源；步骤 03 可将已勾选规则预检后导入当前项目校验，导入页可预览/调整本次导入草稿数据源。
 - 项目校验 `/fixed-rules`：独立 `version=6` 配置，可保存数据源 / 变量 / 规则组 / 规则，支持 `SVN 更新`。
 - 管理后台 `/admin`：项目 CRUD、成员角色与归属调整、密码重置；项目管理员可额外查看默认项目，但默认项目里的删号操作仍仅超级管理员可用；超级管理员可在后台成员表的本人行调整自己的归属项目，保存后前端会自动切换当前项目到新的归属项目。
-- 个人设置 `/profile`：账号信息、密码修改、项目切换。
+- 个人设置 `/profile`：账号信息、密码修改、项目切换、个人 AI 模型配置。
+- 个人校验 `/` 步骤 03「智能添加规则」改为轻量流程：用户先在变量池添加变量，再在智能页签选择一个或多个目标变量并输入规则描述；默认只基于已选变量生成规则，也可开启“允许 AI 自动补齐数据源/变量”后不强制选择目标变量。自动补齐只在描述包含明确配置表路径、Sheet 和字段线索时新增数据源 / 变量；信息不足会提示补充描述，或关闭自动补齐后改用已选变量池变量。AI 自动识别当前 10 类规则是否支持，后端只读取数据源 / Sheet / 列名 / 变量 / 规则摘要等元数据上下文，返回 `ready / needs_input / rejected` 草稿。`ready` 草稿先用临时 `TaskTree` 在面板内预校验，用户确认后才一键保存；`needs_input` 表示需要补充变量或描述后重试，`rejected` 会说明缺失能力并给出扩展建议。
 - 已支持规则类型：`not_null`、`unique`、`fixed_value_compare`、`regex_check`、`sequence_order_check`、`cross_table_mapping`、`composite_condition_check`、`dual_composite_compare`、`multi_composite_pipeline_check`、`multi_composite_mapping_check`；其中个人校验与项目校验的规则弹窗现支持 5 类入口：单一变量校验、组合分支校验、跨组变量校验、多组串行校验、多组映射校验。弹窗会先选规则类型，再按类型过滤目标变量；多组串行 / 多组映射的变量只在节点内选择。单一变量校验新增 `正则校验`，组合分支校验的分支校验条件也支持 `正则校验`，两者都按完整匹配校验整格内容。`composite_condition_check` 的全局筛选和分支筛选已支持字符串 `包含 / 不包含`，分支 `非空校验` 会把 Excel 空单元格、`NaN`、空字符串和纯空白字符串都视为空；即使被校验字段同时是组合变量 `key_column`，空 Key 行也会参与组合分支断言。`dual_composite_compare` 会先对左右组合变量分别应用可选筛选，再按左右关联 Key 字段对齐并执行多条字段 AND 比对；旧规则默认继续按内部 `__key__` 关联，同一组合变量模式下必须同时配置左右筛选。`multi_composite_pipeline_check` 支持 1..N 个组合变量节点：单节点时退化为“前置过滤 + 最终判定”，多节点时按顺序执行，首个失败节点会输出全部异常并短路后续节点。`multi_composite_mapping_check` 支持多个组合变量节点，每个节点下多条筛选条件独立作为检查项；筛选失败的数据可按 Excel 行号闭区间配置“筛选失败排除行号范围”，只有命中范围且当前筛选字段值命中判定值集合的数据才会从异常结果中移除。添加组合变量时还可按原始行序生成 `原值_序号` 的唯一键；只有当前 Key 列存在重复值，才会显示“Key 后追加序号”。
 - 项目校验 `/fixed-rules` 的 `组合分支校验` 保存链路已修复：当全局筛选或分支筛选使用字符串 `包含` 时，前端会保留比较值并按正确协议提交，不再误报“缺少比较值”。
 - 数据源能力：本地 Excel（`.xlsx` / `.xls`）、SVN Excel（远端 URL / 工作副本）；CSV 数据源已不再支持，飞书入口当前显示为“占位”并禁用新增，步骤 2 的字段映射与变量提取支持本地 Excel / SVN Excel。
@@ -19,7 +20,7 @@
 
 ## 2. 技术栈与默认地址
 
-- 后端：FastAPI + SQLAlchemy（异步）+ SQLite + bcrypt + python-jose。
+- 后端：FastAPI + SQLAlchemy（异步）+ SQLite + bcrypt + python-jose + httpx。
 - 前端：Vue 3 + TypeScript + Pinia + Element Plus + Tailwind v3。
 - 默认开发地址：
   - 前端：<http://127.0.0.1:5173>
@@ -105,6 +106,7 @@ npm run build
      - 跨组变量校验：在组合条件段先选“基准变量”和“目标变量（变量 2）”，可分别配置左右筛选条件，再配置左右“关联 Key 字段”、Key 校验方式与多条字段比对规则；同一组合变量对比时左右筛选都必填。开启 `Key 后追加序号` 后，如需按业务字段对齐，可把左右关联 Key 都选为 `INT_Level` 这类原始列。
 - 多组串行校验：可只配置 1 个组合变量节点，也可追加多个节点；每个节点先做前置过滤，再做最终判定，首个失败节点会短路后续节点。
 - 多组映射校验：每个组合变量节点可配置多条筛选条件；筛选失败的数据会进入异常结果，若其 Excel 行号命中该筛选下的“筛选失败排除行号范围”，且当前筛选字段值命中判定值集合，则从异常结果中移除。多个节点全部执行并汇总异常。
+   - 可选：先到 `/profile` 配置 AI 模型，再在 03「智能添加规则」中选择变量池目标变量并输入规则描述。默认 AI 只基于所选变量判断当前 10 类规则是否支持；如开启“允许 AI 自动补齐数据源/变量”，可不选择目标变量，由 AI 根据描述尝试生成待新增数据源 / 变量草稿；`ready` 且预校验成功后才可写入个人配置。
 4. 点击 03 模块底部「执行校验」。
 5. 结果区会展示 4 个统计块（扫描总行数 / 失败数据源 / 异常结果 / 执行耗时）+ 异常明细表，并可导出包含“统计摘要 / 异常明细”的 Excel。规则可选配置“结果显示字段”，异常明细与导出会展示该字段值；未配置时显示字段列为空。
 
@@ -118,7 +120,8 @@ npm run build
 | 认证 | `POST /api/v1/auth/{register,login,change-password}`、`GET /api/v1/auth/me`、`POST /api/v1/auth/switch-project/{project_id}` |
 | 数据源 | `GET /api/v1/sources/capabilities`、`POST /api/v1/sources/{local-pick,upload,metadata,column-preview,composite-preview}` |
 | 个人校验 | `POST /api/v1/engine/execute`、`GET /api/v1/engine/results/{result_id}`、`GET /api/v1/engine/results/{result_id}/export`、`GET/PUT /api/v1/workbench/config`、`POST /api/v1/workbench/svn-update` |
-| 项目校验 | `GET/PUT /api/v1/fixed-rules/config`、`POST /api/v1/fixed-rules/{svn-update,execute}`、`GET /api/v1/fixed-rules/results/{result_id}`、`GET /api/v1/fixed-rules/results/{result_id}/export` |
+| AI 规则助手 | `GET/PUT/DELETE /api/v1/ai/providers/me`、`POST /api/v1/ai/providers/test`、`POST /api/v1/ai/agents/rule-draft`（支持已选变量约束、轻量规则描述与旧调用兼容）、`GET/DELETE /api/v1/ai/drafts`、`POST /api/v1/ai/drafts/{draft_id}/apply` |
+| 项目校验 | `GET/PUT /api/v1/fixed-rules/config`、`POST /api/v1/fixed-rules/{import-preview,import-from-workbench,svn-update,execute}`、`GET /api/v1/fixed-rules/results/{result_id}`、`GET /api/v1/fixed-rules/results/{result_id}/export` |
 | 管理后台 | `/api/v1/admin/projects*`、`/api/v1/admin/projects/{id}/members*`、`POST /api/v1/admin/users/{id}/reset-password` |
 
 ## 6. 相关文档

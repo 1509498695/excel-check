@@ -7,6 +7,7 @@ import DataTable from '../shell/DataTable.vue'
 import EmptyState from '../shell/EmptyState.vue'
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
+import WorkbenchAiRulePanel from './WorkbenchAiRulePanel.vue'
 import { useWorkbenchStore } from '../../store/workbench'
 import type {
   CompositeAssertionOperator,
@@ -44,10 +45,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'toggle-rule-selection', ruleId: string): void
   (e: 'toggle-visible-rule-selection', payload: { ruleIds: string[]; checked: boolean }): void
+  (e: 'open-source-prefill', prefill: Record<string, unknown>): void
+  (e: 'open-single-variable-prefill', prefill: Record<string, unknown>): void
+  (e: 'open-composite-variable-prefill', prefill: Record<string, unknown>): void
+  (e: 'ai-draft-applied', ruleIds: string[]): void
+  (e: 'ai-draft-applied-and-execute', ruleIds: string[]): void
+  (e: 'open-import-selected-rules'): void
 }>()
 
 // 保留原有业务逻辑：规则编排面板的状态管理、保存、删除等行为完全沿用 store。
 const store = useWorkbenchStore()
+const activeRuleTab = ref<'manual' | 'ai'>('ai')
 const isRuleDialogVisible = ref(false)
 const ruleDialogMode = ref<'create' | 'edit'>('create')
 const isInitializingRuleDialog = ref(false)
@@ -2592,26 +2600,32 @@ function handleToggleVisibleSelection(checked: string | number | boolean): void 
 function handleToggleSingleSelection(ruleId: string): void {
   emit('toggle-rule-selection', ruleId)
 }
+
+function handleOpenImportSelectedRules(): void {
+  emit('open-import-selected-rules')
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
-    <!-- 待修复 Banner（极简：1px 边 + 4px 左 warning 色带） -->
-    <div
-      v-if="store.invalidOrchestrationRuleIds.length"
-      role="alert"
-      class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-5 py-3"
-    >
-      <div class="text-[13px] font-medium text-ink-900">存在待修复规则</div>
-      <div class="mt-1 text-[12px] text-ink-500">
-        补齐目标变量、规则名、比较值或分支配置后才能执行
-      </div>
-    </div>
+    <el-tabs v-model="activeRuleTab" class="workbench-rule-tabs">
+      <el-tab-pane label="手动规则编排" name="manual">
+        <div class="flex flex-col gap-4">
+          <!-- 待修复 Banner（极简：1px 边 + 4px 左 warning 色带） -->
+          <div
+            v-if="store.invalidOrchestrationRuleIds.length"
+            role="alert"
+            class="rounded-card border border-line border-l-4 border-l-warning bg-warning-soft/40 px-5 py-3"
+          >
+            <div class="text-[13px] font-medium text-ink-900">存在待修复规则</div>
+            <div class="mt-1 text-[12px] text-ink-500">
+              补齐目标变量、规则名、比较值或分支配置后才能执行
+            </div>
+          </div>
 
-    <!-- 内层卡：左规则组 + 右规则表 -->
-    <div class="workbench-rule-shell">
-      <div class="workbench-rule-layout">
-
+          <!-- 内层卡：左规则组 + 右规则表 -->
+          <div class="workbench-rule-shell">
+            <div class="workbench-rule-layout">
         <!-- 左侧：规则组导航 -->
         <aside class="workbench-rule-sidebar">
           <div class="workbench-rule-sidebar-toolbar">
@@ -2686,6 +2700,12 @@ function handleToggleSingleSelection(ruleId: string): void {
                 @click="handleRemoveGroup"
               >
                 删除组
+              </SecondaryButton>
+              <SecondaryButton
+                size="sm"
+                @click="handleOpenImportSelectedRules"
+              >
+                导入项目校验
               </SecondaryButton>
               <PrimaryButton
                 size="sm"
@@ -2814,7 +2834,19 @@ function handleToggleSingleSelection(ruleId: string): void {
           </div>
         </div>
       </div>
-    </div>
+          </div>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane label="智能添加规则" name="ai">
+        <WorkbenchAiRulePanel
+          @applied="(ruleIds) => emit('ai-draft-applied', ruleIds)"
+          @applied-and-execute="(ruleIds) => emit('ai-draft-applied-and-execute', ruleIds)"
+          @open-source-prefill="(prefill) => emit('open-source-prefill', prefill)"
+          @open-single-variable-prefill="(prefill) => emit('open-single-variable-prefill', prefill)"
+          @open-composite-variable-prefill="(prefill) => emit('open-composite-variable-prefill', prefill)"
+        />
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- Dialog 4：新建规则组 / 重命名规则组 -->
     <el-dialog

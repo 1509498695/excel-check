@@ -10,10 +10,28 @@ import type { VariablePoolStoreLike } from '../../types/panelStores'
 import type {
   CompositeVariablePreviewData,
   DataSource,
+  ExpectedType,
   VariableTag,
   VariablePreviewData,
 } from '../../types/workbench'
 import { EXPECTED_TYPE_OPTIONS } from '../../utils/workbenchMeta'
+
+export interface SingleVariablePrefill {
+  source_id?: string
+  sheet?: string
+  column?: string
+  tag?: string
+  expected_type?: ExpectedType | null
+}
+
+export interface CompositeVariablePrefill {
+  source_id?: string
+  sheet?: string
+  columns?: string[]
+  key_column?: string
+  tag?: string
+  append_index_to_key?: boolean
+}
 
 const props = withDefaults(
   defineProps<{
@@ -370,18 +388,54 @@ async function refreshCompositePreview(): Promise<void> {
   }
 }
 
-async function openSingleCreateTab(): Promise<void> {
-  resetSingleDraft()
-  singleEditingTag.value = null
-  singleDialogVisible.value = true
-  await prepareSingleEditorForSource(singleDraft.source_id, false)
+function applySinglePrefill(prefill?: SingleVariablePrefill): void {
+  if (!prefill) {
+    syncSingleTag()
+    return
+  }
+  singleDraft.source_id = prefill.source_id?.trim() || singleDraft.source_id
+  singleDraft.sheet = prefill.sheet?.trim() ?? ''
+  singleDraft.column = prefill.column?.trim() ?? ''
+  singleDraft.expected_type = prefill.expected_type ?? 'str'
+  if (prefill.tag?.trim()) {
+    singleDraft.tag = prefill.tag.trim()
+    singleTagTouched.value = true
+  }
+  syncSingleTag()
 }
 
-async function openCompositeCreateTab(): Promise<void> {
+function applyCompositePrefill(prefill?: CompositeVariablePrefill): void {
+  if (!prefill) {
+    syncCompositeTag()
+    return
+  }
+  compositeDraft.source_id = prefill.source_id?.trim() || compositeDraft.source_id
+  compositeDraft.sheet = prefill.sheet?.trim() ?? ''
+  compositeDraft.columns = [...new Set((prefill.columns ?? []).map((item) => item.trim()).filter(Boolean))]
+  compositeDraft.key_column = prefill.key_column?.trim() ?? ''
+  compositeDraft.append_index_to_key = prefill.append_index_to_key ?? false
+  if (prefill.tag?.trim()) {
+    compositeDraft.tag = prefill.tag.trim()
+    compositeTagTouched.value = true
+  }
+  syncCompositeTag()
+}
+
+async function openSingleCreateTab(prefill?: SingleVariablePrefill): Promise<void> {
+  resetSingleDraft()
+  applySinglePrefill(prefill)
+  singleEditingTag.value = null
+  singleDialogVisible.value = true
+  await prepareSingleEditorForSource(singleDraft.source_id, Boolean(prefill))
+}
+
+async function openCompositeCreateTab(prefill?: CompositeVariablePrefill): Promise<void> {
   resetCompositeDraft()
+  applyCompositePrefill(prefill)
   compositeEditingTag.value = null
   compositeDialogVisible.value = true
-  await prepareCompositeEditorForSource(compositeDraft.source_id, false)
+  await prepareCompositeEditorForSource(compositeDraft.source_id, Boolean(prefill))
+  await refreshCompositePreview()
 }
 
 async function openEditTab(variable: VariableTag): Promise<void> {
@@ -688,7 +742,7 @@ defineExpose({
             type="button"
             class="ec-btn ec-btn-primary ec-btn-sm"
             :disabled="!store.sources.length"
-            @click="openSingleCreateTab"
+            @click="() => openSingleCreateTab()"
           >
             <Plus class="h-3.5 w-3.5" />
             添加单个变量
@@ -697,7 +751,7 @@ defineExpose({
             type="button"
             class="ec-btn ec-btn-primary ec-btn-sm"
             :disabled="!store.sources.length"
-            @click="openCompositeCreateTab"
+            @click="() => openCompositeCreateTab()"
           >
             <Plus class="h-3.5 w-3.5" />
             添加组合变量

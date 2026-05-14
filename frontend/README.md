@@ -49,13 +49,14 @@ npm run format:check
 
 ```text
 frontend/src
-├── api/                # HTTP 封装：apiFetch、auth、admin、workbench、fixedRules
+├── api/                # HTTP 封装：apiFetch、auth、admin、workbench、fixedRules、ai
 ├── components
+│   ├── profile/        # 个人设置业务组件：AI 模型配置等
 │   ├── shell/          # 共享 UI 组件：PageHeader / AppCard / SectionHeader / StatusBadge / Button / MetricCard / DataTable / EmptyState
-│   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / ResultBoardPanel
+│   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / WorkbenchAiRulePanel / WorkbenchRuleImportDrawer / ResultBoardPanel
 ├── router/             # vue-router：/login /register / /fixed-rules /admin /profile /user-guide
-├── store/              # Pinia：auth / workbench / fixedRules
-├── types/              # TypeScript 类型：api / workbench / fixedRules / auth
+├── store/              # Pinia：auth / workbench / fixedRules / ai
+├── types/              # TypeScript 类型：api / workbench / fixedRules / auth / ai
 ├── utils/              # ruleOrchestrationModel / taskTree / workbenchMeta / apiFetch
 ├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / UserGuideView / LoginView / RegisterView
 ├── App.vue             # 应用壳：ec-* 左侧固定边栏 + 右侧独立滚动工作区
@@ -97,6 +98,9 @@ frontend/src
 
 规则编排补充：
 
+- 个人校验步骤 3 的规则区包含 `手动规则编排 / 智能添加规则` 两个页签。智能页签现在保留「目标变量」多选、规则描述输入框和“允许 AI 自动补齐数据源/变量”开关：默认关闭时用户先从变量池选择一个或多个变量，再用推荐格式描述规则，AI 只基于所选变量生成草稿；开启后目标变量可不选，但描述中需要包含配置表路径、Sheet 和字段线索，AI 才会补齐数据源 / 变量。优化提示词里的“未识别到 Key 字段”会被视为占位说明，不会写入 Key 线索；已有组合变量覆盖规则字段时会直接复用并按变量池真实列名回写，新增变量会按表头精确匹配、`trim` 唯一匹配和保守唯一相似匹配进行纠偏，无法唯一匹配时仍提示补充。结果为 `needs_input` 且自动补齐开启时，可点击“一键补齐并添加”重新生成草稿：后端会对未保存的数据源临时读取表头，Key 只使用用户明确输入或 `INT_ID / INT_Id / ID`，预校验通过后一次性保存数据源、组合变量和规则，不会立即执行正式校验。信息仍不足时结果区会提示补充完整描述，或关闭自动补齐并选择已有变量池变量。后端覆盖当前 10 类已有规则，草稿会先用临时 TaskTree 在面板内执行预校验，不会直接改配置；`ready` 且预校验成功后才可添加并立即保存，`rejected` 会展示当前规则库缺失能力和扩展建议。
+- 手动规则勾选后可点“导入项目校验”打开宽体导入抽屉：抽屉先调用项目校验导入预检，展示规则、数据源和变量映射；匹配到项目已有数据源时默认只读复用，改为自定义源只影响本次导入草稿。若项目变量池已有同名但绑定不同的变量，可在变量映射表修改本次导入的目标变量标签，重新预检通过后会新增对应变量并同步改写规则引用；重复或不兼容项会跳过不覆盖。
+- AI 模型配置在 `/profile`，支持 OpenAI-compatible、Anthropic Messages、Gemini generateContent 三类协议预设；前端只展示连接状态和跳转入口，API Key 明文不回显。
 - 个人校验步骤 3 的单变量规则弹窗现已支持 `包含 (in)`。
 - 个人校验步骤 3 与项目校验 `/fixed-rules` 的单变量规则弹窗都支持 `顺序校验`。
 - 个人校验步骤 3 与项目校验 `/fixed-rules` 的规则弹窗现统一支持 5 类入口：`单一变量校验`、`组合分支校验`、`跨组变量校验`、`多组串行校验`、`多组映射校验`。

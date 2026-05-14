@@ -6,10 +6,10 @@
 
 | 入口 | 视图 | 作用 |
 |:---|:---|:---|
-| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），支持 SVN 更新，构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
+| `/` | [MainBoard.vue](../frontend/src/views/MainBoard.vue) | 个人校验四步工作流（数据源 → 变量池 → 规则 → 结果），步骤 03 支持手动规则编排、AI 智能添加规则和已勾选规则导入项目校验，执行仍构建 `TaskTree` 走 `POST /api/v1/engine/execute`。 |
 | `/fixed-rules` | [FixedRulesBoard.vue](../frontend/src/views/FixedRulesBoard.vue) | 项目校验：独立 `version=6` 配置（`sources / variables / groups / rules`），支持 SVN 更新、执行结果分页与 Excel 导出。 |
 | `/admin` | [AdminView.vue](../frontend/src/views/AdminView.vue) | 项目 CRUD、成员角色与归属调整、密码重置；超级管理员可见全量项目并可在成员表本人行自调自己的归属项目，保存后前端会自动切到新的当前项目；项目管理员可见自己可管理的项目，并额外看到默认项目；默认项目内删成员仍只允许超级管理员，其他成员不能调整超管归属。 |
-| `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目。 |
+| `/profile` | [ProfileView.vue](../frontend/src/views/ProfileView.vue) | 账号信息、修改密码、切换归属项目、个人 AI 模型配置。 |
 | `/login` `/register` | [LoginView.vue](../frontend/src/views/LoginView.vue)、[RegisterView.vue](../frontend/src/views/RegisterView.vue) | 认证入口；默认管理员 `admin / 123456`。 |
 
 ## 二、前端目录（`frontend/src`）
@@ -33,10 +33,18 @@
 |:---|:---|
 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | 步骤 1：数据源 CRUD、本地文件选择、`source_id`-级 `config_issues` 注入。 |
 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 步骤 2：单变量 / 组合变量、Sheet/列下拉、详情弹窗、JSON 预览。 |
-| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：规则组导航 + 当前组规则 CRUD + 规则弹窗，支持单一变量、组合分支、跨组变量、多组串行、多组映射 5 类入口；多组串行 / 多组映射的变量在节点内选择，多组映射按筛选条件独立检查失败行，并支持筛选失败排除行号范围。 |
+| [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 步骤 3：`手动规则编排 / 智能添加规则` tabs；手动页签为规则组导航 + 当前组规则 CRUD + 规则弹窗，并暴露已勾选规则导入项目校验入口。 |
+| [WorkbenchAiRulePanel.vue](../frontend/src/components/workbench/WorkbenchAiRulePanel.vue) | 步骤 3 智能页签：目标变量多选 + 规则描述输入、已选变量约束、AI 三态草稿、面板内预校验、一键添加 / 添加并执行、最近 20 条草稿历史。 |
+| [WorkbenchRuleImportDrawer.vue](../frontend/src/components/workbench/WorkbenchRuleImportDrawer.vue) | 步骤 3 导入抽屉：预检已勾选个人规则到项目校验的数据源 / 变量 / 规则映射，支持本次导入草稿数据源调整、重新预检与确认导入。 |
 | [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 步骤 4：4 个统计块 + 异常明细表 + Excel 导出，支持 `extra` 槽（固定规则页注入 SVN 输出）。 |
 
-### 2.3 已废弃 / 未使用组件
+### 2.3 个人设置组件 `components/profile/`
+
+| 组件 | 作用 |
+|:---|:---|
+| [AiProviderSettingsCard.vue](../frontend/src/components/profile/AiProviderSettingsCard.vue) | `/profile` AI 模型配置：供应商预设、API Key、模型、连通性测试、保存 / 删除，高级项支持 `base_url / extra_headers`。 |
+
+### 2.4 已废弃 / 未使用组件
 
 以下组件留在仓库中但当前未被任何视图引用，待统一清理：
 
@@ -44,17 +52,19 @@
 - [components/workbench/SectionBlock.vue](../frontend/src/components/workbench/SectionBlock.vue)、[components/workbench/WorkbenchStepCard.vue](../frontend/src/components/workbench/WorkbenchStepCard.vue)：早期个人校验折叠卡，已被全展开模块结构取代。
 - [components/fixed-rules/FixedRulesResultPanel.vue](../frontend/src/components/fixed-rules/FixedRulesResultPanel.vue)：原项目校验结果区，已被 `ResultBoardPanel.vue` 复用替代。
 
-### 2.4 状态、路由、API、工具
+### 2.5 状态、路由、API、工具
 
 | 路径 | 作用 |
 |:---|:---|
 | [store/auth.ts](../frontend/src/store/auth.ts) | Pinia：JWT、用户、当前项目、可访问项目。 |
 | [store/workbench.ts](../frontend/src/store/workbench.ts) | Pinia：个人校验数据源、变量、规则编排、执行结果。 |
+| [store/ai.ts](../frontend/src/store/ai.ts) | Pinia：个人 AI 配置、规则草稿生成、草稿历史与已应用状态。 |
 | [store/fixedRules.ts](../frontend/src/store/fixedRules.ts) | Pinia：项目校验页独立状态，与个人校验隔离。 |
 | [api/auth.ts](../frontend/src/api/auth.ts) | 注册 / 登录 / `me` / 切换项目 / 修改密码。 |
 | [api/admin.ts](../frontend/src/api/admin.ts) | 项目 CRUD、成员管理、密码重置。 |
 | [api/workbench.ts](../frontend/src/api/workbench.ts) | 数据源能力 / 元数据 / 列预览 / 引擎执行 / 个人校验配置持久化。 |
-| [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 项目校验配置 CRUD / SVN 更新 / 执行。 |
+| [api/ai.ts](../frontend/src/api/ai.ts) | `/api/v1/ai/*`：AI 供应商配置、测试连接、生成规则草稿、草稿历史。 |
+| [api/fixedRules.ts](../frontend/src/api/fixedRules.ts) | 项目校验配置 CRUD / 个人规则导入预检与确认 / SVN 更新 / 执行。 |
 | [utils/apiFetch.ts](../frontend/src/utils/apiFetch.ts) | 统一注入 JWT、`401` 跳登录、空响应体兼容。 |
 | [utils/taskTree.ts](../frontend/src/utils/taskTree.ts) | `TaskTree` 组装与归一化。 |
 | [utils/ruleOrchestrationModel.ts](../frontend/src/utils/ruleOrchestrationModel.ts) | 个人校验 / 项目校验共享的规则模型工具，包含组合分支、串行节点与映射节点的规范化校验。 |
@@ -90,17 +100,28 @@
 | [app/api/source_api.py](../backend/app/api/source_api.py) | `/api/v1/sources/*`：能力声明、`local-pick`（tkinter）、浏览器上传、metadata、列预览、组合预览。 |
 | [app/api/workbench_api.py](../backend/app/api/workbench_api.py) | `/api/v1/workbench/config` 与 `/api/v1/workbench/svn-update`：个人校验配置按 `project_id + user_id` 隔离持久化，并刷新当前用户个人配置中的 SVN 来源。 |
 | [app/api/execute_api.py](../backend/app/api/execute_api.py) | `/api/v1/engine/execute`：消费 `TaskTree`，调用规则引擎，返回统一结果。 |
-| [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、SVN 更新、执行。 |
+| [app/api/fixed_rules_api.py](../backend/app/api/fixed_rules_api.py) | `/api/v1/fixed-rules/*`：配置 CRUD、个人规则导入预检与确认、SVN 更新、执行。 |
+| [app/api/ai_api.py](../backend/app/api/ai_api.py) | `/api/v1/ai/*`：个人 AI 配置、测试连接、规则草稿、草稿历史与已应用标记。 |
 | [app/api/schemas.py](../backend/app/api/schemas.py)、[app/api/fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py) | Pydantic 入参 / 出参模型。 |
 
-### 3.4 项目校验服务
+### 3.4 AI 规则助手
+
+| 模块 | 作用 |
+|:---|:---|
+| [app/ai/providers.py](../backend/app/ai/providers.py) | OpenAI-compatible、Anthropic Messages、Gemini generateContent 三类 provider 适配与连通性测试。 |
+| [app/ai/agent_service.py](../backend/app/ai/agent_service.py) | 加载个人配置与个人校验元数据上下文，调用模型，Pydantic 校验后按规则类型确定性编译为 `DataSource / VariableTag / FixedRuleDefinition` 草稿；模型失败时可用完整线索兜底生成当前 10 类规则。 |
+| [app/ai/hint_extractor.py](../backend/app/ai/hint_extractor.py) | 从自然语言兜底抽取 SVN 链接、Sheet、目标字段、过滤、左右筛选、业务 Key、比较字段、固定值、顺序和正则等线索。 |
+| [app/ai/prompts.py](../backend/app/ai/prompts.py)、[app/ai/schemas.py](../backend/app/ai/schemas.py) | 结构化输出 schema、prompt 与 AI 接口模型；`workflow_hints` 向后兼容扩展为通用规则线索。 |
+
+### 3.5 项目校验服务
 
 | 模块 | 作用 |
 |:---|:---|
 | [app/fixed_rules/service.py](../backend/app/fixed_rules/service.py) | 配置读写、`version 2/3/4/5 → 6` 自动迁移、`config_issues` 非阻断加载、临时 `TaskTree` 聚合并复用主引擎。 |
+| [app/fixed_rules/import_service.py](../backend/app/fixed_rules/import_service.py) | 个人校验规则导入项目校验：数据源草稿映射、字段兼容、变量复用/新增、语义重复检测与兼容规则落库构建。 |
 | [app/fixed_rules/schemas.py](../backend/app/fixed_rules/schemas.py) | 项目校验域内数据结构。 |
 
-### 3.5 数据加载
+### 3.6 数据加载
 
 | 模块 | 作用 |
 |:---|:---|
@@ -108,7 +129,7 @@
 | [app/loaders/svn_manager.py](../backend/app/loaders/svn_manager.py) | SVN CLI 调用与工作副本更新（含 Windows TortoiseSVN 自动探测）。 |
 | [app/loaders/feishu_reader.py](../backend/app/loaders/feishu_reader.py) | 飞书读取占位实现（未闭环）。 |
 
-### 3.6 规则引擎（三层架构）
+### 3.7 规则引擎（三层架构）
 
 | 模块 | 作用 |
 |:---|:---|
@@ -119,13 +140,13 @@
 
 `backend/app/rules/_*.py` 与 `rule_*.py` 是旧路径薄壳 shim，仅 `from <new path> import *` 转发，对外行为零变更。
 
-### 3.7 工具与测试
+### 3.8 工具与测试
 
 | 模块 | 作用 |
 |:---|:---|
 | [app/utils/formatter.py](../backend/app/utils/formatter.py) | 统一执行响应格式化。 |
 | [app/utils/data_cleaner.py](../backend/app/utils/data_cleaner.py) | 数据清洗辅助。 |
-| [tests/](../backend/tests/) | 接口与引擎黑盒回归；`tests/snapshots/engine/S1–S4.json` 是引擎执行的字节级快照基线。 |
+| [tests/](../backend/tests/) | 接口与引擎黑盒回归；`test_ai_api.py` 覆盖 AI 配置加密、三态草稿和历史隔离，`tests/snapshots/engine/S1–S4.json` 是引擎执行的字节级快照基线。 |
 
 ## 四、关系简图（逻辑分层）
 
@@ -146,6 +167,7 @@ flowchart TB
     AuthApi[api/auth]
     AdminApi[api/admin]
     WBApi[api/workbench]
+    AIApi[api/ai]
     FRApi[api/fixedRules]
   end
   subgraph http [FastAPI]
@@ -153,22 +175,26 @@ flowchart TB
     AdminRouter[admin/router]
     SourceAPI[source_api]
     WorkbenchAPI[workbench_api]
+    AIAPI[ai_api]
     ExecuteAPI[execute_api]
     FixedAPI[fixed_rules_api]
   end
   subgraph domain [领域层]
     Loaders[loaders]
     Rules[rules]
+    AIService[app/ai]
     FRService[fixed_rules/service]
   end
 
   MainBoard --> WBStore
+  MainBoard --> AIStore[store/ai]
   FixedRulesBoard --> FRStore
   AdminView --> AuthStore
   ProfileView --> AuthStore
 
   AuthStore --> AuthApi
   WBStore --> WBApi
+  AIStore --> AIApi
   FRStore --> FRApi
   AdminView --> AdminApi
 
@@ -177,9 +203,11 @@ flowchart TB
   WBApi --> SourceAPI
   WBApi --> WorkbenchAPI
   WBApi --> ExecuteAPI
+  AIApi --> AIAPI
   FRApi --> FixedAPI
 
   ExecuteAPI --> Rules
+  AIAPI --> AIService
   ExecuteAPI --> Loaders
   FixedAPI --> FRService
   FRService --> Rules

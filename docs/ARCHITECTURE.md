@@ -10,7 +10,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 
 - 把「数据源 / 变量 / 规则」抽象成统一的 `TaskTree`，所有执行入口共享同一个执行引擎与同一份结果协议。
 - 区分两种使用场景：
-  - **临时编排**（个人校验 `/`）：项目配置不持久化到项目校验配置，刷新即丢；适合一次性排查。
+  - **个人编排**（个人校验 `/`）：按当前项目和当前用户持久化，不进入项目共享配置；适合个人临时排查和反复调试。
   - **长期复用**（项目校验 `/fixed-rules`）：按 `project_id` 持久化到 `version=6` 配置，可反复执行，可接 SVN 拉新。
 - 多用户多项目隔离：项目校验配置按 `project_id` 隔离，个人校验配置按 `project_id + user_id` 隔离。
 
@@ -18,6 +18,8 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 
 - 不做飞书数据源真实业务化读取（仅占位）。
 - 不做多配置集切换；`regex_check` 与结果导出已接入个人校验和项目校验。
+- 不让 AI 直接写入低层执行配置，也不把业务单元格值发送给模型；AI 只产出意图草稿，后端编译器再确定性生成个人校验配置。
+- AI 智能添加规则只作用于个人校验 `/`，不改项目校验 `/fixed-rules` 的共享配置链路。
 - 不做 SaaS 化部署；本轮只支持本机共享部署，远程用户文件通过上传进入服务端，`local-pick` 仍仅适合服务所在机器的桌面联调。
 - SVN 远端 URL 接入仅承诺 `http(s)://`，不做 `svn://` / `svn+ssh://`，且 URL 必须指向单文件（`.xls/.xlsx`）。
 
@@ -25,7 +27,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 
 | 层 | 选择 |
 |:---|:---|
-| 后端 | Python 3.10+、FastAPI、SQLAlchemy 异步、SQLite（运行时数据库 `backend/.runtime/excel_check.db`） |
+| 后端 | Python 3.10+、FastAPI、SQLAlchemy 异步、SQLite（运行时数据库 `backend/.runtime/excel_check.db`）、httpx |
 | 认证 | python-jose（JWT）+ bcrypt；默认管理员 `admin / 123456` 启动时固定播种 |
 | 数据读取 | pandas + openpyxl（`.xlsx`）+ xlrd（`.xls`） |
 | 外部能力 | TortoiseSVN CLI 自动探测（Windows）、tkinter 文件对话框（本地拾取） |
@@ -49,6 +51,8 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 - 三级角色：超级管理员、项目管理员、普通用户；项目管理员可进入受限版 `/admin`。
 - 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
 - 个人校验四步工作流：数据源 → 变量池 → 规则编排 → 结果；可刷新当前用户个人配置中的 SVN 来源。
+- 个人校验步骤 03 可将已勾选手动规则导入项目校验：先预检数据源 / 字段 / 变量 / 重复规则，用户可调整本次导入草稿数据源，确认后只写入兼容规则，不覆盖项目已有配置。
+- 个人校验步骤 03 的 AI Agent 工作流：目标变量多选 + 规则描述 → 模型意图草稿 / 后端自然语言兜底解析 → 确定性编译 → 返回 `ready / needs_input / rejected`；默认只复用用户选择的变量池变量，不自动新增数据源或变量，用户也可开启“允许 AI 自动补齐数据源/变量”后不强制选择目标变量。`ready` 草稿会先由前端临时合并为 `TaskTree` 并在面板内预校验，用户确认后才复用现有数据源、变量池、规则编排 store 一键添加并立即保存。
 - 项目校验页独立 `version=6` 配置：`sources / variables / groups / rules` 一体化保存，并兼容历史路径替换字段。
 - 10 类规则：`not_null / unique / regex_check / sequence_order_check / fixed_value_compare / cross_table_mapping / composite_condition_check / dual_composite_compare / multi_composite_pipeline_check / multi_composite_mapping_check`。
 - 组合变量：同一数据源同 Sheet 的多列组合，支持 `key_column` 与 JSON 映射。
@@ -169,6 +173,17 @@ class TaskTree:
 
 固定规则配置读取额外允许 `meta.config_issues: [{ source_id, message }]`，作为非阻断告警。
 
+### 4.5 AI 配置与草稿历史
+
+AI 模型凭据和规则草稿都进入 SQLite 运行库，并沿用现有 Fernet 加密 helper：
+
+| 表 | 隔离键 | 说明 |
+|:---|:---|:---|
+| `ai_provider_credentials` | `user_id` 唯一 | 个人 AI 供应商配置；保存 `provider_preset / base_url / model / encrypted_api_key / extra_headers_json`，GET 接口只返回脱敏 Key。 |
+| `ai_rule_drafts` | `project_id + user_id` | 当前项目当前用户最近 20 条 AI 草稿历史；保存结构化返回结果、三态 verdict、是否已应用。 |
+
+内置供应商预设覆盖 OpenAI-compatible、Anthropic Messages、Gemini generateContent 三类协议：OpenAI、Anthropic Claude、Google Gemini、DeepSeek、通义千问 DashScope、Kimi、智谱 GLM、OpenRouter 与自定义 OpenAI-compatible。后端统一用 `httpx` 直连，优先请求严格结构化输出，不可用时回退 JSON 模式并由 Pydantic 与业务编译器二次校验。
+
 ## 5. API 协议
 
 所有接口前缀 `/api/v1`，详细字段见 [backend/app/api/schemas.py](../backend/app/api/schemas.py) 与 [backend/app/api/fixed_rules_schemas.py](../backend/app/api/fixed_rules_schemas.py)。
@@ -225,12 +240,29 @@ class TaskTree:
 | `PUT` | `/workbench/config` | 保存个人校验配置（前端 2 秒防抖自动调用）。 |
 | `POST` | `/workbench/svn-update` | 刷新当前用户个人校验配置中的 SVN 来源，按目标去重并复用统一 SVN 更新逻辑。 |
 
-### 5.5 项目校验 `/fixed-rules`
+### 5.5 AI 规则助手 `/ai`
+
+| 方法 | 路径 | 说明 |
+|:---|:---|:---|
+| `GET` | `/ai/providers/me` | 读取当前用户 AI 配置，不返回明文 API Key。 |
+| `PUT` | `/ai/providers/me` | 保存当前用户 AI 配置；API Key 为空时保留旧密文。 |
+| `DELETE` | `/ai/providers/me` | 删除当前用户 AI 配置。 |
+| `POST` | `/ai/providers/test` | 测试供应商连通性，失败时返回鉴权、限流、网络或格式类错误。 |
+| `POST` | `/ai/agents/rule-draft` | 基于当前个人校验元数据上下文生成规则草稿，返回 `ready / needs_input / rejected`。 |
+| `GET` | `/ai/drafts` | 读取当前项目当前用户最近 20 条草稿。 |
+| `POST` | `/ai/drafts/{draft_id}/apply` | 标记草稿已被前端应用。 |
+| `DELETE` | `/ai/drafts/{draft_id}` / `/ai/drafts` | 删除单条或清空当前项目当前用户草稿。 |
+
+`/ai/agents/rule-draft` 在调用模型前只发送元数据上下文：数据源 ID / 类型 / Sheet / 列名、变量池 schema、现有规则摘要，不发送单元格业务值。当前前端默认携带 `input_mode=free_text`、`allow_auto_complete=false`、`selected_variable_tags` 和变量角色线索；用户开启自动补齐开关时会发送 `allow_auto_complete=true`，目标变量可为空。旧调用仍兼容 `workflow_hints` 的结构化字段。`allow_auto_complete=false` 时，后端会强制草稿只引用 `selected_variable_tags` 中的变量，不返回待新增数据源或变量；`allow_auto_complete=true` 时沿用既有自动补齐能力，可返回待新增数据源 / 变量草稿。后端自然语言兜底解析支持 `筛选字段=值1,值2` 和 `字段=值1 or 值2` 这类集合表达，并按变量池真实列名回写字段。变量未选、变量类型不匹配、字段或参数不足时返回 `needs_input`，当前 10 类规则无法表达时返回 `rejected` 并携带 `extension_suggestions`。前端对 `ready` 草稿的预校验复用现有 `/engine/execute`，但不写入个人配置、不覆盖正式结果面板。
+
+### 5.6 项目校验 `/fixed-rules`
 
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
 | `GET` | `/fixed-rules/config` | 读取当前项目的项目校验配置；可能附带 `meta.config_issues`。 |
 | `PUT` | `/fixed-rules/config` | 保存配置（严格校验）。 |
+| `POST` | `/fixed-rules/import-preview` | 基于当前用户个人校验配置与已选规则生成导入预检快照，入参可带 `source_overrides` 与 `variable_tag_overrides` 草稿，返回规则状态、数据源映射、变量映射、字段问题与统计。 |
+| `POST` | `/fixed-rules/import-from-workbench` | 重新预检后仅导入兼容个人规则；草稿数据源与目标变量标签只作用于本次导入，重复或不兼容规则跳过，不覆盖项目已有配置。 |
 | `POST` | `/fixed-rules/svn-update` | 汇总规则路径，按父目录去重统一执行 SVN 更新。 |
 | `POST` | `/fixed-rules/execute` | 服务端聚合临时 `TaskTree` 后复用主引擎；返回统一响应协议。 |
 
@@ -244,10 +276,10 @@ class TaskTree:
 |:---|:---|:---|
 | 01 数据源 | [DataSourcePanel.vue](../frontend/src/components/workbench/DataSourcePanel.vue) | CRUD 数据源、本地路径选择 |
 | 02 变量池 | [VariablePoolPanel.vue](../frontend/src/components/workbench/VariablePoolPanel.vue) | 单变量 / 组合变量、Sheet/列下拉、详情弹窗 |
-| 03 规则编排 | [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 规则组导航 + 规则 CRUD + 弹窗（单变量支持 `eq / ne / gt / lt / not_null / unique / 包含(in)`，组合变量支持条件分支、跨组比对、多组串行与多组映射） |
+| 03 规则编排 | [WorkbenchRuleOrchestrationPanel.vue](../frontend/src/components/workbench/WorkbenchRuleOrchestrationPanel.vue) | 手动规则编排 + 智能添加规则 tabs；手动编排保留规则组导航、规则 CRUD、规则弹窗和“导入项目校验”入口，导入抽屉预检通过后才写入项目校验；AI 页签仅展示目标变量多选与规则描述输入，并复用现有数据源 / 变量池 / 规则保存链路。 |
 | 04 结果 | [ResultBoardPanel.vue](../frontend/src/components/workbench/ResultBoardPanel.vue) | 4 统计块 + 异常明细表 |
 
-个人校验编排不持久化，刷新即丢；`workbench` store 在主要状态变更后 2 秒防抖自动调用 `PUT /workbench/config`。
+个人校验配置按 `project_id + user_id` 持久化；`workbench` store 在主要状态变更后 2 秒防抖自动调用 `PUT /workbench/config`，AI 一键添加后会立即调用 `saveConfigNow()`。
 
 ### 6.2 项目校验页 `/fixed-rules`
 
@@ -258,7 +290,7 @@ class TaskTree:
 | 页面 | 组成 |
 |:---|:---|
 | `/admin` | KPI（项目数 / 当前项目成员 / 超级管理员 / 我的归属项目）+ 单列三模块（项目列表 / 项目详情 / 项目成员），项目卡片 `border-blue-500 + bg-blue-50` 选中态，成员表用极浅 `border-gray-100` 网格线；项目管理员也可在后台选中默认项目，但默认项目中的删除成员入口仍受限。 |
-| `/profile` | 全宽 3 模块：账号信息（横向 4 列描述列表）/ 修改密码（`max-w-md` 表单 + 左对齐保存按钮）/ 我的项目（4 列等宽表格）。 |
+| `/profile` | 全宽 4 模块：账号信息（横向 4 列描述列表）/ 修改密码（`max-w-md` 表单 + 左对齐保存按钮）/ 我的项目（4 列等宽表格）/ AI 模型配置。 |
 
 ## 7. 规则引擎
 

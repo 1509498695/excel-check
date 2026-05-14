@@ -7,6 +7,7 @@ import { apiChangePassword } from '../api/auth'
 import { useAuthStore } from '../store/auth'
 import { useFixedRulesStore } from '../store/fixedRules'
 import { useWorkbenchStore } from '../store/workbench'
+import AiProviderSettingsCard from '../components/profile/AiProviderSettingsCard.vue'
 import AppCard from '../components/shell/AppCard.vue'
 import DataTable from '../components/shell/DataTable.vue'
 import EmptyState from '../components/shell/EmptyState.vue'
@@ -15,7 +16,7 @@ import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SectionHeader from '../components/shell/SectionHeader.vue'
 import StatusBadge from '../components/shell/StatusBadge.vue'
 
-type StepIndex = 1 | 2 | 3
+type StepIndex = 1 | 2 | 3 | 4
 
 // 保持原有逻辑不变：密码修改与项目切换行为维持原实现。
 const auth = useAuthStore()
@@ -47,7 +48,10 @@ function getSectionStatusLabel(step: StepIndex): string {
   if (step === 2) {
     return '待操作'
   }
-  return auth.userProjects.length ? '已就绪' : '待加入'
+  if (step === 3) {
+    return auth.userProjects.length ? '已就绪' : '待加入'
+  }
+  return '可配置'
 }
 
 function getSectionStatusTone(step: StepIndex): 'pending' | 'done' {
@@ -57,7 +61,10 @@ function getSectionStatusTone(step: StepIndex): 'pending' | 'done' {
   if (step === 2) {
     return 'pending'
   }
-  return auth.userProjects.length ? 'done' : 'pending'
+  if (step === 3) {
+    return auth.userProjects.length ? 'done' : 'pending'
+  }
+  return 'pending'
 }
 
 async function handleChangePassword(): Promise<void> {
@@ -347,6 +354,23 @@ function openUserGuide(): void {
                 </template>
               </DataTable>
             </div>
+          </div>
+        </AppCard>
+
+        <AppCard as="section" padding="none" class="profile-settings-card">
+          <div class="profile-settings-card__inner">
+            <div class="profile-settings-card__header">
+              <SectionHeader
+                variant="workbench"
+                step="04"
+                title="AI 模型配置"
+                description="用于个人校验步骤 03 的智能添加规则；配置按当前账号保存"
+                :status-label="getSectionStatusLabel(4)"
+                :status-tone="getSectionStatusTone(4)"
+              />
+            </div>
+
+            <AiProviderSettingsCard />
           </div>
         </AppCard>
       </div>

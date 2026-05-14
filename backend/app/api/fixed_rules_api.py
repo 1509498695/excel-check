@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.fixed_rules_schemas import FixedRulesConfig, FixedRulesExecuteRequest
+from backend.app.api.fixed_rules_schemas import (
+    FixedRulesConfig,
+    FixedRulesExecuteRequest,
+    FixedRulesImportRequest,
+)
 from backend.app.auth.dependencies import CurrentUserContext, get_current_user
 from backend.app.database import get_db
 from backend.app.fixed_rules.db_service import (
     load_fixed_rules_config_from_db,
     save_fixed_rules_config_to_db,
+)
+from backend.app.fixed_rules.import_service import (
+    build_import_preview,
+    build_imported_config,
 )
 from backend.app.fixed_rules.service import (
     build_default_fixed_rules_config,
@@ -34,9 +44,42 @@ from backend.app.result_exporter import (
     build_execution_result_workbook,
 )
 from backend.app.utils.formatter import build_execution_response
+from backend.app.models import WorkbenchConfigRecord
 
 
 router = APIRouter(prefix="/fixed-rules", tags=["fixed-rules"])
+
+
+async def _load_current_fixed_config(
+    db: AsyncSession,
+    project_id: int,
+) -> FixedRulesConfig:
+    raw = await load_fixed_rules_config_from_db(db, project_id)
+    if raw is None:
+        return build_default_fixed_rules_config()
+    parsed = parse_raw_fixed_rules_config(raw)
+    config, _issues = load_fixed_rules_config_with_issues(
+        parsed,
+        allow_legacy_mapping_config=True,
+    )
+    return config
+
+
+async def _load_current_workbench_payload(
+    db: AsyncSession,
+    project_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    result = await db.execute(
+        select(WorkbenchConfigRecord).where(
+            WorkbenchConfigRecord.project_id == project_id,
+            WorkbenchConfigRecord.user_id == user_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise ValueError("当前个人校验尚未配置可导入规则。")
+    return json.loads(record.config_json)
 
 
 @router.get("/config")
@@ -114,6 +157,84 @@ async def put_fixed_rules_config(
         }
 
     return response
+
+
+@router.post("/import-preview")
+async def preview_import_from_workbench(
+    payload: FixedRulesImportRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """预检：将当前用户个人校验中勾选的规则导入项目校验。"""
+    project_id = ctx.require_project_member()
+
+    try:
+        workbench_payload = await _load_current_workbench_payload(
+            db,
+            project_id,
+            ctx.user_id,
+        )
+        fixed_config = await _load_current_fixed_config(db, project_id)
+        preview = build_import_preview(
+            workbench_payload=workbench_payload,
+            fixed_config=fixed_config,
+            selected_rule_ids=payload.selected_rule_ids,
+            source_overrides=payload.source_overrides,
+            variable_tag_overrides=payload.variable_tag_overrides,
+        )
+    except (json.JSONDecodeError, FileNotFoundError, ValueError, ImportError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": preview.response,
+    }
+
+
+@router.post("/import-from-workbench")
+async def import_from_workbench(
+    payload: FixedRulesImportRequest,
+    ctx: CurrentUserContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """提交：从当前用户个人校验导入兼容规则到项目校验。"""
+    project_id = ctx.require_project_member()
+
+    try:
+        workbench_payload = await _load_current_workbench_payload(
+            db,
+            project_id,
+            ctx.user_id,
+        )
+        fixed_config = await _load_current_fixed_config(db, project_id)
+        preview = build_import_preview(
+            workbench_payload=workbench_payload,
+            fixed_config=fixed_config,
+            selected_rule_ids=payload.selected_rule_ids,
+            source_overrides=payload.source_overrides,
+            variable_tag_overrides=payload.variable_tag_overrides,
+        )
+        if preview.rules_to_add:
+            imported_config = build_imported_config(preview)
+            await save_fixed_rules_config_to_db(
+                db,
+                project_id,
+                imported_config.model_dump(mode="json", exclude_none=True),
+            )
+        else:
+            imported_config = fixed_config
+    except (json.JSONDecodeError, FileNotFoundError, ValueError, ImportError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "code": 200,
+        "msg": "ok",
+        "data": imported_config.model_dump(mode="json", exclude_none=True),
+        "meta": {
+            "import_result": preview.response,
+        },
+    }
 
 
 @router.post("/svn-update")

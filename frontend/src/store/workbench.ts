@@ -13,9 +13,11 @@ import {
   triggerWorkbenchSvnUpdate,
 } from '../api/workbench'
 import type { CompositeCondition, FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
+import type { AiRuleDraftPayload } from '../types/ai'
 import type {
   AbnormalResult,
   DataSource,
+  ExecuteResponse,
   ExecutionMeta,
   SourceMetadata,
   SourceType,
@@ -46,6 +48,7 @@ import {
   UNGROUPED_GROUP,
 } from '../utils/ruleOrchestrationModel'
 import { buildTaskTreePayload } from '../utils/taskTree'
+import { getFixedRuleDuplicateSet } from '../utils/ruleFingerprint'
 import {
   extractSourceBasename,
   getSourceLocator,
@@ -968,6 +971,25 @@ export const useWorkbenchStore = defineStore('workbench', {
       ])
     },
 
+    ensureOrchestrationGroupByName(groupName: string): string {
+      const normalizedName = groupName.trim() || 'AI生成规则组'
+      const existingGroup = this.ruleGroups.find((group) => group.group_name === normalizedName)
+      if (existingGroup) {
+        return existingGroup.group_id
+      }
+
+      const groupId = createEntityId('group')
+      this.ruleGroups = ensureDefaultGroup([
+        ...this.ruleGroups,
+        {
+          group_id: groupId,
+          group_name: normalizedName,
+          builtin: false,
+        },
+      ])
+      return groupId
+    },
+
     renameOrchestrationGroup(groupId: string, groupName: string): void {
       this.ruleGroups = ensureDefaultGroup(
         this.ruleGroups.map((group) =>
@@ -1234,6 +1256,90 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     async saveConfigNow(): Promise<void> {
       await saveWorkbenchConfig(this._getAutoSavePayload())
+    },
+
+    async applyAiRuleDraft(draft: AiRuleDraftPayload): Promise<string[]> {
+      const duplicateIds = getFixedRuleDuplicateSet(this.orchestrationRules, draft.rules_to_add)
+      const rulesToApply = draft.rules_to_add.filter((rule) => !duplicateIds.has(rule.rule_id))
+      if (!rulesToApply.length) {
+        throw new Error('规则已存在，无需重复添加。')
+      }
+
+      draft.sources_to_add.forEach((source) => {
+        this.upsertSource(source)
+      })
+      draft.variables_to_add.forEach((variable) => {
+        this.upsertVariable(variable)
+      })
+
+      const appliedRuleIds: string[] = []
+      rulesToApply.forEach((rule) => {
+        this.upsertOrchestrationRule(rule)
+        appliedRuleIds.push(rule.rule_id)
+      })
+
+      await this.saveConfigNow()
+      return appliedRuleIds
+    },
+
+    async previewAiRuleDraft(draft: AiRuleDraftPayload): Promise<ExecuteResponse> {
+      const combinedSources = this.sources.map((source) => ({ ...source }))
+      const combinedVariables = this.variables.map((variable) => ({ ...variable }))
+
+      draft.sources_to_add.forEach((source) => {
+        const index = combinedSources.findIndex((item) => item.id === source.id)
+        const nextSource = { ...source }
+        if (index >= 0) {
+          combinedSources.splice(index, 1, { ...combinedSources[index], ...nextSource })
+        } else {
+          combinedSources.push(nextSource)
+        }
+      })
+
+      draft.variables_to_add.forEach((variable) => {
+        const index = combinedVariables.findIndex((item) => item.tag === variable.tag)
+        const nextVariable = { ...variable }
+        if (index >= 0) {
+          combinedVariables.splice(index, 1, { ...combinedVariables[index], ...nextVariable })
+        } else {
+          combinedVariables.push(nextVariable)
+        }
+      })
+
+      const requiredTags = new Set<string>()
+      draft.rules_to_add.forEach((rule) => {
+        if (rule.target_variable_tag?.trim()) {
+          requiredTags.add(rule.target_variable_tag.trim())
+        }
+        if (rule.reference_variable_tag?.trim()) {
+          requiredTags.add(rule.reference_variable_tag.trim())
+        }
+        rule.pipeline_config?.nodes.forEach((node) => {
+          if (node.variable_tag.trim()) {
+            requiredTags.add(node.variable_tag.trim())
+          }
+        })
+        rule.mapping_config?.nodes.forEach((node) => {
+          if (node.variable_tag.trim()) {
+            requiredTags.add(node.variable_tag.trim())
+          }
+        })
+      })
+
+      const previewVariables = combinedVariables.filter((variable) => requiredTags.has(variable.tag))
+      const requiredSourceIds = new Set(previewVariables.map((variable) => variable.source_id))
+      const previewSources = combinedSources.filter((source) => requiredSourceIds.has(source.id))
+      const previewRuleIds = draft.rules_to_add.map((rule) => rule.rule_id).filter(Boolean)
+      const validationRules = orchestrationRulesToValidationRules(previewVariables, draft.rules_to_add)
+      const payload = buildTaskTreePayload(
+        previewSources,
+        previewVariables,
+        validationRules,
+        previewRuleIds,
+        1,
+        this.resultPageSize,
+      )
+      return executeTaskTree(payload)
     },
 
     async runSvnUpdate(): Promise<void> {

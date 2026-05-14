@@ -270,3 +270,14 @@ class FixedRulesExecuteRequest(BaseModel):
     selected_rule_ids: list[str] | None = None
     page: int | None = Field(default=None, ge=1)
     size: int | None = Field(default=None, ge=1, le=200)
+
+
+class FixedRulesImportRequest(BaseModel):
+    """描述从个人校验导入项目校验的请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_rule_ids: list[str] = Field(default_factory=list)
+    source_overrides: dict[str, DataSource] = Field(default_factory=dict)
+    variable_tag_overrides: dict[str, str] = Field(default_factory=dict)
+    preview_token: str | None = None

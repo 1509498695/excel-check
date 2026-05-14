@@ -30,6 +30,19 @@ function extractApiErrorMessage(detail: unknown): string | null {
     return detail
   }
 
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const payload = detail as { msg?: unknown; message?: unknown; detail?: unknown }
+    if (typeof payload.msg === 'string' && payload.msg.trim()) {
+      return payload.msg
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message
+    }
+    if (typeof payload.detail === 'string' && payload.detail.trim()) {
+      return payload.detail
+    }
+  }
+
   if (!Array.isArray(detail)) {
     return null
   }

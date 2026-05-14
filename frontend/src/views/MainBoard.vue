@@ -10,6 +10,7 @@ import MetricCard from '../components/shell/MetricCard.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import SourcePathReplacementDialog from '../components/workbench/SourcePathReplacementDialog.vue'
+import WorkbenchRuleImportDrawer from '../components/workbench/WorkbenchRuleImportDrawer.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
@@ -17,6 +18,7 @@ import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SecondaryButton from '../components/shell/SecondaryButton.vue'
 import type { StatusBadgeType } from '../components/shell'
 import { useWorkbenchStore } from '../store/workbench'
+import type { ExpectedType, SourceType } from '../types/workbench'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
@@ -26,10 +28,32 @@ type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
 type StatTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 type SectionKey = 'source' | 'variable' | 'rule' | 'result'
+interface DataSourceDialogPrefill {
+  id?: string
+  type?: SourceType
+  pathOrUrl?: string
+  token?: string
+}
+interface SingleVariablePrefill {
+  source_id?: string
+  sheet?: string
+  column?: string
+  tag?: string
+  expected_type?: ExpectedType | null
+}
+interface CompositeVariablePrefill {
+  source_id?: string
+  sheet?: string
+  columns?: string[]
+  key_column?: string
+  tag?: string
+  append_index_to_key?: boolean
+}
 
 const selectedGuideStep = ref<StepIndex | null>(null)
 const hasManuallySelectedGuideStep = ref(false)
 const selectedRuleIds = ref<string[]>([])
+const importDrawerVisible = ref(false)
 
 onMounted(async () => {
   // 保留原有业务逻辑：工作台初始化仍并行读取能力与服务端配置。
@@ -70,11 +94,11 @@ const sourceStepRef = ref<HTMLElement | null>(null)
 const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)
 const resultStepRef = ref<HTMLElement | null>(null)
-const dataSourcePanelRef = ref<{ openCreateDialog: () => void } | null>(null)
+const dataSourcePanelRef = ref<{ openCreateDialog: (prefill?: DataSourceDialogPrefill) => void } | null>(null)
 const sourcePathReplacementDialogRef = ref<{ openDialog: () => void } | null>(null)
 const variablePoolPanelRef = ref<{
-  openSingleCreateTab: () => Promise<void>
-  openCompositeCreateTab: () => Promise<void>
+  openSingleCreateTab: (prefill?: SingleVariablePrefill) => Promise<void>
+  openCompositeCreateTab: (prefill?: CompositeVariablePrefill) => Promise<void>
 } | null>(null)
 const collapsedSections = reactive<Record<SectionKey, boolean>>({
   source: false,
@@ -355,6 +379,48 @@ function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
 }
 
+function normalizeString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function normalizeSourceType(value: unknown): SourceType {
+  return value === 'local_excel' || value === 'local_csv' || value === 'feishu' || value === 'svn'
+    ? value
+    : 'svn'
+}
+
+function normalizeExpectedType(value: unknown): ExpectedType | null | undefined {
+  if (value === 'str' || value === 'json' || value === 'int') {
+    return value
+  }
+  return undefined
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+  const items = value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+  return items.length ? items : undefined
+}
+
+async function openDataSourcePrefill(prefill: Record<string, unknown>): Promise<void> {
+  await ensureStepExpanded(1)
+  await scrollToStep(1)
+  dataSourcePanelRef.value?.openCreateDialog({
+    id: normalizeString(prefill.id ?? prefill.source_id),
+    type: normalizeSourceType(prefill.type),
+    pathOrUrl: normalizeString(prefill.pathOrUrl ?? prefill.path_or_url),
+    token: normalizeString(prefill.token),
+  })
+}
+
 function openSourcePathReplacementDialog(): void {
   sourcePathReplacementDialogRef.value?.openDialog()
 }
@@ -370,6 +436,31 @@ function openSingleVariableCreate(): void {
 
 function openCompositeVariableCreate(): void {
   void variablePoolPanelRef.value?.openCompositeCreateTab()
+}
+
+async function openSingleVariablePrefill(prefill: Record<string, unknown>): Promise<void> {
+  await ensureStepExpanded(2)
+  await scrollToStep(2)
+  await variablePoolPanelRef.value?.openSingleCreateTab({
+    source_id: normalizeString(prefill.source_id),
+    sheet: normalizeString(prefill.sheet),
+    column: normalizeString(prefill.column),
+    tag: normalizeString(prefill.tag),
+    expected_type: normalizeExpectedType(prefill.expected_type),
+  })
+}
+
+async function openCompositeVariablePrefill(prefill: Record<string, unknown>): Promise<void> {
+  await ensureStepExpanded(2)
+  await scrollToStep(2)
+  await variablePoolPanelRef.value?.openCompositeCreateTab({
+    source_id: normalizeString(prefill.source_id),
+    sheet: normalizeString(prefill.sheet),
+    columns: normalizeStringArray(prefill.columns),
+    key_column: normalizeString(prefill.key_column),
+    tag: normalizeString(prefill.tag),
+    append_index_to_key: normalizeBoolean(prefill.append_index_to_key),
+  })
 }
 
 async function handleStepperClick(step: StepIndex): Promise<void> {
@@ -393,6 +484,21 @@ function buildOrderedSelectedRuleIds(nextSelectedRuleIdSet: Set<string>): string
   return store.orchestrationRules
     .map((rule) => rule.rule_id)
     .filter((ruleId) => nextSelectedRuleIdSet.has(ruleId))
+}
+
+function selectAppliedRuleIds(ruleIds: string[]): void {
+  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
+  ruleIds.forEach((ruleId) => nextSelectedRuleIdSet.add(ruleId))
+  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
+}
+
+function handleAiDraftApplied(ruleIds: string[]): void {
+  selectAppliedRuleIds(ruleIds)
+}
+
+async function handleAiDraftAppliedAndExecute(ruleIds: string[]): Promise<void> {
+  selectAppliedRuleIds(ruleIds)
+  await runExecution()
 }
 
 function handleToggleRuleSelection(ruleId: string): void {
@@ -419,6 +525,15 @@ function handleToggleVisibleRuleSelection(payload: {
   })
   selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
 }
+
+function openRuleImportDrawer(): void {
+  if (!selectedRuleIds.value.length) {
+    ElMessage.warning('请先勾选需要导入项目校验的规则。')
+    return
+  }
+  importDrawerVisible.value = true
+}
+
 </script>
 
 <template>
@@ -625,6 +740,12 @@ function handleToggleVisibleRuleSelection(payload: {
             :selected-rule-ids="selectedRuleIds"
             @toggle-rule-selection="handleToggleRuleSelection"
             @toggle-visible-rule-selection="handleToggleVisibleRuleSelection"
+            @open-source-prefill="openDataSourcePrefill"
+            @open-single-variable-prefill="openSingleVariablePrefill"
+            @open-composite-variable-prefill="openCompositeVariablePrefill"
+            @ai-draft-applied="handleAiDraftApplied"
+            @ai-draft-applied-and-execute="handleAiDraftAppliedAndExecute"
+            @open-import-selected-rules="openRuleImportDrawer"
           />
           <div class="personal-rule-actions">
             <PrimaryButton
@@ -692,6 +813,10 @@ function handleToggleVisibleRuleSelection(payload: {
         ref="sourcePathReplacementDialogRef"
         :store="store"
         variant="workbench"
+      />
+      <WorkbenchRuleImportDrawer
+        v-model:visible="importDrawerVisible"
+        :selected-rule-ids="selectedRuleIds"
       />
     </div>
   </div>
