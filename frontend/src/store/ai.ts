@@ -185,6 +185,10 @@ export const useAiStore = defineStore('ai', {
       this.currentDraft = draft
     },
 
+    clearCurrentDraft(): void {
+      this.currentDraft = null
+    },
+
     async markApplied(draftId: number | null | undefined): Promise<void> {
       if (!draftId) {
         return

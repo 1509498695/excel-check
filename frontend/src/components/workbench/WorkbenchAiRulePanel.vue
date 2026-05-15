@@ -27,9 +27,16 @@ import {
   getAiRuleTypeLabel,
   mapAiDraftToResultItems,
   mapDraftToHistoryViewModel,
+  markAiRuleResultDuplicate,
   type AiResultSummaryViewModel,
   type AiRuleResultViewModel,
 } from '../../utils/aiRuleViewModel'
+import {
+  applyAiRuleTemplate,
+  getAvailableAiRuleTemplates,
+  getRecommendedAiRuleTemplates,
+} from '../../utils/aiRuleTemplates'
+import { buildAiPreviewExplanation } from '../../utils/aiPreviewExplanation'
 import { extractSmartRuleWorkflowHints } from '../../utils/aiRuleHintExtractor'
 import { getFixedRuleDuplicateSet } from '../../utils/ruleFingerprint'
 
@@ -217,6 +224,7 @@ const previewResult = ref<ExecutionResponse | null>(null)
 const previewError = ref('')
 const isPreviewing = ref(false)
 const isAutoCompletingAndApplying = ref(false)
+const isRegeneratingWithPreviewAdvice = ref(false)
 const configDrawerVisible = ref(false)
 const configDrawerItem = ref<AiRuleResultViewModel | null>(null)
 const selectedApplyGroupId = ref('')
@@ -260,6 +268,7 @@ const workflowHints = reactive<SmartRuleWorkflowHintsState>({
   rightKeyField: '',
   compareFields: '',
 })
+const templateWorkflowHints = ref<AiRuleWorkflowHints>({})
 
 type SmartRuleHintKey = keyof SmartRuleWorkflowHintsState
 
@@ -294,17 +303,28 @@ const resultItems = computed(() =>
     if (item.status !== 'ready' || !item.rule || !duplicateRuleIds.value.has(item.rule.rule_id)) {
       return item
     }
-    return {
-      ...item,
-      status: 'duplicate' as const,
-      reasonText: '当前个人校验中已有相同规则，无需重复添加。',
-    }
+    return markAiRuleResultDuplicate(item)
   }),
 )
 const resultSummary = computed(() => buildAiResultSummaryFromItems(resultItems.value))
 const pendingPreview = computed(() => buildPendingConfigPreview(currentDraft.value))
 const historyItems = computed(() => aiStore.drafts.map(mapDraftToHistoryViewModel))
 const applyGroupOptions = computed(() => workbenchStore.allRuleGroups)
+const selectedTemplateVariables = computed(() => {
+  const variablesByTag = new Map(workbenchStore.variables.map((variable) => [variable.tag, variable]))
+  return selectedVariableTags.value
+    .map((tag) => variablesByTag.get(tag))
+    .filter((variable): variable is VariableTag => Boolean(variable))
+})
+const availableAiRuleTemplates = computed(() =>
+  getAvailableAiRuleTemplates({
+    selectedVariables: selectedTemplateVariables.value,
+    allowAutoComplete: allowAutoComplete.value,
+  }),
+)
+const recommendedAiRuleTemplates = computed(() =>
+  getRecommendedAiRuleTemplates(selectedTemplateVariables.value),
+)
 const providerLabel = computed(() => {
   if (!aiStore.provider) return '未配置'
   return `${getProviderPresetLabel(aiStore.provider.provider_preset)} / ${aiStore.provider.model}`
@@ -315,6 +335,7 @@ const previewRows = computed<AbnormalResult[]>(() => {
 })
 const previewTotal = computed(() => previewResult.value?.data.total ?? previewRows.value.length)
 const previewFailedSources = computed(() => previewResult.value?.meta.failed_sources ?? [])
+const previewExplanation = computed(() => buildAiPreviewExplanation(previewResult.value))
 const isPreviewSuccessful = computed(
   () => Boolean(previewResult.value) && !previewError.value && previewFailedSources.value.length === 0,
 )
@@ -340,6 +361,18 @@ const canAutoCompleteAndApply = computed(
     !isPreviewing.value &&
     !isApplying.value &&
     !isAutoCompletingAndApplying.value,
+)
+const canRegenerateWithPreviewAdvice = computed(
+  () =>
+    previewExplanation.value.canRegenerate &&
+    currentDraft.value?.verdict === 'ready' &&
+    !currentDraft.value.applied &&
+    canGenerate.value &&
+    !aiStore.isDraftGenerating &&
+    !isPreviewing.value &&
+    !isApplying.value &&
+    !isAutoCompletingAndApplying.value &&
+    !isRegeneratingWithPreviewAdvice.value,
 )
 const configDrawerPayload = computed(() => {
   const rule = configDrawerItem.value?.rule
@@ -509,6 +542,7 @@ function applyDescriptionHints(): void {
 
 function updateSelectedVariableTags(value: string[]): void {
   selectedVariableTags.value = Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)))
+  templateWorkflowHints.value = {}
   syncRoleHintsFromSelectedVariables()
   resetPreview()
 }
@@ -544,9 +578,11 @@ function buildStructuredHintsText(): string {
   return lines.join('\n')
 }
 
-function buildExtraHintsPayload(): string | undefined {
+function buildExtraHintsPayload(adjustmentHints = ''): string | undefined {
   const structuredHints = buildStructuredHintsText()
-  const merged = [extraHints.value.trim(), structuredHints].filter(Boolean).join('\n\n')
+  const merged = [extraHints.value.trim(), adjustmentHints.trim(), structuredHints]
+    .filter(Boolean)
+    .join('\n\n')
   return merged || undefined
 }
 
@@ -558,7 +594,7 @@ function buildDescriptionPayload(): string {
 }
 
 function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
-  const payload: AiRuleWorkflowHints = {}
+  const payload: AiRuleWorkflowHints = cloneWorkflowHints(templateWorkflowHints.value)
   const putText = (key: keyof AiRuleWorkflowHints, value: string): void => {
     const trimmed = value.trim()
     if (trimmed) {
@@ -641,6 +677,10 @@ function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
   return payload
 }
 
+function cloneWorkflowHints(hints: AiRuleWorkflowHints): AiRuleWorkflowHints {
+  return JSON.parse(JSON.stringify(hints)) as AiRuleWorkflowHints
+}
+
 function isPlaceholderKeyColumn(value?: string): boolean {
   if (!value?.trim()) return false
   if (value.includes('未识别') || value.includes('需要用户确认')) return true
@@ -695,6 +735,7 @@ function buildDraftPayloadForWorkflow(
 function loadBusinessRuleExample(): void {
   clearAutoFillTimer()
   manuallyEditedHintKeys.clear()
+  templateWorkflowHints.value = {}
   description.value = BUSINESS_RULE_EXAMPLE
   Object.assign(workflowHints, {
     ruleTypeHint: '',
@@ -741,10 +782,82 @@ function loadBusinessRuleExample(): void {
   ElMessage.success('已载入规则描述示例，请选择变量池变量后校验。')
 }
 
+function handleApplyRuleTemplate(templateId: string): void {
+  try {
+    clearAutoFillTimer()
+    manuallyEditedHintKeys.clear()
+    const result = applyAiRuleTemplate(
+      templateId,
+      [...recommendedAiRuleTemplates.value, ...availableAiRuleTemplates.value],
+      selectedTemplateVariables.value,
+    )
+    description.value = result.description
+    templateWorkflowHints.value = cloneWorkflowHints(result.workflowHints)
+    applyTemplateWorkflowHints(result.workflowHints)
+    if (result.allowAutoComplete) {
+      allowAutoComplete.value = true
+    }
+    extraHints.value = ''
+    aiStore.clearPromptOptimizeResult()
+    aiStore.clearCurrentDraft()
+    resetPreview()
+    ElMessage.success('已载入规则模板，请确认描述后再 AI 校验。')
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '载入规则模板失败。')
+  }
+}
+
+function applyTemplateWorkflowHints(hints: AiRuleWorkflowHints): void {
+  setWorkflowHint('ruleTypeHint', hints.rule_type_hint)
+  setWorkflowHint('targetVariableTag', hints.target_variable_tag)
+  setWorkflowHint('referenceVariableTag', hints.reference_variable_tag)
+  setWorkflowHint('leftVariableTag', hints.left_variable_tag)
+  setWorkflowHint('rightVariableTag', hints.right_variable_tag)
+  setWorkflowHint('sourceId', hints.source_id)
+  setWorkflowHint('sourceUrl', hints.source_url)
+  setWorkflowHint('sheet', hints.sheet)
+  setWorkflowHint('targetField', hints.target_field)
+  setWorkflowHint('displayField', hints.display_field)
+  setWorkflowHint('filterField', hints.filter_field)
+  setWorkflowHint('filterOperator', hints.filter_operator)
+  setWorkflowHint('filterValue', hints.filter_value)
+  setWorkflowHint('assertionField', hints.assertion_field)
+  setWorkflowHint('assertionOperator', hints.assertion_operator)
+  setWorkflowHint('assertionValue', hints.assertion_value)
+  setWorkflowHint('operator', hints.operator)
+  setWorkflowHint('expectedValue', hints.expected_value)
+  setWorkflowHint('expectedValueMode', hints.expected_value_mode)
+  setWorkflowHint('regexPattern', hints.regex_pattern)
+  setWorkflowHint('sequenceDirection', hints.sequence_direction)
+  setWorkflowHint('sequenceStep', hints.sequence_step)
+  setWorkflowHint('sequenceStartMode', hints.sequence_start_mode)
+  setWorkflowHint('sequenceStartValue', hints.sequence_start_value)
+  setWorkflowHint('keyColumn', hints.key_column)
+  setWorkflowHint('compositeColumns', hints.composite_columns)
+  setWorkflowHint('leftFilterField', hints.left_filter_field)
+  setWorkflowHint('leftFilterOperator', hints.left_filter_operator)
+  setWorkflowHint('leftFilterValue', hints.left_filter_value)
+  setWorkflowHint('rightFilterField', hints.right_filter_field)
+  setWorkflowHint('rightFilterOperator', hints.right_filter_operator)
+  setWorkflowHint('rightFilterValue', hints.right_filter_value)
+  setWorkflowHint('leftKeyField', hints.left_key_field)
+  setWorkflowHint('rightKeyField', hints.right_key_field)
+  setWorkflowHint('compareFields', hints.compare_fields)
+}
+
+function setWorkflowHint(key: SmartRuleHintKey, value: string | string[] | null | undefined): void {
+  if (Array.isArray(value)) {
+    workflowHints[key] = value.join(',')
+    return
+  }
+  workflowHints[key] = value ?? ''
+}
+
 function clearInput(): void {
   clearAutoFillTimer()
   manuallyEditedHintKeys.clear()
   aiStore.clearPromptOptimizeResult()
+  templateWorkflowHints.value = {}
   description.value = ''
   extraHints.value = ''
   selectedVariableTags.value = []
@@ -851,7 +964,8 @@ function closePromptOptimizeResult(): void {
   aiStore.clearPromptOptimizeResult()
 }
 
-async function generateDraft(): Promise<void> {
+async function generateDraft(adjustmentHints?: string | Event): Promise<void> {
+  const previewAdjustmentHints = typeof adjustmentHints === 'string' ? adjustmentHints : ''
   if (!canGenerate.value) {
     ElMessage.warning(
       !isConfigured.value
@@ -872,7 +986,7 @@ async function generateDraft(): Promise<void> {
     await workbenchStore.saveConfigNow()
     const draft = await aiStore.generateDraft(
       buildDescriptionPayload(),
-      buildExtraHintsPayload(),
+      buildExtraHintsPayload(previewAdjustmentHints),
       buildWorkflowHintsPayload(),
       {
         inputMode: 'free_text',
@@ -890,6 +1004,25 @@ async function generateDraft(): Promise<void> {
     }
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '生成规则草稿失败。')
+  }
+}
+
+async function regenerateDraftWithPreviewAdvice(): Promise<void> {
+  const adjustmentHints = previewExplanation.value.adjustmentHints
+  if (!adjustmentHints) {
+    ElMessage.warning('当前没有可用于重新生成的预校验调整建议。')
+    return
+  }
+  if (!canRegenerateWithPreviewAdvice.value) {
+    ElMessage.warning('请先等待当前操作完成，并确认规则描述和目标变量仍可用于 AI 校验。')
+    return
+  }
+
+  isRegeneratingWithPreviewAdvice.value = true
+  try {
+    await generateDraft(adjustmentHints)
+  } finally {
+    isRegeneratingWithPreviewAdvice.value = false
   }
 }
 
@@ -1160,6 +1293,8 @@ function formatValue(value: unknown): string {
         :can-generate="canGenerate"
         :max-length="DESCRIPTION_MAX_LENGTH"
         :prompt-text="COMMON_WORKFLOW_PROMPT"
+        :templates="availableAiRuleTemplates"
+        :recommended-templates="recommendedAiRuleTemplates"
         @update:description="resetPreview"
         @update:selected-variable-tags="updateSelectedVariableTags"
         @update:allow-auto-complete="updateAllowAutoComplete"
@@ -1170,6 +1305,7 @@ function formatValue(value: unknown): string {
         @model-config="goProfile"
         @load-example="loadBusinessRuleExample"
         @copy-prompt="copyWorkflowPrompt"
+        @apply-template="handleApplyRuleTemplate"
       />
 
       <section
@@ -1294,6 +1430,67 @@ function formatValue(value: unknown): string {
           </div>
           <div v-if="previewFailedSources.length" class="ai-preview-result__warning">
             数据源读取失败：{{ previewFailedSources.join('、') }}
+          </div>
+          <div
+            v-if="previewExplanation.hasResult"
+            class="ai-preview-explanation"
+            :class="{ 'is-passed': previewExplanation.passed, 'is-warning': previewExplanation.hasIssues }"
+          >
+            <div class="ai-preview-explanation__head">
+              <div>
+                <h4>{{ previewExplanation.summaryTitle }}</h4>
+                <p>{{ previewExplanation.summaryText }}</p>
+              </div>
+              <span class="ai-preview-explanation__badge">
+                {{ previewExplanation.passed ? '可添加' : '需确认' }}
+              </span>
+            </div>
+
+            <div v-if="previewExplanation.issueGroups.length" class="ai-preview-explanation__groups">
+              <article
+                v-for="group in previewExplanation.issueGroups"
+                :key="group.id"
+                class="ai-preview-explanation__group"
+              >
+                <div class="ai-preview-explanation__group-top">
+                  <strong>{{ group.ruleName }}</strong>
+                  <span>样例中 {{ group.sampleCount }} 条</span>
+                </div>
+                <p class="ai-preview-explanation__message">{{ group.message }}</p>
+                <div class="ai-preview-explanation__samples">
+                  <span
+                    v-for="sample in group.sampleRows"
+                    :key="`${sample.ruleName}-${sample.location}-${sample.rowIndex}-${sample.rawValue}`"
+                  >
+                    行 {{ sample.rowIndex }} · {{ sample.location }} · 原始值 {{ sample.rawValue }}
+                    <template v-if="sample.displayValue"> · 显示 {{ sample.displayValue }}</template>
+                  </span>
+                </div>
+                <p class="ai-preview-explanation__suggestion">建议：{{ group.suggestion }}</p>
+              </article>
+            </div>
+
+            <div v-if="previewExplanation.suggestions.length" class="ai-preview-explanation__suggestions">
+              <span>修复方向</span>
+              <ul>
+                <li v-for="suggestion in previewExplanation.suggestions" :key="suggestion">
+                  {{ suggestion }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="previewExplanation.canRegenerate" class="ai-preview-explanation__actions">
+              <SecondaryButton
+                size="sm"
+                :disabled="!canRegenerateWithPreviewAdvice"
+                :loading="isRegeneratingWithPreviewAdvice || aiStore.isDraftGenerating"
+                @click="regenerateDraftWithPreviewAdvice"
+              >
+                <template #icon><MagicStick /></template>
+                带调整建议重新生成
+              </SecondaryButton>
+              <span>只重新生成草稿并再次预校验，不会直接保存规则。</span>
+            </div>
           </div>
           <el-table
             v-if="previewRows.length"

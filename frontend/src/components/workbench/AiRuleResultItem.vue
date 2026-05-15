@@ -60,13 +60,28 @@ function getStatusIcon(status: AiRuleUiStatus): unknown {
 
     <div class="ai-rule-result-item__main">
       <h4>{{ item.title }}</h4>
-      <p class="ai-rule-result-item__meta">{{ item.metaText }}</p>
-      <p v-if="item.missingText" class="ai-rule-result-item__missing">
-        缺失信息：{{ item.missingText }}
-      </p>
-      <p v-if="item.reasonText" class="ai-rule-result-item__reason">
-        原因：{{ item.reasonText }}
-      </p>
+      <div
+        v-if="item.explanationItems.length || item.nextActionText || item.rewriteHintText"
+        class="ai-rule-explanation-card"
+        :class="`is-${item.status}`"
+      >
+        <div class="ai-rule-explanation-card__title">{{ item.explanationTitle }}</div>
+        <dl class="ai-rule-explanation-card__list">
+          <template v-for="explanation in item.explanationItems" :key="`${explanation.label}-${explanation.text}`">
+            <dt :class="explanation.tone ? `is-${explanation.tone}` : undefined">
+              {{ explanation.label }}
+            </dt>
+            <dd>{{ explanation.text }}</dd>
+          </template>
+        </dl>
+        <p v-if="item.nextActionText" class="ai-rule-explanation-card__next">
+          下一步：{{ item.nextActionText }}
+        </p>
+        <p v-if="item.rewriteHintText" class="ai-rule-explanation-card__rewrite">
+          改写建议：{{ item.rewriteHintText }}
+        </p>
+      </div>
+      <p v-else class="ai-rule-result-item__meta">{{ item.metaText }}</p>
     </div>
 
     <div class="ai-rule-result-item__actions">
@@ -93,14 +108,26 @@ function getStatusIcon(status: AiRuleUiStatus): unknown {
           <template #icon><MagicStick /></template>
           一键补齐并添加
         </PrimaryButton>
-        <SecondaryButton size="sm" @click="emit('resolve-missing', item.missing)">
-          选择数据源
+        <SecondaryButton
+          v-if="item.missing?.suggested_action === 'edit_description'"
+          size="sm"
+          @click="emit('rewrite-rule')"
+        >
+          {{ item.resolveActionText || '回到输入框改写' }}
         </SecondaryButton>
-        <SecondaryButton size="sm" @click="emit('resolve-missing', item.missing)">
-          新增数据源
+        <SecondaryButton
+          v-else
+          size="sm"
+          @click="emit('resolve-missing', item.missing)"
+        >
+          {{ item.resolveActionText || '补充信息' }}
         </SecondaryButton>
-        <SecondaryButton size="sm" @click="emit('resolve-missing', item.missing)">
-          补充字段线索
+        <SecondaryButton
+          v-if="item.missing?.suggested_action !== 'edit_description'"
+          size="sm"
+          @click="emit('rewrite-rule')"
+        >
+          改写描述
         </SecondaryButton>
       </template>
       <template v-else-if="item.status === 'rejected'">

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Delete, MagicStick, Refresh, Setting } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Delete, MagicStick, Refresh, Setting } from '@element-plus/icons-vue'
 
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
 import type { VariableTag } from '../../types/workbench'
+import type { AiRuleTemplate } from '../../utils/aiRuleTemplates'
 
 const props = defineProps<{
   description: string
@@ -18,6 +19,8 @@ const props = defineProps<{
   canGenerate: boolean
   maxLength: number
   promptText: string
+  templates: AiRuleTemplate[]
+  recommendedTemplates: AiRuleTemplate[]
 }>()
 
 const emit = defineEmits<{
@@ -31,11 +34,16 @@ const emit = defineEmits<{
   (e: 'model-config'): void
   (e: 'load-example'): void
   (e: 'copy-prompt'): void
+  (e: 'apply-template', templateId: string): void
 }>()
 
 const showPrompt = ref(false)
+const templatesExpanded = ref(false)
 
 const descriptionCount = computed(() => props.description.length)
+const visibleTemplates = computed(() => props.templates.slice(0, 10))
+const visibleRecommendedTemplates = computed(() => props.recommendedTemplates.slice(0, 6))
+const templateCountText = computed(() => `${visibleTemplates.value.length} 个模板`)
 const placeholder = `推荐格式：
 筛选DESC3=升级p1建筑到p2级p4次,完成p2等级的p1科研，两种类型。STR_ABSwitch字段=GreenServer:0 or SLG2:0。
 
@@ -136,6 +144,72 @@ function buildVariableDetail(variable: VariableTag): string {
           </div>
         </el-option>
       </el-select>
+    </div>
+
+    <div v-if="visibleRecommendedTemplates.length" class="smart-rule-template-panel is-recommended">
+      <div class="smart-rule-template-panel__head">
+        <span>根据已选变量推荐</span>
+        <small>基于变量类型、字段和 Key 自动生成</small>
+      </div>
+      <div class="smart-rule-template-panel__list">
+        <button
+          v-for="template in visibleRecommendedTemplates"
+          :key="template.id"
+          type="button"
+          class="smart-rule-template-card is-recommended"
+          data-test="ai-rule-recommendation-card"
+          @click="emit('apply-template', template.id)"
+        >
+          <span class="smart-rule-template-card__top">
+            <span class="smart-rule-template-card__title">{{ template.title }}</span>
+            <span class="smart-rule-template-card__badge">{{ template.variableKindLabel }}</span>
+          </span>
+          <span class="smart-rule-template-card__meta">
+            {{ template.ruleTypeLabel }} · {{ template.categoryLabel }}
+          </span>
+          <span class="smart-rule-template-card__summary">
+            {{ template.recommendReason || template.summary }}
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div v-if="visibleTemplates.length" class="smart-rule-template-panel">
+      <div class="smart-rule-template-panel__head">
+        <div class="smart-rule-template-panel__title">
+          <span>规则模板 / 常用案例</span>
+          <small>默认收起，展开后点击模板只填入描述和规则线索</small>
+        </div>
+        <button
+          type="button"
+          class="smart-rule-template-panel__toggle"
+          data-test="ai-rule-template-toggle"
+          @click="templatesExpanded = !templatesExpanded"
+        >
+          <span>{{ templateCountText }}</span>
+          <span>{{ templatesExpanded ? '收起' : '展开' }}</span>
+          <component :is="templatesExpanded ? ArrowUp : ArrowDown" class="smart-rule-template-panel__toggle-icon" />
+        </button>
+      </div>
+      <div v-if="templatesExpanded" class="smart-rule-template-panel__list">
+        <button
+          v-for="template in visibleTemplates"
+          :key="template.id"
+          type="button"
+          class="smart-rule-template-card"
+          data-test="ai-rule-template-card"
+          @click="emit('apply-template', template.id)"
+        >
+          <span class="smart-rule-template-card__top">
+            <span class="smart-rule-template-card__title">{{ template.title }}</span>
+            <span class="smart-rule-template-card__badge">{{ template.variableKindLabel }}</span>
+          </span>
+          <span class="smart-rule-template-card__meta">
+            {{ template.ruleTypeLabel }} · {{ template.categoryLabel }}
+          </span>
+          <span class="smart-rule-template-card__summary">{{ template.summary }}</span>
+        </button>
+      </div>
     </div>
 
     <div v-if="showPrompt" class="smart-rule-prompt">
