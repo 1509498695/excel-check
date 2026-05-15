@@ -74,6 +74,20 @@ const providerOptions: Array<{
     model: 'openai/gpt-5-mini',
   },
   {
+    label: '小米 MiMo',
+    value: 'xiaomi_mimo',
+    protocol: 'OpenAI-compatible',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    model: 'mimo-v2.5-pro',
+  },
+  {
+    label: '小米 MiMo 会员',
+    value: 'xiaomi_mimo_token_plan',
+    protocol: 'OpenAI-compatible',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    model: 'mimo-v2.5-pro',
+  },
+  {
     label: '自定义 OpenAI 兼容',
     value: 'custom_openai',
     protocol: 'OpenAI-compatible',

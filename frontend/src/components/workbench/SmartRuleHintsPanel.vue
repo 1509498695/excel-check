@@ -3,46 +3,8 @@ import { computed, ref } from 'vue'
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 
 import type { DataSource, VariableTag } from '../../types/workbench'
+import type { SmartRuleWorkflowHintsState } from '../../utils/aiRuleInputDraft'
 import { getSourceTypeLabel } from '../../utils/workbenchMeta'
-
-export interface SmartRuleWorkflowHintsState {
-  ruleTypeHint: string
-  targetVariableTag: string
-  referenceVariableTag: string
-  leftVariableTag: string
-  rightVariableTag: string
-  sourceId: string
-  sourceUrl: string
-  sheet: string
-  targetField: string
-  ruleGroupName: string
-  filterField: string
-  filterOperator: string
-  filterValue: string
-  assertionField: string
-  assertionOperator: string
-  assertionValue: string
-  operator: string
-  expectedValue: string
-  expectedValueMode: string
-  displayField: string
-  regexPattern: string
-  sequenceDirection: string
-  sequenceStep: string
-  sequenceStartMode: string
-  sequenceStartValue: string
-  keyColumn: string
-  compositeColumns: string
-  leftFilterField: string
-  leftFilterOperator: string
-  leftFilterValue: string
-  rightFilterField: string
-  rightFilterOperator: string
-  rightFilterValue: string
-  leftKeyField: string
-  rightKeyField: string
-  compareFields: string
-}
 
 const props = defineProps<{
   hints: SmartRuleWorkflowHintsState

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, MagicStick, Refresh, VideoPlay } from '@element-plus/icons-vue'
@@ -8,7 +8,6 @@ import AiRuleResultList from './AiRuleResultList.vue'
 import DraftHistoryPanel from './DraftHistoryPanel.vue'
 import PendingConfigPreview from './PendingConfigPreview.vue'
 import SmartRuleInputCard from './SmartRuleInputCard.vue'
-import type { SmartRuleWorkflowHintsState } from './SmartRuleHintsPanel.vue'
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
 import { useAiStore } from '../../store/ai'
@@ -36,6 +35,11 @@ import {
   getAvailableAiRuleTemplates,
   getRecommendedAiRuleTemplates,
 } from '../../utils/aiRuleTemplates'
+import {
+  AI_RULE_INPUT_DEFAULT_GROUP_NAME,
+  createDefaultSmartRuleWorkflowHintsState,
+  type SmartRuleWorkflowHintsState,
+} from '../../utils/aiRuleInputDraft'
 import { buildAiPreviewExplanation } from '../../utils/aiPreviewExplanation'
 import { extractSmartRuleWorkflowHints } from '../../utils/aiRuleHintExtractor'
 import { getFixedRuleDuplicateSet } from '../../utils/ruleFingerprint'
@@ -48,7 +52,7 @@ const emit = defineEmits<{
   (e: 'open-composite-variable-prefill', prefill: Record<string, unknown>): void
 }>()
 
-const AI_RULE_GROUP_NAME = 'AI生成规则组'
+const AI_RULE_GROUP_NAME = AI_RULE_INPUT_DEFAULT_GROUP_NAME
 const DESCRIPTION_MAX_LENGTH = 800
 const AUTO_FILL_DELAY_MS = 350
 const BUSINESS_RULE_EXAMPLE =
@@ -216,9 +220,24 @@ const router = useRouter()
 const aiStore = useAiStore()
 const workbenchStore = useWorkbenchStore()
 
-const description = ref('')
-const extraHints = ref('')
-const selectedVariableTags = ref<string[]>([])
+const description = computed({
+  get: () => aiStore.smartRuleInputDraft.description,
+  set: (value: string) => {
+    aiStore.smartRuleInputDraft.description = value
+  },
+})
+const extraHints = computed({
+  get: () => aiStore.smartRuleInputDraft.extraHints,
+  set: (value: string) => {
+    aiStore.smartRuleInputDraft.extraHints = value
+  },
+})
+const selectedVariableTags = computed({
+  get: () => aiStore.smartRuleInputDraft.selectedVariableTags,
+  set: (value: string[]) => {
+    aiStore.smartRuleInputDraft.selectedVariableTags = value
+  },
+})
 const isApplying = ref(false)
 const previewResult = ref<ExecutionResponse | null>(null)
 const previewError = ref('')
@@ -228,47 +247,19 @@ const isRegeneratingWithPreviewAdvice = ref(false)
 const configDrawerVisible = ref(false)
 const configDrawerItem = ref<AiRuleResultViewModel | null>(null)
 const selectedApplyGroupId = ref('')
-const allowAutoComplete = ref(false)
-
-const workflowHints = reactive<SmartRuleWorkflowHintsState>({
-  ruleTypeHint: '',
-  targetVariableTag: '',
-  referenceVariableTag: '',
-  leftVariableTag: '',
-  rightVariableTag: '',
-  sourceId: '',
-  sourceUrl: '',
-  sheet: '',
-  targetField: '',
-  ruleGroupName: AI_RULE_GROUP_NAME,
-  filterField: '',
-  filterOperator: '',
-  filterValue: '',
-  assertionField: '',
-  assertionOperator: '',
-  assertionValue: '',
-  operator: '',
-  expectedValue: '',
-  expectedValueMode: '',
-  displayField: '',
-  regexPattern: '',
-  sequenceDirection: '',
-  sequenceStep: '',
-  sequenceStartMode: '',
-  sequenceStartValue: '',
-  keyColumn: '',
-  compositeColumns: '',
-  leftFilterField: '',
-  leftFilterOperator: '',
-  leftFilterValue: '',
-  rightFilterField: '',
-  rightFilterOperator: '',
-  rightFilterValue: '',
-  leftKeyField: '',
-  rightKeyField: '',
-  compareFields: '',
+const allowAutoComplete = computed({
+  get: () => aiStore.smartRuleInputDraft.allowAutoComplete,
+  set: (value: boolean) => {
+    aiStore.smartRuleInputDraft.allowAutoComplete = value
+  },
 })
-const templateWorkflowHints = ref<AiRuleWorkflowHints>({})
+const workflowHints = aiStore.smartRuleInputDraft.workflowHints
+const templateWorkflowHints = computed({
+  get: () => aiStore.smartRuleInputDraft.templateWorkflowHints,
+  set: (value: AiRuleWorkflowHints) => {
+    aiStore.smartRuleInputDraft.templateWorkflowHints = cloneWorkflowHints(value)
+  },
+})
 
 type SmartRuleHintKey = keyof SmartRuleWorkflowHintsState
 
@@ -406,6 +397,8 @@ function getProviderPresetLabel(preset: string): string {
     kimi: 'Kimi',
     zhipu: '智谱 GLM',
     openrouter: 'OpenRouter',
+    xiaomi_mimo: '小米 MiMo',
+    xiaomi_mimo_token_plan: '小米 MiMo 会员',
     custom_openai: '自定义',
   }
   return labels[preset] ?? preset
@@ -738,42 +731,9 @@ function loadBusinessRuleExample(): void {
   templateWorkflowHints.value = {}
   description.value = BUSINESS_RULE_EXAMPLE
   Object.assign(workflowHints, {
-    ruleTypeHint: '',
+    ...createDefaultSmartRuleWorkflowHintsState(),
     targetVariableTag: selectedVariableTags.value[0] ?? '',
-    referenceVariableTag: '',
     leftVariableTag: selectedVariableTags.value[0] ?? '',
-    rightVariableTag: '',
-    sourceId: '',
-    sourceUrl: '',
-    sheet: '',
-    targetField: '',
-    ruleGroupName: AI_RULE_GROUP_NAME,
-    filterField: '',
-    filterOperator: '',
-    filterValue: '',
-    assertionField: '',
-    assertionOperator: '',
-    assertionValue: '',
-    operator: '',
-    expectedValue: '',
-    expectedValueMode: '',
-    displayField: '',
-    regexPattern: '',
-    sequenceDirection: '',
-    sequenceStep: '',
-    sequenceStartMode: '',
-    sequenceStartValue: '',
-    keyColumn: '',
-    compositeColumns: '',
-    leftFilterField: '',
-    leftFilterOperator: '',
-    leftFilterValue: '',
-    rightFilterField: '',
-    rightFilterOperator: '',
-    rightFilterValue: '',
-    leftKeyField: '',
-    rightKeyField: '',
-    compareFields: '',
   })
   extraHints.value = ''
   applyDescriptionHints()
@@ -857,48 +817,8 @@ function clearInput(): void {
   clearAutoFillTimer()
   manuallyEditedHintKeys.clear()
   aiStore.clearPromptOptimizeResult()
-  templateWorkflowHints.value = {}
-  description.value = ''
-  extraHints.value = ''
-  selectedVariableTags.value = []
-  Object.assign(workflowHints, {
-    ruleTypeHint: '',
-    targetVariableTag: '',
-    referenceVariableTag: '',
-    leftVariableTag: '',
-    rightVariableTag: '',
-    sourceId: '',
-    sourceUrl: '',
-    sheet: '',
-    targetField: '',
-    ruleGroupName: AI_RULE_GROUP_NAME,
-    filterField: '',
-    filterOperator: '',
-    filterValue: '',
-    assertionField: '',
-    assertionOperator: '',
-    assertionValue: '',
-    operator: '',
-    expectedValue: '',
-    expectedValueMode: '',
-    displayField: '',
-    regexPattern: '',
-    sequenceDirection: '',
-    sequenceStep: '',
-    sequenceStartMode: '',
-    sequenceStartValue: '',
-    keyColumn: '',
-    compositeColumns: '',
-    leftFilterField: '',
-    leftFilterOperator: '',
-    leftFilterValue: '',
-    rightFilterField: '',
-    rightFilterOperator: '',
-    rightFilterValue: '',
-    leftKeyField: '',
-    rightKeyField: '',
-    compareFields: '',
-  })
+  aiStore.clearCurrentDraft()
+  aiStore.resetSmartRuleInputDraft()
   resetPreview()
 }
 

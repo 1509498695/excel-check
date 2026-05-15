@@ -182,7 +182,7 @@ AI 模型凭据和规则草稿都进入 SQLite 运行库，并沿用现有 Ferne
 | `ai_provider_credentials` | `user_id` 唯一 | 个人 AI 供应商配置；保存 `provider_preset / base_url / model / encrypted_api_key / extra_headers_json`，GET 接口只返回脱敏 Key。 |
 | `ai_rule_drafts` | `project_id + user_id` | 当前项目当前用户最近 20 条 AI 草稿历史；保存结构化返回结果、三态 verdict、是否已应用。 |
 
-内置供应商预设覆盖 OpenAI-compatible、Anthropic Messages、Gemini generateContent 三类协议：OpenAI、Anthropic Claude、Google Gemini、DeepSeek、通义千问 DashScope、Kimi、智谱 GLM、OpenRouter 与自定义 OpenAI-compatible。后端统一用 `httpx` 直连，优先请求严格结构化输出，不可用时回退 JSON 模式并由 Pydantic 与业务编译器二次校验。
+内置供应商预设覆盖 OpenAI-compatible、Anthropic Messages、Gemini generateContent 三类协议：OpenAI、Anthropic Claude、Google Gemini、DeepSeek、通义千问 DashScope、Kimi、智谱 GLM、OpenRouter、小米 MiMo、小米 MiMo 会员与自定义 OpenAI-compatible。后端统一用 `httpx` 直连，优先请求严格结构化输出，不可用时回退 JSON 模式并由 Pydantic 与业务编译器二次校验。
 
 ## 5. API 协议
 

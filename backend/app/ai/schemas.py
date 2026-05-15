@@ -30,6 +30,8 @@ AiProviderPreset = Literal[
     "kimi",
     "zhipu",
     "openrouter",
+    "xiaomi_mimo",
+    "xiaomi_mimo_token_plan",
     "custom_openai",
 ]
 AiProviderProtocol = Literal["openai_compatible", "anthropic", "gemini"]

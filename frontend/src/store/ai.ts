@@ -21,6 +21,11 @@ import type {
   RulePromptOptimizeRequest,
   RulePromptOptimizeResult,
 } from '../types/ai'
+import {
+  createDefaultAiRuleInputDraftState,
+  createDefaultSmartRuleWorkflowHintsState,
+  type AiRuleInputDraftState,
+} from '../utils/aiRuleInputDraft'
 
 interface AiState {
   provider: AiProviderConfig | null
@@ -34,6 +39,7 @@ interface AiState {
   isDraftHistoryLoading: boolean
   error: string
   promptOptimizeResult: RulePromptOptimizeResult | null
+  smartRuleInputDraft: AiRuleInputDraftState
 }
 
 export const useAiStore = defineStore('ai', {
@@ -49,6 +55,7 @@ export const useAiStore = defineStore('ai', {
     isDraftHistoryLoading: false,
     error: '',
     promptOptimizeResult: null,
+    smartRuleInputDraft: createDefaultAiRuleInputDraftState(),
   }),
 
   getters: {
@@ -166,6 +173,19 @@ export const useAiStore = defineStore('ai', {
 
     clearPromptOptimizeResult(): void {
       this.promptOptimizeResult = null
+    },
+
+    resetSmartRuleInputDraft(): void {
+      const nextDraft = createDefaultAiRuleInputDraftState()
+      this.smartRuleInputDraft.description = nextDraft.description
+      this.smartRuleInputDraft.extraHints = nextDraft.extraHints
+      this.smartRuleInputDraft.selectedVariableTags = nextDraft.selectedVariableTags
+      this.smartRuleInputDraft.allowAutoComplete = nextDraft.allowAutoComplete
+      Object.assign(
+        this.smartRuleInputDraft.workflowHints,
+        createDefaultSmartRuleWorkflowHintsState(),
+      )
+      this.smartRuleInputDraft.templateWorkflowHints = nextDraft.templateWorkflowHints
     },
 
     async loadDrafts(): Promise<void> {

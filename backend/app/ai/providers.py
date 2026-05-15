@@ -76,6 +76,18 @@ PROVIDER_PRESETS: dict[AiProviderPreset, ProviderPreset] = {
         "https://openrouter.ai/api/v1",
         "openai/gpt-5-mini",
     ),
+    "xiaomi_mimo": ProviderPreset(
+        "小米 MiMo",
+        "openai_compatible",
+        "https://api.xiaomimimo.com/v1",
+        "mimo-v2.5-pro",
+    ),
+    "xiaomi_mimo_token_plan": ProviderPreset(
+        "小米 MiMo 会员",
+        "openai_compatible",
+        "https://token-plan-cn.xiaomimimo.com/v1",
+        "mimo-v2.5-pro",
+    ),
     "custom_openai": ProviderPreset(
         "自定义 OpenAI 兼容",
         "openai_compatible",
@@ -431,4 +443,3 @@ async def _call_gemini(
         raise ProviderConnectionError("invalid_json", "Gemini 响应缺少 candidates.content.parts。") from exc
     text = "\n".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
     return text, data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else {}
-
