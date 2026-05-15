@@ -12,7 +12,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const showShell = computed(() => auth.isLoggedIn)
+const showShell = computed(() => auth.isLoggedIn && route.meta.guest !== true)
 
 const currentRoleLabel = computed(() => {
   if (auth.isSuperAdmin) {

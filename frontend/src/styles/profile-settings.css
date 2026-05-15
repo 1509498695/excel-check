@@ -1,0 +1,217 @@
+/* Profile Settings Page polish */
+.profile-settings-page {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 72% 0%, rgba(15, 98, 254, 0.035), transparent 30%),
+    var(--color-bg-page);
+}
+
+.profile-settings-page .ui-page-header {
+  padding: 24px 32px 10px;
+}
+
+.profile-settings-page .ui-page-header__breadcrumb {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.profile-settings-page .ui-page-header__title {
+  margin-top: 7px;
+  color: var(--color-text-main);
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.profile-settings-content {
+  gap: 22px !important;
+  padding-top: 20px !important;
+}
+
+.profile-settings-stack {
+  gap: 24px !important;
+}
+
+.profile-settings-card {
+  border-radius: 18px;
+}
+
+.profile-settings-card__inner {
+  padding: 20px 22px 22px;
+}
+
+.profile-settings-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 14px;
+}
+
+.profile-settings-card__body {
+  padding-top: 16px;
+}
+
+.profile-settings-page .workbench-section-head {
+  align-items: flex-start;
+  min-height: 48px;
+}
+
+.profile-settings-page .workbench-section-head__index {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.profile-settings-page .workbench-section-head__title {
+  color: var(--color-text-main);
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.profile-settings-page .workbench-section-head__description {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.profile-settings-page .ui-data-table {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.profile-settings-page .ui-data-table th {
+  height: 44px;
+  background: #f6f8fc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.profile-settings-page .ui-data-table td {
+  height: 50px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.profile-settings-page .ui-status-badge {
+  min-height: 22px;
+}
+
+.profile-current-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  border-radius: 999px;
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 0 9px;
+}
+
+.profile-empty-panel {
+  border: 1px dashed var(--color-border);
+  border-radius: 14px;
+  background: #fbfcff;
+}
+
+.profile-password-form {
+  width: 100%;
+}
+
+.profile-password-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.profile-form-field {
+  min-width: 0;
+}
+
+.profile-form-field label {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-password-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 22px;
+}
+
+.profile-password-form .el-input__wrapper {
+  min-height: 44px;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px var(--color-border) inset, 0 6px 16px rgba(15, 23, 42, 0.025);
+  transition:
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.profile-password-form .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px #cbd5e1 inset, 0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.profile-password-form .el-input__wrapper.is-focus,
+.profile-password-form .el-input.is-focus .el-input__wrapper {
+  box-shadow:
+    0 0 0 1px var(--color-primary) inset,
+    0 0 0 4px rgba(15, 98, 254, 0.1),
+    0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.profile-password-form .el-input__inner {
+  color: var(--color-text-main);
+  font-size: 14px;
+}
+
+.profile-password-form .el-input__inner::placeholder {
+  color: #94a3b8;
+}
+
+.profile-password-form .el-input__suffix-inner {
+  color: #94a3b8;
+}
+
+@media (min-width: 1920px) {
+  .profile-settings-content {
+    gap: 24px !important;
+    padding-top: 22px !important;
+  }
+
+  .profile-settings-card__inner {
+    padding: 22px 24px 24px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .profile-password-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .profile-settings-page .ui-page-header {
+    padding: 20px 18px 8px;
+  }
+
+  .profile-settings-content {
+    padding-right: 18px !important;
+    padding-left: 18px !important;
+  }
+
+  .profile-settings-card__header {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,283 @@
+/* ================ Admin Dashboard Page polish（管理后台新版 UI 对齐） ================ */
+.admin-dashboard-page {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(246, 248, 252, 0.96)),
+    var(--color-bg-page);
+}
+
+.admin-dashboard-page .ui-page-header {
+  border-bottom-color: rgba(229, 234, 243, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 248, 252, 0.72)),
+    var(--color-bg-page);
+  padding-top: 22px;
+  padding-bottom: 18px;
+}
+
+.admin-dashboard-page .ui-page-header__breadcrumb {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.admin-dashboard-page .ui-page-header__title {
+  margin-top: 7px;
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.admin-dashboard-page .ui-page-header__actions {
+  gap: 14px;
+}
+
+.admin-dashboard-search {
+  width: 260px;
+}
+
+.admin-dashboard-search .el-input__wrapper {
+  min-height: 42px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--color-border) inset, 0 8px 18px rgba(15, 23, 42, 0.03);
+}
+
+.admin-dashboard-content {
+  gap: 18px !important;
+  padding-top: 20px !important;
+}
+
+.admin-dashboard-page .ui-metric-card {
+  min-height: 128px;
+  padding: 24px 26px;
+}
+
+.admin-dashboard-page .ui-metric-card__icon {
+  width: 62px;
+  height: 62px;
+}
+
+.admin-dashboard-page .ui-metric-card__icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.admin-dashboard-page .ui-metric-card__label {
+  font-size: 14px;
+}
+
+.admin-dashboard-page .ui-metric-card__value {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  font-size: 34px;
+}
+
+.admin-dashboard-card {
+  border-radius: 18px;
+}
+
+.admin-dashboard-card__inner {
+  padding: 20px 22px 22px;
+}
+
+.admin-dashboard-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 14px;
+}
+
+.admin-dashboard-card__body {
+  padding-top: 16px;
+}
+
+.admin-dashboard-card__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-dashboard-page .workbench-section-head {
+  align-items: flex-start;
+  min-height: 48px;
+}
+
+.admin-dashboard-page .workbench-section-head__index {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.admin-dashboard-page .workbench-section-head__title {
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.admin-dashboard-page .workbench-section-head__description {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.admin-project-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.admin-project-card {
+  position: relative;
+  display: flex;
+  min-height: 126px;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  padding: 18px 18px 16px;
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1),
+    transform 160ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.admin-project-card::before {
+  display: none;
+}
+
+.admin-project-card:hover {
+  transform: translateY(-1px);
+  border-color: #c9d8ee;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
+}
+
+.admin-project-card.is-active {
+  border-color: rgba(15, 98, 254, 0.46);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 98, 254, 0.11);
+}
+
+.admin-project-card__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-main);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-project-card__meta {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-project-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.admin-current-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  border-radius: 999px;
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 0 9px;
+}
+
+.admin-empty-panel {
+  border: 1px dashed var(--color-border);
+  border-radius: 14px;
+  background: #fbfcff;
+}
+
+.admin-dashboard-page .ui-data-table {
+  border-color: var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.admin-dashboard-page .ui-data-table th {
+  height: 44px;
+  background: #f6f8fc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.admin-dashboard-page .ui-data-table td {
+  height: 50px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.admin-dashboard-page .table-actions {
+  gap: 14px;
+}
+
+.admin-dashboard-page .el-tag,
+.admin-dashboard-page .ui-status-badge {
+  min-height: 22px;
+}
+
+@media (min-width: 1920px) {
+  .admin-dashboard-content {
+    gap: 20px !important;
+    padding-top: 22px !important;
+  }
+
+  .admin-dashboard-card__inner {
+    padding: 22px 24px 24px;
+  }
+}
+
+@media (max-width: 1535px) {
+  .admin-project-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .admin-project-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-dashboard-search {
+    width: min(100%, 280px);
+  }
+
+  .admin-project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-dashboard-card__header {
+    flex-direction: column;
+  }
+
+  .admin-dashboard-card__actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}

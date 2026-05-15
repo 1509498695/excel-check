@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "lint": "eslint \"src/**/*.{ts,vue}\"",
+    "test:unit": "vitest",
+    "test:rule-contract": "node scripts/check-rule-contracts.mjs",
     "format:check": "prettier --check \"package.json\" \"eslint.config.js\" \".prettierrc.json\" \"src/types/api.ts\" \"src/types/workbench.ts\" \"src/types/fixedRules.ts\" \"src/api/workbench.ts\" \"src/utils/apiFetch.ts\" \"src/components/shell/CollapsibleSection.vue\"",
     "preview": "vite preview"
   },
@@ -31,6 +33,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.1",
+    "vitest": "^4.1.6",
     "vue-eslint-parser": "^10.4.0",
     "vue-tsc": "^3.2.5"
   }

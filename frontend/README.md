@@ -56,12 +56,13 @@ frontend/src
 │   └── workbench/      # 个人校验业务组件：DataSourcePanel / VariablePoolPanel / WorkbenchRuleOrchestrationPanel / WorkbenchAiRulePanel / WorkbenchRuleImportDrawer / ResultBoardPanel
 ├── router/             # vue-router：/login /register / /fixed-rules /admin /profile /user-guide
 ├── store/              # Pinia：auth / workbench / fixedRules / ai
+├── styles/             # 全局样式模块：shared / workbench / personal-check / fixed-rules / admin / profile / auth / user-guide / ai-rule
 ├── types/              # TypeScript 类型：api / workbench / fixedRules / auth / ai
 ├── utils/              # ruleOrchestrationModel / taskTree / workbenchMeta / apiFetch
 ├── views/              # 页面入口：MainBoard / FixedRulesBoard / AdminView / ProfileView / UserGuideView / LoginView / RegisterView
 ├── App.vue             # 应用壳：ec-* 左侧固定边栏 + 右侧独立滚动工作区
 ├── main.ts             # 入口
-└── style.css           # 全局 token 与共享 utility（统一收口在此）
+└── style.css           # Tailwind 指令入口；具体全局样式按域拆到 styles/
 ```
 
 更细的「文件 → 作用」对照请看 [../docs/MODULES.md](../docs/MODULES.md)。
@@ -81,7 +82,7 @@ frontend/src
 - 旧组件 `StatusDot / StatPill` 保留为兼容包装，新页面优先使用 `StatusBadge / MetricCard`。
 - `EmptyState` 支持 `table / panel / result` 三种空态场景和 `source / variable / rule / result` 图标语义，表格空数据应优先使用它而不是单行纯文本。
 - 页面级视觉替换应优先复用这些组件，不直接复制卡片、按钮、状态标签和表格样式。
-- `style.css` 末尾保留 `Global UI Final Polish` 最终覆盖层，用于统一 Element Plus、旧 `ec-*` 类和新版 `ui-*` 组件的按钮、输入框、表格、标签、卡片、空态与链接细节。
+- `style.css` 仅保留 Tailwind 指令；全局 token、Element Plus 校准、旧 `ec-*`、新版 `ui-*`、页面专用样式和最终覆盖层按原 cascade 顺序拆到 `src/styles/`。其中 `shared-final.css` 保留 `Global UI Final Polish`，用于统一按钮、输入框、表格、标签、卡片、空态与链接细节。
 - 个人校验 `/` 使用 `personal-check-*` 专用类、项目校验 `/fixed-rules` 使用 `project-check-*` 专用类，对步骤条、统计卡、工作区表格、规则区和结果空态做参考稿级视觉精修；两者共享同一套 SaaS 工作台视觉基线。
 - 个人校验 `/` 与项目校验 `/fixed-rules` 共享 `ResultBoardPanel`：执行后可导出 Excel，文件包含 `统计摘要` 与 `异常明细` 两个页签，导出的是当前 `result_id` 的全量结果而不是当前分页；规则可选配置 `结果显示字段`，异常明细表和导出会展示该字段值。
 - 管理后台 `/admin` 使用 `admin-dashboard-*` 专用类，对页面头操作区、统计卡、项目列表卡片、详情表格和成员表格做新版后台视觉精修。

@@ -1,0 +1,560 @@
+{
+  "fixed_rules_config": {
+    "version": 6,
+    "configured": true,
+    "sources": [
+      {
+        "id": "items-source",
+        "type": "local_excel",
+        "pathOrUrl": "backend/tests/data/minimal_rules.xlsx"
+      }
+    ],
+    "variables": [
+      {
+        "tag": "[items-source-items-ID]",
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "single",
+        "column": "ID",
+        "expected_type": "int"
+      },
+      {
+        "tag": "[items-source-items-Name]",
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "single",
+        "column": "Name",
+        "expected_type": "str"
+      },
+      {
+        "tag": "[items-source-drops-RefID]",
+        "source_id": "items-source",
+        "sheet": "drops",
+        "variable_kind": "single",
+        "column": "RefID",
+        "expected_type": "int"
+      },
+      {
+        "tag": "[items-source-items-composite-a]",
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["ID", "Name"],
+        "key_column": "ID",
+        "expected_type": "json"
+      },
+      {
+        "tag": "[items-source-items-composite-b]",
+        "source_id": "items-source",
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["ID", "Name"],
+        "key_column": "ID",
+        "expected_type": "json"
+      }
+    ],
+    "groups": [
+      {
+        "group_id": "ungrouped",
+        "group_name": "未分组",
+        "builtin": true
+      },
+      {
+        "group_id": "contract-group",
+        "group_name": "Contract group",
+        "builtin": false
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "contract-not-null",
+        "group_id": "contract-group",
+        "rule_name": "ID is required",
+        "target_variable_tag": "[items-source-items-ID]",
+        "display_field": "ID",
+        "rule_type": "not_null"
+      },
+      {
+        "rule_id": "contract-unique",
+        "group_id": "contract-group",
+        "rule_name": "Name is unique",
+        "target_variable_tag": "[items-source-items-Name]",
+        "display_field": "Name",
+        "rule_type": "unique"
+      },
+      {
+        "rule_id": "contract-fixed-value",
+        "group_id": "contract-group",
+        "rule_name": "ID is greater than zero",
+        "target_variable_tag": "[items-source-items-ID]",
+        "display_field": "ID",
+        "rule_type": "fixed_value_compare",
+        "operator": "gt",
+        "expected_value": "0",
+        "expected_value_mode": null
+      },
+      {
+        "rule_id": "contract-regex",
+        "group_id": "contract-group",
+        "rule_name": "Name contains letters",
+        "target_variable_tag": "[items-source-items-Name]",
+        "display_field": "Name",
+        "rule_type": "regex_check",
+        "expected_value": "^[A-Za-z]+$"
+      },
+      {
+        "rule_id": "contract-sequence",
+        "group_id": "contract-group",
+        "rule_name": "ID sequence asc",
+        "target_variable_tag": "[items-source-items-ID]",
+        "display_field": "ID",
+        "rule_type": "sequence_order_check",
+        "sequence_direction": "asc",
+        "sequence_step": "1",
+        "sequence_start_mode": "manual",
+        "sequence_start_value": "1"
+      },
+      {
+        "rule_id": "contract-cross-table",
+        "group_id": "contract-group",
+        "rule_name": "ID exists in drops",
+        "target_variable_tag": "[items-source-items-ID]",
+        "display_field": "ID",
+        "rule_type": "cross_table_mapping",
+        "reference_variable_tag": "[items-source-drops-RefID]"
+      },
+      {
+        "rule_id": "contract-composite-condition",
+        "group_id": "contract-group",
+        "rule_name": "Composite branch rule",
+        "target_variable_tag": "[items-source-items-composite-a]",
+        "display_field": "Name",
+        "rule_type": "composite_condition_check",
+        "composite_config": {
+          "global_filters": [
+            {
+              "condition_id": "cc-global-name",
+              "field": "Name",
+              "operator": "contains",
+              "value_source": "literal",
+              "expected_value": "A"
+            }
+          ],
+          "branches": [
+            {
+              "branch_id": "cc-branch-main",
+              "filters": [
+                {
+                  "condition_id": "cc-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0"
+                }
+              ],
+              "assertions": [
+                {
+                  "condition_id": "cc-assert-name",
+                  "field": "Name",
+                  "operator": "regex",
+                  "expected_value": "^[A-Za-z]+$"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "rule_id": "contract-dual-composite",
+        "group_id": "contract-group",
+        "rule_name": "Composite pair compare",
+        "target_variable_tag": "[items-source-items-composite-a]",
+        "display_field": "Name",
+        "rule_type": "dual_composite_compare",
+        "reference_variable_tag": "[items-source-items-composite-b]",
+        "key_check_mode": "bidirectional",
+        "left_key_field": "ID",
+        "right_key_field": "ID",
+        "comparisons": [
+          {
+            "comparison_id": "dual-name-eq",
+            "left_field": "Name",
+            "operator": "eq",
+            "right_field": "Name"
+          }
+        ],
+        "left_filters": [
+          {
+            "condition_id": "dual-left-id",
+            "field": "ID",
+            "operator": "gt",
+            "value_source": "literal",
+            "expected_value": "0"
+          }
+        ],
+        "right_filters": [
+          {
+            "condition_id": "dual-right-name",
+            "field": "Name",
+            "operator": "not_null"
+          }
+        ]
+      },
+      {
+        "rule_id": "contract-pipeline",
+        "group_id": "contract-group",
+        "rule_name": "Pipeline nodes",
+        "target_variable_tag": "",
+        "display_field": null,
+        "rule_type": "multi_composite_pipeline_check",
+        "pipeline_config": {
+          "nodes": [
+            {
+              "node_id": "pipeline-node-a",
+              "variable_tag": "[items-source-items-composite-a]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "pipeline-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0"
+                }
+              ],
+              "assertions": [
+                {
+                  "condition_id": "pipeline-assert-name",
+                  "field": "Name",
+                  "operator": "not_null"
+                }
+              ]
+            },
+            {
+              "node_id": "pipeline-node-b",
+              "variable_tag": "[items-source-items-composite-b]",
+              "display_field": "Name",
+              "filters": [],
+              "assertions": [
+                {
+                  "condition_id": "pipeline-assert-regex",
+                  "field": "Name",
+                  "operator": "regex",
+                  "expected_value": "^[A-Za-z]+$"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "rule_id": "contract-mapping",
+        "group_id": "contract-group",
+        "rule_name": "Mapping nodes",
+        "target_variable_tag": "",
+        "display_field": null,
+        "rule_type": "multi_composite_mapping_check",
+        "mapping_config": {
+          "nodes": [
+            {
+              "node_id": "mapping-node-a",
+              "variable_tag": "[items-source-items-composite-a]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "mapping-filter-name",
+                  "field": "Name",
+                  "operator": "eq",
+                  "value_source": "literal",
+                  "expected_value": "Sword",
+                  "exclusion_ranges": [
+                    {
+                      "range_id": "mapping-range-a",
+                      "start_row": 5,
+                      "end_row": 7,
+                      "expected_value": "Sword"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "node_id": "mapping-node-b",
+              "variable_tag": "[items-source-items-composite-b]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "mapping-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0",
+                  "exclusion_ranges": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "local_path_replacement_presets": [],
+    "selected_local_path_replacement_preset": null,
+    "svn_path_replacement_presets": [],
+    "selected_svn_path_replacement_preset": null
+  },
+  "expected_task_tree_variable_tags": [
+    "[items-source-items-ID]",
+    "[items-source-items-Name]",
+    "[items-source-drops-RefID]",
+    "[items-source-items-composite-a]",
+    "[items-source-items-composite-b]"
+  ],
+  "expected_validation_rules": [
+    {
+      "rule_id": "contract-not-null",
+      "rule_type": "not_null",
+      "params": {
+        "target_tags": ["[items-source-items-ID]"],
+        "rule_name": "ID is required",
+        "location": "items -> ID",
+        "display_field": "ID"
+      }
+    },
+    {
+      "rule_id": "contract-unique",
+      "rule_type": "unique",
+      "params": {
+        "target_tags": ["[items-source-items-Name]"],
+        "rule_name": "Name is unique",
+        "location": "items -> Name",
+        "display_field": "Name"
+      }
+    },
+    {
+      "rule_id": "contract-fixed-value",
+      "rule_type": "fixed_value_compare",
+      "params": {
+        "target_tag": "[items-source-items-ID]",
+        "operator": "gt",
+        "expected_value": "0",
+        "expected_value_mode": null,
+        "rule_name": "ID is greater than zero",
+        "location": "items -> ID",
+        "display_field": "ID"
+      }
+    },
+    {
+      "rule_id": "contract-regex",
+      "rule_type": "regex_check",
+      "params": {
+        "target_tag": "[items-source-items-Name]",
+        "pattern": "^[A-Za-z]+$",
+        "rule_name": "Name contains letters",
+        "location": "items -> Name",
+        "display_field": "Name"
+      }
+    },
+    {
+      "rule_id": "contract-sequence",
+      "rule_type": "sequence_order_check",
+      "params": {
+        "target_tag": "[items-source-items-ID]",
+        "direction": "asc",
+        "step": "1",
+        "start_mode": "manual",
+        "start_value": "1",
+        "rule_name": "ID sequence asc",
+        "location": "items -> ID",
+        "display_field": "ID"
+      }
+    },
+    {
+      "rule_id": "contract-cross-table",
+      "rule_type": "cross_table_mapping",
+      "params": {
+        "dict_tag": "[items-source-drops-RefID]",
+        "target_tag": "[items-source-items-ID]",
+        "rule_name": "ID exists in drops",
+        "location": "items -> ID",
+        "display_field": "ID"
+      }
+    },
+    {
+      "rule_id": "contract-composite-condition",
+      "rule_type": "composite_condition_check",
+      "params": {
+        "target_tag": "[items-source-items-composite-a]",
+        "rule_name": "Composite branch rule",
+        "display_field": "Name",
+        "composite_config": {
+          "global_filters": [
+            {
+              "condition_id": "cc-global-name",
+              "field": "Name",
+              "operator": "contains",
+              "value_source": "literal",
+              "expected_value": "A"
+            }
+          ],
+          "branches": [
+            {
+              "branch_id": "cc-branch-main",
+              "filters": [
+                {
+                  "condition_id": "cc-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0"
+                }
+              ],
+              "assertions": [
+                {
+                  "condition_id": "cc-assert-name",
+                  "field": "Name",
+                  "operator": "regex",
+                  "expected_value": "^[A-Za-z]+$"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "rule_id": "contract-dual-composite",
+      "rule_type": "dual_composite_compare",
+      "params": {
+        "target_tag": "[items-source-items-composite-a]",
+        "reference_tag": "[items-source-items-composite-b]",
+        "key_check_mode": "bidirectional",
+        "left_key_field": "ID",
+        "right_key_field": "ID",
+        "display_field": "Name",
+        "comparisons": [
+          {
+            "comparison_id": "dual-name-eq",
+            "left_field": "Name",
+            "operator": "eq",
+            "right_field": "Name"
+          }
+        ],
+        "left_filters": [
+          {
+            "condition_id": "dual-left-id",
+            "field": "ID",
+            "operator": "gt",
+            "value_source": "literal",
+            "expected_value": "0"
+          }
+        ],
+        "right_filters": [
+          {
+            "condition_id": "dual-right-name",
+            "field": "Name",
+            "operator": "not_null"
+          }
+        ],
+        "rule_name": "Composite pair compare"
+      }
+    },
+    {
+      "rule_id": "contract-pipeline",
+      "rule_type": "multi_composite_pipeline_check",
+      "params": {
+        "target_tag": "[items-source-items-composite-a]",
+        "rule_name": "Pipeline nodes",
+        "display_field": null,
+        "pipeline_config": {
+          "nodes": [
+            {
+              "node_id": "pipeline-node-a",
+              "variable_tag": "[items-source-items-composite-a]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "pipeline-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0"
+                }
+              ],
+              "assertions": [
+                {
+                  "condition_id": "pipeline-assert-name",
+                  "field": "Name",
+                  "operator": "not_null"
+                }
+              ]
+            },
+            {
+              "node_id": "pipeline-node-b",
+              "variable_tag": "[items-source-items-composite-b]",
+              "display_field": "Name",
+              "filters": [],
+              "assertions": [
+                {
+                  "condition_id": "pipeline-assert-regex",
+                  "field": "Name",
+                  "operator": "regex",
+                  "expected_value": "^[A-Za-z]+$"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "rule_id": "contract-mapping",
+      "rule_type": "multi_composite_mapping_check",
+      "params": {
+        "target_tag": "[items-source-items-composite-a]",
+        "rule_name": "Mapping nodes",
+        "display_field": null,
+        "mapping_config": {
+          "nodes": [
+            {
+              "node_id": "mapping-node-a",
+              "variable_tag": "[items-source-items-composite-a]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "mapping-filter-name",
+                  "field": "Name",
+                  "operator": "eq",
+                  "value_source": "literal",
+                  "expected_value": "Sword",
+                  "exclusion_ranges": [
+                    {
+                      "range_id": "mapping-range-a",
+                      "start_row": 5,
+                      "end_row": 7,
+                      "expected_value": "Sword"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "node_id": "mapping-node-b",
+              "variable_tag": "[items-source-items-composite-b]",
+              "display_field": "Name",
+              "filters": [
+                {
+                  "condition_id": "mapping-filter-id",
+                  "field": "ID",
+                  "operator": "gt",
+                  "value_source": "literal",
+                  "expected_value": "0",
+                  "exclusion_ranges": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

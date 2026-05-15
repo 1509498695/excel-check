@@ -1,0 +1,347 @@
+/* ================ Project Check Page polish（项目校验页与个人校验页视觉对齐） ================ */
+.project-check-page {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(246, 248, 252, 0.96)),
+    var(--color-bg-page);
+}
+
+.project-check-page .ui-page-header {
+  border-bottom-color: rgba(229, 234, 243, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 248, 252, 0.72)),
+    var(--color-bg-page);
+  padding-top: 22px;
+  padding-bottom: 18px;
+}
+
+.project-check-page .ui-page-header__breadcrumb {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.project-check-page .ui-page-header__title {
+  margin-top: 7px;
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.project-check-content {
+  gap: 14px !important;
+  padding-top: 16px !important;
+}
+
+.project-stepper-card {
+  border-radius: 18px;
+}
+
+.project-stepper {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 76px;
+  padding: 18px 28px;
+}
+
+.project-stepper__item {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.project-stepper__badge {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8e1ee;
+  border-radius: 999px;
+  color: #64748b;
+  background: #f8fafc;
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 800;
+  transition:
+    color 160ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.project-stepper__copy {
+  min-width: 0;
+}
+
+.project-stepper__title {
+  color: var(--color-text-main);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.project-stepper__description {
+  overflow: hidden;
+  max-width: 210px;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-stepper__line {
+  height: 2px;
+  min-width: 56px;
+  flex: 1 1 auto;
+  border-radius: 999px;
+  background: #d8e1ee;
+}
+
+.project-stepper__item--done .project-stepper__badge {
+  color: #ffffff;
+  border-color: var(--color-success);
+  background: linear-gradient(180deg, #18c477, var(--color-success));
+  box-shadow: 0 8px 18px rgba(18, 183, 106, 0.18);
+}
+
+.project-stepper__line--done {
+  background: var(--color-success);
+}
+
+.project-stepper__item--active .project-stepper__badge {
+  color: #ffffff;
+  border-color: var(--color-primary);
+  background: linear-gradient(180deg, #1b6dff, var(--color-primary));
+  box-shadow: 0 10px 20px rgba(15, 98, 254, 0.24);
+}
+
+.project-stepper__item--active .project-stepper__description {
+  color: var(--color-primary-hover);
+}
+
+.project-stepper__item--pending .project-stepper__badge {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.project-check-page .ui-metric-card {
+  min-height: 128px;
+  padding: 24px 26px;
+}
+
+.project-check-page .ui-metric-card__icon {
+  width: 62px;
+  height: 62px;
+}
+
+.project-check-page .ui-metric-card__icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.project-check-page .ui-metric-card__label {
+  font-size: 14px;
+}
+
+.project-check-page .ui-metric-card__value {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  font-size: 34px;
+}
+
+.project-check-page .ui-collapsible-section {
+  border-radius: 18px;
+}
+
+.project-check-page .ui-collapsible-section.is-active {
+  border-color: var(--color-border);
+}
+
+.project-check-page .ui-collapsible-section.is-active .ui-collapsible-section__inner {
+  box-shadow: none;
+}
+
+.project-check-page .ui-collapsible-section__inner {
+  padding: 18px 18px 16px;
+}
+
+.project-check-page .workbench-section-head {
+  align-items: flex-start;
+  min-height: 48px;
+}
+
+.project-check-page .workbench-section-head__index {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.project-check-page .workbench-section-head__title {
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.project-check-page .workbench-section-head__description {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.project-check-page .workbench-section-head__actions,
+.project-check-page .workbench-section-toolbar__actions {
+  gap: 12px;
+}
+
+.project-check-page .ec-btn-text-collapse {
+  min-height: 36px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.project-check-page .panel-stack,
+.project-check-page .variable-layout,
+.project-check-page .variable-config-panel,
+.project-check-page .variable-summary-panel {
+  min-width: 0;
+}
+
+.project-check-page .workbench-table.el-table {
+  border-radius: 12px !important;
+  border-color: var(--color-border) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.project-check-page .workbench-table th.el-table__cell {
+  height: 44px;
+  background: #f6f8fc !important;
+  color: #64748b !important;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.project-check-page .workbench-table td.el-table__cell {
+  height: 48px;
+  color: var(--color-text-secondary) !important;
+  font-size: 13px;
+}
+
+.project-check-page .workbench-table .el-table__empty-block {
+  min-height: 58px;
+}
+
+.project-check-page .mono-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 2px 8px;
+}
+
+.project-check-page .tag-button {
+  color: var(--color-primary-hover);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.project-check-page .tag-button:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.project-check-page .el-tag {
+  min-height: 22px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.project-check-page .table-actions {
+  gap: 14px;
+}
+
+.project-check-page .workbench-rule-shell {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.project-check-page .workbench-rule-layout {
+  min-height: 174px;
+}
+
+.project-check-page .workbench-rule-sidebar {
+  width: 260px;
+  border-right: 1px solid var(--color-border);
+  background: #fbfcff;
+}
+
+.project-check-page .workbench-rule-sidebar-toolbar {
+  gap: 10px;
+  padding: 12px;
+}
+
+.project-check-page .workbench-rule-menu {
+  padding: 0 12px 12px;
+}
+
+.project-check-page .workbench-rule-menu-item {
+  min-height: 38px;
+  border-radius: 8px;
+}
+
+.project-check-page .workbench-rule-main {
+  background: #ffffff;
+}
+
+.project-check-page .workbench-rule-header {
+  min-height: 58px;
+  border-bottom: 1px solid var(--color-border-light);
+  padding: 12px 16px;
+}
+
+.project-check-page .workbench-rule-empty {
+  min-height: 132px;
+}
+
+.project-check-page .ui-data-table {
+  border-radius: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  box-shadow: none;
+}
+
+@media (min-width: 1920px) {
+  .project-check-content {
+    gap: 16px !important;
+    padding-top: 18px !important;
+  }
+
+  .project-stepper {
+    min-height: 78px;
+    padding-right: 34px;
+    padding-left: 34px;
+  }
+
+  .project-check-page .ui-collapsible-section__inner {
+    padding: 20px;
+  }
+}

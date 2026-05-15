@@ -48,7 +48,6 @@ import {
   UNGROUPED_GROUP,
 } from '../utils/ruleOrchestrationModel'
 import { buildTaskTreePayload } from '../utils/taskTree'
-import { getFixedRuleDuplicateSet } from '../utils/ruleFingerprint'
 import {
   extractSourceBasename,
   getSourceLocator,
@@ -62,7 +61,13 @@ import {
 } from '../utils/sourcePathReplacement'
 import { saveApiFile } from '../utils/download'
 import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
+import {
+  buildAiDraftPreviewTaskTreePayload,
+  getAiDraftRulesToApply,
+} from '../utils/aiDraftWorkflow'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
+
+type AutoSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
 
 interface WorkbenchState {
   sources: DataSource[]
@@ -95,6 +100,16 @@ interface WorkbenchState {
   selectedLocalPathReplacementPreset: string | null
   svnPathReplacementPresets: string[]
   selectedSvnPathReplacementPreset: string | null
+  autoSaveStatus: AutoSaveStatus
+  autoSaveError: string
+  autoSaveSavedAt: number | null
+}
+
+function formatAutoSaveError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  return '自动保存失败，请稍后重试。'
 }
 
 function createWorkbenchDemoRules(): FixedRuleDefinition[] {
@@ -356,6 +371,9 @@ export const useWorkbenchStore = defineStore('workbench', {
     selectedLocalPathReplacementPreset: null,
     svnPathReplacementPresets: [],
     selectedSvnPathReplacementPreset: null,
+    autoSaveStatus: 'idle',
+    autoSaveError: '',
+    autoSaveSavedAt: null,
   }),
 
   getters: {
@@ -1255,12 +1273,33 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     async saveConfigNow(): Promise<void> {
-      await saveWorkbenchConfig(this._getAutoSavePayload())
+      const runId = ((this as any)._autoSaveRunId ?? 0) + 1
+      ;(this as any)._autoSaveRunId = runId
+      this.autoSaveStatus = 'saving'
+      this.autoSaveError = ''
+
+      try {
+        await saveWorkbenchConfig(this._getAutoSavePayload())
+        if ((this as any)._autoSaveRunId === runId) {
+          this.autoSaveStatus = 'saved'
+          this.autoSaveError = ''
+          this.autoSaveSavedAt = Date.now()
+        }
+      } catch (error) {
+        if ((this as any)._autoSaveRunId === runId) {
+          this.autoSaveStatus = 'failed'
+          this.autoSaveError = formatAutoSaveError(error)
+        }
+        throw error
+      }
+    },
+
+    async retryAutoSave(): Promise<void> {
+      await this.saveConfigNow()
     },
 
     async applyAiRuleDraft(draft: AiRuleDraftPayload): Promise<string[]> {
-      const duplicateIds = getFixedRuleDuplicateSet(this.orchestrationRules, draft.rules_to_add)
-      const rulesToApply = draft.rules_to_add.filter((rule) => !duplicateIds.has(rule.rule_id))
+      const rulesToApply = getAiDraftRulesToApply(this.orchestrationRules, draft.rules_to_add)
       if (!rulesToApply.length) {
         throw new Error('规则已存在，无需重复添加。')
       }
@@ -1283,60 +1322,10 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     async previewAiRuleDraft(draft: AiRuleDraftPayload): Promise<ExecuteResponse> {
-      const combinedSources = this.sources.map((source) => ({ ...source }))
-      const combinedVariables = this.variables.map((variable) => ({ ...variable }))
-
-      draft.sources_to_add.forEach((source) => {
-        const index = combinedSources.findIndex((item) => item.id === source.id)
-        const nextSource = { ...source }
-        if (index >= 0) {
-          combinedSources.splice(index, 1, { ...combinedSources[index], ...nextSource })
-        } else {
-          combinedSources.push(nextSource)
-        }
-      })
-
-      draft.variables_to_add.forEach((variable) => {
-        const index = combinedVariables.findIndex((item) => item.tag === variable.tag)
-        const nextVariable = { ...variable }
-        if (index >= 0) {
-          combinedVariables.splice(index, 1, { ...combinedVariables[index], ...nextVariable })
-        } else {
-          combinedVariables.push(nextVariable)
-        }
-      })
-
-      const requiredTags = new Set<string>()
-      draft.rules_to_add.forEach((rule) => {
-        if (rule.target_variable_tag?.trim()) {
-          requiredTags.add(rule.target_variable_tag.trim())
-        }
-        if (rule.reference_variable_tag?.trim()) {
-          requiredTags.add(rule.reference_variable_tag.trim())
-        }
-        rule.pipeline_config?.nodes.forEach((node) => {
-          if (node.variable_tag.trim()) {
-            requiredTags.add(node.variable_tag.trim())
-          }
-        })
-        rule.mapping_config?.nodes.forEach((node) => {
-          if (node.variable_tag.trim()) {
-            requiredTags.add(node.variable_tag.trim())
-          }
-        })
-      })
-
-      const previewVariables = combinedVariables.filter((variable) => requiredTags.has(variable.tag))
-      const requiredSourceIds = new Set(previewVariables.map((variable) => variable.source_id))
-      const previewSources = combinedSources.filter((source) => requiredSourceIds.has(source.id))
-      const previewRuleIds = draft.rules_to_add.map((rule) => rule.rule_id).filter(Boolean)
-      const validationRules = orchestrationRulesToValidationRules(previewVariables, draft.rules_to_add)
-      const payload = buildTaskTreePayload(
-        previewSources,
-        previewVariables,
-        validationRules,
-        previewRuleIds,
-        1,
+      const payload = buildAiDraftPreviewTaskTreePayload(
+        this.sources,
+        this.variables,
+        draft,
         this.resultPageSize,
       )
       return executeTaskTree(payload)
@@ -1537,9 +1526,14 @@ export const useWorkbenchStore = defineStore('workbench', {
       if ((this as any)._autoSaveTimer) {
         clearTimeout((this as any)._autoSaveTimer)
       }
-      (this as any)._autoSaveTimer = setTimeout(() => {
-        saveWorkbenchConfig(this._getAutoSavePayload()).catch(() => {
-          /* 静默失败 */
+      if (this.autoSaveStatus !== 'saving') {
+        this.autoSaveStatus = 'idle'
+      }
+      this.autoSaveError = ''
+      ;(this as any)._autoSaveTimer = setTimeout(() => {
+        ;(this as any)._autoSaveTimer = null
+        this.saveConfigNow().catch(() => {
+          // 自动保存失败已记录到状态中，页面用非阻断提示展示。
         })
       }, 2000)
     },
@@ -1576,6 +1570,9 @@ export const useWorkbenchStore = defineStore('workbench', {
         this.selectedLocalPathReplacementPreset = null
         this.svnPathReplacementPresets = []
         this.selectedSvnPathReplacementPreset = null
+        this.autoSaveStatus = 'idle'
+        this.autoSaveError = ''
+        this.autoSaveSavedAt = null
 
         if (data && typeof data === 'object') {
           if (Array.isArray(data.sources)) this.sources = data.sources as DataSource[]

@@ -24,9 +24,9 @@ async function handleLogin(): Promise<void> {
   try {
     // 保留原有业务逻辑：登录继续调用原 auth store 鉴权链路。
     await auth.login(username.value.trim(), password.value)
-    ElMessage.success('登录成功')
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-    router.push(redirect.startsWith('/') ? redirect : '/')
+    await router.replace(redirect.startsWith('/') ? redirect : '/')
+    ElMessage.success('登录成功')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '登录失败')
   } finally {

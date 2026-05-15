@@ -72,7 +72,8 @@
 | [utils/workbenchMeta.ts](../frontend/src/utils/workbenchMeta.ts) | 个人校验元数据辅助（来源类型、规则类型、列预览限制等）。 |
 | [router/index.ts](../frontend/src/router/index.ts) | vue-router：路由表与全局认证守卫。 |
 | [App.vue](../frontend/src/App.vue) | 应用壳：左固定边栏 + 右独立滚动工作区；项目卡 + 用户菜单。 |
-| [style.css](../frontend/src/style.css) | 全局 token、Element Plus 校准、共享 utility class（`ec-btn-*` / `workbench-*` / `table-actions` 等）。 |
+| [style.css](../frontend/src/style.css) | Tailwind 指令入口；具体全局样式由 `main.ts` 按顺序导入 `styles/*.css`。 |
+| [styles/](../frontend/src/styles/) | 全局样式模块：`shared` 承载 token / Element Plus / `ec-*` / `ui-*`，`workbench` 承载通用工作台样式，`personal-check` / `fixed-rules` / `admin` / `profile` / `auth` / `user-guide` / `ai-rule` 按页面或域拆分；`shared-overrides` 与 `shared-final` 保留原全局覆盖层的 cascade 位置。 |
 
 ## 三、后端目录（`backend`）
 

@@ -16,7 +16,7 @@ import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
 import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SecondaryButton from '../components/shell/SecondaryButton.vue'
-import type { StatusBadgeType } from '../components/shell'
+import { StatusBadge, type StatusBadgeType } from '../components/shell'
 import { useWorkbenchStore } from '../store/workbench'
 import type { ExpectedType, SourceType } from '../types/workbench'
 
@@ -159,6 +159,32 @@ function getStatusBadgeType(tone: StatTone): StatusBadgeType {
   if (tone === 'error') return 'danger'
   return 'neutral'
 }
+
+function formatAutoSaveTime(savedAt: number | null): string {
+  if (!savedAt) {
+    return ''
+  }
+  return new Date(savedAt).toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+const autoSaveStatusMeta = computed<{ label: string; type: StatusBadgeType }>(() => {
+  if (store.autoSaveStatus === 'saving') {
+    return { label: '保存中', type: 'pending' }
+  }
+  if (store.autoSaveStatus === 'saved') {
+    const savedTime = formatAutoSaveTime(store.autoSaveSavedAt)
+    return { label: savedTime ? `已保存 ${savedTime}` : '已保存', type: 'success' }
+  }
+  if (store.autoSaveStatus === 'failed') {
+    return { label: '保存失败', type: 'danger' }
+  }
+  return { label: '自动保存待命', type: 'neutral' }
+})
 
 function getMetricIconTone(index: number): (typeof metricIconTones)[number] {
   return metricIconTones[index] ?? 'primary'
@@ -375,6 +401,15 @@ async function handleSvnUpdate(): Promise<void> {
   }
 }
 
+async function retryAutoSave(): Promise<void> {
+  try {
+    await store.retryAutoSave()
+    ElMessage.success('配置已保存。')
+  } catch {
+    ElMessage.warning('自动保存仍失败，请稍后重试。')
+  }
+}
+
 function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
 }
@@ -541,6 +576,7 @@ function openRuleImportDrawer(): void {
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
     <PageHeader breadcrumb="主页 / 个人校验" title="配置表个人校验">
       <template #actions>
+        <StatusBadge :type="autoSaveStatusMeta.type" :label="autoSaveStatusMeta.label" />
         <SecondaryButton
           :disabled="store.isUpdatingSvn || !store.canRunSvnUpdate"
           @click="handleSvnUpdate"
@@ -579,6 +615,17 @@ function openRuleImportDrawer(): void {
         </SecondaryButton>
       </template>
     </PageHeader>
+
+    <div
+      v-if="store.autoSaveStatus === 'failed'"
+      class="mx-8 mt-4 flex flex-col gap-3 rounded-field border border-danger/40 bg-danger-soft/40 px-4 py-3 text-[13px] text-danger sm:flex-row sm:items-center sm:justify-between"
+      role="status"
+    >
+      <span>{{ store.autoSaveError || '自动保存失败，当前修改可能尚未保存。' }}</span>
+      <SecondaryButton size="sm" @click="retryAutoSave">
+        重试保存
+      </SecondaryButton>
+    </div>
 
     <!-- 主滚动区 -->
     <div class="personal-check-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
