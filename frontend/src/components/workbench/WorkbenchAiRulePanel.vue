@@ -8,6 +8,7 @@ import AiRuleResultList from './AiRuleResultList.vue'
 import DraftHistoryPanel from './DraftHistoryPanel.vue'
 import PendingConfigPreview from './PendingConfigPreview.vue'
 import SmartRuleInputCard from './SmartRuleInputCard.vue'
+import WorkbenchRuleConfigPreview from './WorkbenchRuleConfigPreview.vue'
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
 import { useAiDraftApply } from './ai/composables/useAiDraftApply'
@@ -25,7 +26,7 @@ import type {
   AiRuleWorkflowHints,
 } from '../../types/ai'
 import type { FixedRuleDefinition } from '../../types/fixedRules'
-import type { VariableTag } from '../../types/workbench'
+import type { DataSource, VariableTag } from '../../types/workbench'
 import {
   buildPendingConfigPreview,
   getAiRuleTypeLabel,
@@ -501,12 +502,32 @@ const canRegenerateWithPreviewAdvice = computed(
     !isAutoCompletingAndApplying.value &&
     !isRegeneratingWithPreviewAdvice.value,
 )
+const configDrawerVariables = computed(() => {
+  const variablesByTag = new Map<string, VariableTag>()
+  workbenchStore.variables.forEach((variable) => variablesByTag.set(variable.tag, variable))
+  currentDraft.value?.draft.variables_to_add.forEach((variable) => {
+    if (!variablesByTag.has(variable.tag)) {
+      variablesByTag.set(variable.tag, variable)
+    }
+  })
+  return [...variablesByTag.values()]
+})
+const configDrawerSources = computed(() => {
+  const sourcesById = new Map<string, DataSource>()
+  workbenchStore.sources.forEach((source) => sourcesById.set(source.id, source))
+  currentDraft.value?.draft.sources_to_add.forEach((source) => {
+    if (!sourcesById.has(source.id)) {
+      sourcesById.set(source.id, source)
+    }
+  })
+  return [...sourcesById.values()]
+})
 const configDrawerPayload = computed(() => {
   const rule = configDrawerItem.value?.rule
   if (!rule || !currentDraft.value) return ''
-  const variables = collectVariablesForRule(rule, currentDraft.value.draft)
+  const variables = collectVariablesForRule(rule, configDrawerVariables.value)
   const sourceIds = new Set(variables.map((variable) => variable.source_id))
-  const sources = currentDraft.value.draft.sources_to_add.filter((source) => sourceIds.has(source.id))
+  const sources = configDrawerSources.value.filter((source) => sourceIds.has(source.id))
   return JSON.stringify({ sources, variables, rule }, null, 2)
 })
 
@@ -894,7 +915,7 @@ function cloneRule(rule: FixedRuleDefinition): FixedRuleDefinition {
   return JSON.parse(JSON.stringify(rule)) as FixedRuleDefinition
 }
 
-function collectVariablesForRule(rule: FixedRuleDefinition, draft: AiRuleDraftPayload): VariableTag[] {
+function collectVariablesForRule(rule: FixedRuleDefinition, variables: VariableTag[]): VariableTag[] {
   const tags = new Set<string>()
   if (rule.target_variable_tag?.trim()) tags.add(rule.target_variable_tag.trim())
   if (rule.reference_variable_tag?.trim()) tags.add(rule.reference_variable_tag.trim())
@@ -904,7 +925,7 @@ function collectVariablesForRule(rule: FixedRuleDefinition, draft: AiRuleDraftPa
   rule.mapping_config?.nodes.forEach((node) => {
     if (node.variable_tag.trim()) tags.add(node.variable_tag.trim())
   })
-  return draft.variables_to_add.filter((variable) => tags.has(variable.tag))
+  return variables.filter((variable) => tags.has(variable.tag))
 }
 
 function buildDraftPayloadForWorkflow(
@@ -1537,13 +1558,19 @@ function formatValue(value: unknown): string {
       @delete="deleteHistoryDraft"
     />
 
-    <el-drawer v-model="configDrawerVisible" title="规则配置详情" size="520px">
-      <div v-if="configDrawerItem" class="smart-rule-config-drawer">
-        <div class="smart-rule-config-drawer__summary">
-          <h3>{{ configDrawerItem.title }}</h3>
-          <p>{{ getAiRuleTypeLabel(configDrawerItem.rule?.rule_type) }}</p>
-        </div>
-        <pre>{{ configDrawerPayload }}</pre>
+    <el-drawer v-model="configDrawerVisible" title="规则配置详情" size="760px">
+      <div v-if="configDrawerItem?.rule" class="smart-rule-config-drawer">
+        <WorkbenchRuleConfigPreview
+          :rule="configDrawerItem.rule"
+          :variables="configDrawerVariables"
+          :sources="configDrawerSources"
+          :groups="applyGroupOptions"
+        />
+        <el-collapse class="mt-5">
+          <el-collapse-item title="查看 JSON" name="json">
+            <pre class="rounded-field bg-subtle p-3 text-[12px] leading-6 text-ink-700">{{ configDrawerPayload }}</pre>
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </el-drawer>
   </div>
