@@ -1,0 +1,98 @@
+{
+  "draft": {
+    "reuse_variable_tags": [
+      "bpcherks"
+    ],
+    "rules_to_add": [
+      {
+        "binding": null,
+        "comparisons": [
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_FreeRewardSubType",
+            "operator": "eq",
+            "right_field": "INT_FreeRewardSubType"
+          },
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_FreeRewardValue",
+            "operator": "eq",
+            "right_field": "INT_FreeRewardValue"
+          },
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_PayRewardSubType1",
+            "operator": "eq",
+            "right_field": "INT_PayRewardSubType1"
+          },
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_PayRewardValue1",
+            "operator": "eq",
+            "right_field": "INT_PayRewardValue1"
+          },
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_PayRewardSubType2",
+            "operator": "eq",
+            "right_field": "INT_PayRewardSubType2"
+          },
+          {
+            "comparison_id": "<dynamic>",
+            "left_field": "INT_PayRewardValue2",
+            "operator": "eq",
+            "right_field": "INT_PayRewardValue2"
+          }
+        ],
+        "composite_config": null,
+        "display_field": null,
+        "expected_value": null,
+        "expected_value_mode": null,
+        "group_id": "ungrouped",
+        "key_check_mode": "baseline_only",
+        "left_filters": [
+          {
+            "condition_id": "<dynamic>",
+            "expected_field": null,
+            "expected_value": "1012",
+            "expected_value_mode": null,
+            "field": "INT_Index",
+            "operator": "eq",
+            "value_source": "literal"
+          }
+        ],
+        "left_key_field": "INT_Level",
+        "mapping_config": null,
+        "operator": null,
+        "pipeline_config": null,
+        "reference_variable_tag": "bpcherks",
+        "right_filters": [
+          {
+            "condition_id": "<dynamic>",
+            "expected_field": null,
+            "expected_value": "1010",
+            "expected_value_mode": null,
+            "field": "INT_Index",
+            "operator": "eq",
+            "value_source": "literal"
+          }
+        ],
+        "right_key_field": "INT_Level",
+        "rule_id": "<dynamic>",
+        "rule_name": "level_reward-INT_Level-两组配置比对",
+        "rule_type": "dual_composite_compare",
+        "sequence_direction": null,
+        "sequence_start_mode": null,
+        "sequence_start_value": null,
+        "sequence_step": null,
+        "target_variable_tag": "bpcherks"
+      }
+    ],
+    "sources_to_add": [],
+    "variables_to_add": []
+  },
+  "missing": [],
+  "rejection_reason": null,
+  "rule_type": "dual_composite_compare",
+  "verdict": "ready"
+}

@@ -23,6 +23,7 @@ import type {
 } from '../types/ai'
 import {
   createDefaultAiRuleInputDraftState,
+  createDefaultGroupedSmartRuleWorkflowHintsState,
   createDefaultSmartRuleWorkflowHintsState,
   type AiRuleInputDraftState,
 } from '../utils/aiRuleInputDraft'
@@ -184,6 +185,10 @@ export const useAiStore = defineStore('ai', {
       Object.assign(
         this.smartRuleInputDraft.workflowHints,
         createDefaultSmartRuleWorkflowHintsState(),
+      )
+      Object.assign(
+        this.smartRuleInputDraft.workflowHintGroups,
+        createDefaultGroupedSmartRuleWorkflowHintsState(),
       )
       this.smartRuleInputDraft.templateWorkflowHints = nextDraft.templateWorkflowHints
     },

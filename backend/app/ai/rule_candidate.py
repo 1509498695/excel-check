@@ -11,7 +11,7 @@ import re
 from typing import Literal
 
 from backend.app.ai.hint_extractor import extract_workflow_hints_from_text
-from backend.app.ai.schemas import AiRuleWorkflowHints, MissingItem
+from backend.app.ai.workflow_hints import AiRuleWorkflowHints, MissingItem, has_complete_dual_hints
 from backend.app.api.fixed_rules_schemas import FixedRuleType
 
 
@@ -604,7 +604,7 @@ def _merge_hints(base: AiRuleWorkflowHints, override: AiRuleWorkflowHints) -> Ai
             key == "rule_type_hint"
             and base_value == "fixed_value_compare"
             and value == "dual_composite_compare"
-            and _has_complete_dual_hints(override)
+            and has_complete_dual_hints(override)
         ):
             updates[key] = value
         elif value not in ("", None) and not base_value:
@@ -614,17 +614,6 @@ def _merge_hints(base: AiRuleWorkflowHints, override: AiRuleWorkflowHints) -> Ai
     payload = base.model_dump()
     payload.update(updates)
     return AiRuleWorkflowHints.model_validate(payload)
-
-
-def _has_complete_dual_hints(hints: AiRuleWorkflowHints) -> bool:
-    return bool(
-        hints.left_filter_field
-        and hints.left_filter_value
-        and hints.right_filter_field
-        and hints.right_filter_value
-        and (hints.key_column or hints.left_key_field or hints.right_key_field)
-        and hints.compare_fields
-    )
 
 
 def _has_explicit_rule_type_signal(text: str, rule_type: str) -> bool:

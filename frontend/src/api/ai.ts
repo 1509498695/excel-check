@@ -59,6 +59,15 @@ export async function optimizeRulePrompt(
   })
 }
 
+export async function dryRunRulePromptOptimize(
+  payload: RulePromptOptimizeRequest,
+): Promise<RulePromptOptimizeResponse> {
+  return apiFetch<RulePromptOptimizeResponse>('/api/v1/ai/agents/rule-prompt-optimize?dry_run=true', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function listAiDrafts(limit = 20): Promise<AiRuleDraftListResponse> {
   return apiFetch<AiRuleDraftListResponse>(`/api/v1/ai/drafts?limit=${limit}`)
 }

@@ -3,116 +3,33 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse
 
-from backend.app.ai.schemas import AiRuleFilterHint, AiRuleWorkflowHints
+from backend.app.ai.extractors.source import (
+    derive_source_id as _derive_source_id,
+    extract_source_url as _extract_source_url,
+    guess_source_type as _guess_source_type,
+)
+from backend.app.ai.extractors.value import (
+    extract_fixed_value_compare as _extract_fixed_value_compare,
+    extract_sequence as _extract_sequence,
+)
+from backend.app.ai.template.labels import (
+    RULE_TYPE_ALIASES,
+    SUPPORTED_RULE_TYPES,
+    TEMPLATE_LABELS,
+    TEMPLATE_PLACEHOLDERS,
+)
+from backend.app.ai.template.legacy_adapter import normalize_legacy_template_text
+from backend.app.ai.template.template_dsl import (
+    extract_template_sections,
+    normalize_inline_template_labels,
+    normalize_text,
+)
+from backend.app.ai.workflow_hints import AiRuleFilterHint, AiRuleWorkflowHints
 
 
 SERVER_CONFIG_PATTERN = r"^(?:(?:all|\d+(?:-\d+)?):[01](;(?:all|\d+(?:-\d+)?):[01])*)?$"
 FIELD_TOKEN_PATTERN = r"(?<![A-Za-z0-9_])[A-Z][A-Za-z0-9]*_[A-Za-z0-9_]+(?![A-Za-z0-9_])"
-SUPPORTED_RULE_TYPES = {
-    "not_null",
-    "unique",
-    "regex_check",
-    "sequence_order_check",
-    "fixed_value_compare",
-    "cross_table_mapping",
-    "composite_condition_check",
-    "dual_composite_compare",
-    "multi_composite_pipeline_check",
-    "multi_composite_mapping_check",
-}
-RULE_TYPE_ALIASES = {
-    "非空": "not_null",
-    "非空校验": "not_null",
-    "不能为空": "not_null",
-    "必填": "not_null",
-    "唯一": "unique",
-    "唯一校验": "unique",
-    "不能重复": "unique",
-    "不可重复": "unique",
-    "固定值": "fixed_value_compare",
-    "固定值比较": "fixed_value_compare",
-    "枚举": "fixed_value_compare",
-    "枚举校验": "fixed_value_compare",
-    "正则": "regex_check",
-    "正则校验": "regex_check",
-    "格式": "regex_check",
-    "格式校验": "regex_check",
-    "顺序": "sequence_order_check",
-    "顺序校验": "sequence_order_check",
-    "连续": "sequence_order_check",
-    "引用": "cross_table_mapping",
-    "引用存在": "cross_table_mapping",
-    "包含": "cross_table_mapping",
-    "包含(in)": "cross_table_mapping",
-    "字典": "cross_table_mapping",
-    "组合分支": "composite_condition_check",
-    "组合分支校验": "composite_condition_check",
-    "条件分支": "composite_condition_check",
-    "跨组变量": "dual_composite_compare",
-    "跨组变量校验": "dual_composite_compare",
-    "按key对比": "dual_composite_compare",
-    "双组合变量": "dual_composite_compare",
-    "多组串行": "multi_composite_pipeline_check",
-    "多组串行校验": "multi_composite_pipeline_check",
-    "多节点串行": "multi_composite_pipeline_check",
-    "多组映射": "multi_composite_mapping_check",
-    "多组映射校验": "multi_composite_mapping_check",
-    "多节点映射": "multi_composite_mapping_check",
-}
-TEMPLATE_LABELS = (
-    "数据源",
-    "配置表链接",
-    "配置表路径",
-    "sheet分页",
-    "Sheet分页",
-    "sheet",
-    "Sheet",
-    "变量选择",
-    "规则类型",
-    "rule_type",
-    "目标字段",
-    "目标",
-    "目标列名",
-    "校验字段",
-    "筛选条件",
-    "筛选",
-    "左侧筛选",
-    "右侧筛选",
-    "Key字段",
-    "Key 字段",
-    "Key值选择",
-    "Key选择",
-    "Key值",
-    "选择Key",
-    "Key",
-    "关联Key",
-    "引用对象",
-    "比较字段",
-    "筛选规则1",
-    "筛选规则2",
-    "校验规则",
-    "最终判定",
-    "校验判定",
-    "判定",
-    "断言",
-    "规则参数",
-    "规则是",
-    "补充说明",
-)
-TEMPLATE_PLACEHOLDERS = {
-    "配置表链接",
-    "sheet名",
-    "变量1,变量2",
-    "目标字段",
-    "从 not_null / unique / fixed_value_compare / regex_check / sequence_order_check / cross_table_mapping / composite_condition_check / dual_composite_compare / multi_composite_pipeline_check / multi_composite_mapping_check 中选择",
-    "字段或内容",
-    "全部数据 / 满足 xxx 的数据",
-    "字段名",
-    "不能为空 / 不能重复 / 只能是 A,B,C / 必须等于字段 X / 必须存在于引用表 / 匹配正则 xxx",
-    "可选，比如排序方向、正则、引用表、比较字段",
-}
 
 
 def _is_placeholder_key_column(value: str | None) -> bool:
@@ -138,8 +55,9 @@ def _is_placeholder_key_column(value: str | None) -> bool:
 
 def extract_workflow_hints_from_text(text: str) -> AiRuleWorkflowHints:
     """用确定性规则抽取常见导表规则描述中的数据源、Sheet、字段和组合变量线索。"""
-    normalized_text = _normalize_text(text)
-    template_sections = _extract_template_sections(text)
+    dsl_text = normalize_legacy_template_text(text)
+    normalized_text = _normalize_text(dsl_text)
+    template_sections = _extract_template_sections(dsl_text)
     natural_target_text = _extract_natural_target_text(normalized_text)
     natural_filter_text = _extract_natural_filter_text(normalized_text)
     natural_rule_text = _extract_natural_rule_text(normalized_text)
@@ -418,15 +336,7 @@ def extract_workflow_hints_from_text(text: str) -> AiRuleWorkflowHints:
 
 
 def _normalize_text(text: str) -> str:
-    return (
-        text.replace("\r", " ")
-        .replace("\n", " ")
-        .replace("“", '"')
-        .replace("”", '"')
-        .replace("‘", "'")
-        .replace("’", "'")
-        .strip()
-    )
+    return normalize_text(text)
 
 
 def _unwrap_natural_value(value: str | None) -> str | None:
@@ -471,11 +381,6 @@ def _extract_natural_key_column(text: str) -> str | None:
     return None if _is_placeholder_key_column(value) else value
 
 
-def _extract_source_url(text: str) -> str | None:
-    match = re.search(r"https?://[A-Za-z0-9_./:%?=&~#+-]+\.xls[xm]?", text, re.IGNORECASE)
-    return match.group(0) if match else None
-
-
 def _extract_source_value(text: str) -> str | None:
     return _extract_template_value(text, ("数据源", "配置表链接", "配置表路径"))
 
@@ -518,36 +423,12 @@ def _extract_template_value(text: str, labels: tuple[str, ...]) -> str | None:
 
 
 def _extract_template_sections(text: str) -> dict[str, str]:
-    text = _normalize_inline_template_labels(text)
-    label_pattern = "|".join(re.escape(label) for label in TEMPLATE_LABELS)
-    sections: dict[str, list[str]] = {}
-    current_label: str | None = None
-    for raw_line in text.replace("\r", "\n").split("\n"):
-        line = raw_line.strip()
-        if not line:
-            continue
-        match = re.match(rf"^({label_pattern})\s*[：:=]\s*(.*)$", line, re.IGNORECASE)
-        if match:
-            current_label = match.group(1)
-            sections.setdefault(current_label, []).append(match.group(2).strip())
-        elif current_label:
-            sections[current_label].append(line)
-    return {
-        label: re.sub(r"[；;。]$", "", "\n".join(value for value in values if value).strip())
-        for label, values in sections.items()
-        if any(value.strip() for value in values)
-    }
+    return extract_template_sections(text)
 
 
 def _normalize_inline_template_labels(text: str) -> str:
     """允许用户把短模板写成一行，用逗号隔开不同标签。"""
-    label_pattern = "|".join(re.escape(label) for label in TEMPLATE_LABELS)
-    return re.sub(
-        rf"([,，；;]\s*)({label_pattern})\s*[：:=]",
-        lambda match: f"\n{match.group(2)}：",
-        text,
-        flags=re.IGNORECASE,
-    )
+    return normalize_inline_template_labels(text)
 
 
 def _extract_rule_type_hint(sections: dict[str, str], text: str) -> str | None:
@@ -1268,33 +1149,6 @@ def _extract_compare_fields(
     return result
 
 
-def _extract_fixed_value_compare(text: str) -> tuple[str | None, str | None, str | None]:
-    if re.search(r"(?:等于\s*字段|必须\s*等于\s*字段)", text, re.IGNORECASE):
-        return None, None, None
-    if re.search(r"(不能为空|非空|必填|not\s*null|not_null)", text, re.IGNORECASE) and not re.search(
-        r"(期望值|比较值|固定值|只能是|必须是|等于|不等于|大于|小于|!=|>|<)",
-        text,
-        re.IGNORECASE,
-    ):
-        return None, None, None
-    patterns = [
-        (r"(?:期望值|比较值|固定值)\s*[：:=]\s*[\"']?([^\"'，。；;、\s]+)", "eq"),
-        (r"(?:只能是|必须是|等于|为|是)\s*[\"']?([^\"'，。；;、\s]+)", "eq"),
-        (r"(?:不等于|不能是|不可为|!=)\s*[\"']?([^\"'，。；;、\s]+)", "ne"),
-        (r"(?:大于|>)\s*[\"']?([^\"'，。；;、\s]+)", "gt"),
-        (r"(?:小于|<)\s*[\"']?([^\"'，。；;、\s]+)", "lt"),
-    ]
-    for pattern, operator in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            value = match.group(1).strip()
-            if _looks_like_meta_expected_value(value):
-                continue
-            mode = "set" if "," in value or "，" in value or "或" in value else "single"
-            return operator, value.replace("，", ","), mode
-    return None, None, None
-
-
 def _extract_dual_compare_operator(text: str) -> str | None:
     if re.search(r"(?:非空|不能为空|not\s*null|not_null)", text, re.IGNORECASE):
         return "not_null"
@@ -1369,27 +1223,6 @@ def _extract_multi_nodes(text: str, *, mode: str) -> list[dict[str, object]]:
     return nodes
 
 
-def _looks_like_meta_expected_value(value: str) -> bool:
-    return value.startswith(("更适合", "适合")) or value in {"AI", "ai", "解析"}
-
-
-def _extract_sequence(text: str) -> tuple[str | None, str | None, str | None, str | None]:
-    direction = None
-    if any(keyword in text for keyword in ("降序", "递减", "方向=降序", "方向：降序")):
-        direction = "desc"
-    elif any(keyword in text for keyword in ("升序", "递增", "连续", "顺序", "方向=升序", "方向：升序")):
-        direction = "asc"
-    step_match = re.search(r"步长\s*[：:=为是]?\s*(\d+)", text)
-    start_match = re.search(r"(?:起始值|起始|从)\s*[：:=为是]?\s*(\d+)", text)
-    auto_start = bool(re.search(r"(?:起始值|起始)\s*[：:=为是]?\s*(?:自动|auto)", text, re.IGNORECASE))
-    return (
-        direction,
-        step_match.group(1) if step_match else None,
-        "manual" if start_match else ("auto" if auto_start or direction else None),
-        start_match.group(1) if start_match else None,
-    )
-
-
 def _build_composite_columns(
     *,
     key_column: str | None,
@@ -1432,19 +1265,3 @@ def _first_match(text: str, patterns: list[str]) -> str | None:
             return match.group(1).strip()
     return None
 
-
-def _derive_source_id(source_url: str | None) -> str | None:
-    if not source_url:
-        return None
-    raw_name = urlparse(source_url).path.rstrip("/").split("/")[-1]
-    stem = raw_name.rsplit(".", 1)[0] if "." in raw_name else raw_name
-    source_id = re.sub(r"[^A-Za-z0-9_]+", "_", stem).strip("_")
-    return source_id or None
-
-
-def _guess_source_type(source_url: str | None) -> str | None:
-    if not source_url:
-        return None
-    if source_url.lower().startswith(("http://", "https://", "svn://")):
-        return "svn"
-    return "local_excel"

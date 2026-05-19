@@ -13,4 +13,5 @@
 
 - `PROJECT_RECORD.md`：分钟级开发进度日记，2026-04-20 后停止追加。
 - `需求文档.md`：早期 SDD（含 18 条历史「需求补充」公告），由 [../ARCHITECTURE.md](../ARCHITECTURE.md) 取代。
-- `refactor/`：一次性重构基线与 Prompt 包，已落地完成。
+- `changelog-unreleased-before-doc-cleanup-2026-05-19.md`：文档精简前的 `CHANGELOG.md` 快照，用于追溯被压缩的 `[Unreleased]` 明细。
+- `refactor/`：一次性重构基线、Prompt 包和智能添加规则阶段性重构方案，已落地完成。

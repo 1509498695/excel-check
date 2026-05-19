@@ -14,12 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.ai.agent_service import (
     AiProviderInvalid,
     AiProviderNotConfigured,
+    dry_run_rule_prompt_optimize,
+    generate_rule_draft,
+    optimize_rule_prompt,
+)
+from backend.app.ai.draft_repository import (
     clear_drafts,
     delete_draft,
-    generate_rule_draft,
     list_rule_drafts,
     mark_draft_applied,
-    optimize_rule_prompt,
 )
 from backend.app.ai.providers import (
     ProviderConnectionError,
@@ -209,11 +212,15 @@ async def create_rule_draft(
 @router.post("/agents/rule-prompt-optimize")
 async def optimize_rule_prompt_input(
     payload: RulePromptOptimizeRequest,
+    dry_run: bool = Query(default=False),
     ctx: CurrentUserContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """优化智能添加规则的自然语言描述，不生成草稿、不保存规则。"""
     project_id = ctx.require_project_member()
+    if dry_run:
+        result = await dry_run_rule_prompt_optimize(raw_description=payload.raw_description)
+        return {"code": 200, "msg": "ok", "data": result.model_dump()}
     _enforce_rule_draft_rate_limit(ctx.user_id)
     result = await optimize_rule_prompt(
         db=db,

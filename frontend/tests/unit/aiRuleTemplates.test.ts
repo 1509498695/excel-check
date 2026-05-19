@@ -271,7 +271,7 @@ describe('aiRuleTemplates', () => {
       [],
     )
 
-    expect(result.description).toContain('[reward-a]')
+    expect(result.description).toContain('左右两组按 Key 对齐后比较字段必须相等')
     expect(result.workflowHints).toMatchObject({
       rule_type_hint: 'dual_composite_compare',
       left_variable_tag: '[reward-a]',

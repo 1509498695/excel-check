@@ -102,7 +102,7 @@ export interface AiRuleWorkflowHints {
   target_field?: string | null
   display_field?: string | null
   filter_field?: string | null
-  filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'contains' | 'not_contains' | null
+  filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | 'contains' | 'not_contains' | null
   filter_value?: string | null
   filters?: Array<{
     field: string

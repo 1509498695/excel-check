@@ -818,6 +818,33 @@ async def test_rule_prompt_optimize_without_provider_returns_failed_fallback(
 
 
 @pytest.mark.anyio
+async def test_rule_prompt_optimize_dry_run_extracts_local_clues_without_provider(
+    auth_client: AsyncClient,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """dry_run 只做本地线索抽取，不要求模型配置。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-prompt-optimize?dry_run=true",
+        json={
+            "raw_description": "筛选：INT_ID唯一，INT_Faction!=0，Key值选择：INT_ID，判定：INT_Group必须重复",
+            "selected_variable_tags": [],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "optimized"
+    assert data["fallback"] is True
+    assert data["optimized_description"] == ""
+    assert data["detected_clues"]["rule_type_hint"] == "composite_condition_check"
+    assert data["detected_clues"]["target_field"] == "INT_Group"
+    assert data["detected_clues"]["key_field"] == "INT_ID"
+
+
+@pytest.mark.anyio
 async def test_rule_prompt_optimize_short_template_fallback_outputs_dsl(
     auth_client: AsyncClient,
     test_project_id: int,

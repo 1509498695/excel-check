@@ -1,0 +1,41 @@
+{
+  "draft": {
+    "reuse_variable_tags": [
+      "[src_demo-items-ID]"
+    ],
+    "rules_to_add": [
+      {
+        "binding": null,
+        "comparisons": [],
+        "composite_config": null,
+        "display_field": null,
+        "expected_value": "0,1",
+        "expected_value_mode": "set",
+        "group_id": "ungrouped",
+        "key_check_mode": null,
+        "left_filters": [],
+        "left_key_field": null,
+        "mapping_config": null,
+        "operator": "eq",
+        "pipeline_config": null,
+        "reference_variable_tag": null,
+        "right_filters": [],
+        "right_key_field": null,
+        "rule_id": "<dynamic>",
+        "rule_name": "ID-eq-0,1",
+        "rule_type": "fixed_value_compare",
+        "sequence_direction": null,
+        "sequence_start_mode": null,
+        "sequence_start_value": null,
+        "sequence_step": null,
+        "target_variable_tag": "[src_demo-items-ID]"
+      }
+    ],
+    "sources_to_add": [],
+    "variables_to_add": []
+  },
+  "missing": [],
+  "rejection_reason": null,
+  "rule_type": "fixed_value_compare",
+  "verdict": "ready"
+}

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkbenchAiRulePanel from '../../src/components/workbench/WorkbenchAiRulePanel.vue'
 import { useAiStore } from '../../src/store/ai'
 import { useWorkbenchStore } from '../../src/store/workbench'
+import { AI_RULE_DESCRIPTION_TEMPLATE } from '../../src/utils/aiRuleInputDraft'
 import type { AiRuleDraft } from '../../src/types/ai'
 import type { VariableTag } from '../../src/types/workbench'
 
@@ -189,7 +190,7 @@ describe('WorkbenchAiRulePanel smart input draft', () => {
 
     await wrapper.get('[data-test="smart-clear"]').trigger('click')
 
-    expect(aiStore.smartRuleInputDraft.description).toBe('')
+    expect(aiStore.smartRuleInputDraft.description).toBe(AI_RULE_DESCRIPTION_TEMPLATE)
     expect(aiStore.smartRuleInputDraft.selectedVariableTags).toEqual([])
     expect(aiStore.smartRuleInputDraft.workflowHints.targetField).toBe('')
     expect(aiStore.smartRuleInputDraft.workflowHints.ruleGroupName).toBe('AI生成规则组')
@@ -202,11 +203,12 @@ describe('WorkbenchAiRulePanel smart input draft', () => {
     const aiStore = useAiStore()
 
     await wrapper.get('[data-test="smart-load-example"]').trigger('click')
-    expect(aiStore.smartRuleInputDraft.description).toContain('校验规则筛选DESC3')
+    expect(aiStore.smartRuleInputDraft.description).toContain('筛选：')
+    expect(aiStore.smartRuleInputDraft.description).toContain('DESC3 = 升级p1建筑到p2级p4次')
 
     await wrapper.get('[data-test="smart-select-variable"]').trigger('click')
     await wrapper.get('[data-test="smart-apply-template"]').trigger('click')
-    expect(aiStore.smartRuleInputDraft.description).toContain('ID 字段不能为空')
+    expect(aiStore.smartRuleInputDraft.description).toContain('判定：ID 不能为空')
     expect(aiStore.smartRuleInputDraft.workflowHints.ruleTypeHint).toBe('not_null')
 
     await wrapper.get('[data-test="draft-fill"]').trigger('click')

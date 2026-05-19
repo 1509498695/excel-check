@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { CircleCheck, MagicStick, Refresh, VideoPlay } from '@element-plus/icons-vue'
 
 import AiRuleResultList from './AiRuleResultList.vue'
@@ -10,6 +10,12 @@ import PendingConfigPreview from './PendingConfigPreview.vue'
 import SmartRuleInputCard from './SmartRuleInputCard.vue'
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
+import { useAiDraftApply } from './ai/composables/useAiDraftApply'
+import { useAiDraftPreview } from './ai/composables/useAiDraftPreview'
+import { getSmartRuleGenerateBlockedMessage } from './ai/composables/useSmartRuleDraft'
+import { useSmartRuleHistory } from './ai/composables/useSmartRuleHistory'
+import { useSmartRuleHintSync } from './ai/composables/useSmartRuleHintSync'
+import { useSmartRuleTemplates } from './ai/composables/useSmartRuleTemplates'
 import { useAiStore } from '../../store/ai'
 import { useWorkbenchStore } from '../../store/workbench'
 import type {
@@ -18,7 +24,6 @@ import type {
   AiRuleDraftPayload,
   AiRuleWorkflowHints,
 } from '../../types/ai'
-import type { AbnormalResult, ExecutionResponse } from '../../types/api'
 import type { FixedRuleDefinition } from '../../types/fixedRules'
 import type { VariableTag } from '../../types/workbench'
 import {
@@ -40,10 +45,9 @@ import {
   AI_RULE_DESCRIPTION_TEMPLATE,
   AI_RULE_INPUT_DEFAULT_GROUP_NAME,
   createDefaultSmartRuleWorkflowHintsState,
+  serializeHintsToWorkflowHints,
   type SmartRuleWorkflowHintsState,
 } from '../../utils/aiRuleInputDraft'
-import { buildAiPreviewExplanation } from '../../utils/aiPreviewExplanation'
-import { extractSmartRuleWorkflowHints } from '../../utils/aiRuleHintExtractor'
 import { getFixedRuleDuplicateSet } from '../../utils/ruleFingerprint'
 
 const emit = defineEmits<{
@@ -246,10 +250,6 @@ const selectedVariableTags = computed({
     aiStore.smartRuleInputDraft.selectedVariableTags = value
   },
 })
-const isApplying = ref(false)
-const previewResult = ref<ExecutionResponse | null>(null)
-const previewError = ref('')
-const isPreviewing = ref(false)
 const isAutoCompletingAndApplying = ref(false)
 const isRegeneratingWithPreviewAdvice = ref(false)
 const configDrawerVisible = ref(false)
@@ -282,6 +282,17 @@ const templateWorkflowHints = computed({
 })
 
 type SmartRuleHintKey = keyof SmartRuleWorkflowHintsState
+
+const {
+  dryRunWorkflowHints,
+  resolveDescriptionHints,
+  clearDryRunWorkflowHints,
+} = useSmartRuleHintSync({
+  description,
+  selectedVariableTags,
+  allowAutoComplete,
+})
+const { applyTemplateWorkflowHints } = useSmartRuleTemplates(workflowHints)
 
 const RULE_DESCRIPTION_TEMPLATE_LABELS = [
   '数据源',
@@ -380,6 +391,49 @@ const duplicateRuleIds = computed(() => {
 const addableDraftRules = computed(
   () => currentDraft.value?.draft.rules_to_add.filter((rule) => !duplicateRuleIds.value.has(rule.rule_id)) ?? [],
 )
+const {
+  previewResult,
+  previewError,
+  isPreviewing,
+  previewRows,
+  previewTotal,
+  previewFailedSources,
+  previewExplanation,
+  isPreviewSuccessful,
+  resetPreview,
+  previewDraft,
+} = useAiDraftPreview({
+  currentDraft,
+  previewAiRuleDraft: (payload) => workbenchStore.previewAiRuleDraft(payload),
+  buildDraftPayloadForWorkflow,
+})
+const { isApplying, applyDraft } = useAiDraftApply({
+  currentDraft,
+  isPreviewSuccessful,
+  duplicateRuleIds,
+  applyAiRuleDraft: (payload) => workbenchStore.applyAiRuleDraft(payload),
+  markApplied: (draftId) => aiStore.markApplied(draftId),
+  buildDraftPayloadForWorkflow,
+  onApplied: (ruleIds, options) => {
+    if (options?.execute) {
+      emit('applied-and-execute', ruleIds)
+    } else {
+      emit('applied', ruleIds)
+    }
+  },
+})
+const { loadHistoryDraft, deleteHistoryDraft, clearHistory } = useSmartRuleHistory({
+  description,
+  selectedVariableTags,
+  workflowHints,
+  defaultGroupName: AI_RULE_GROUP_NAME,
+  clearManualHintEdits: () => manuallyEditedHintKeys.clear(),
+  setCurrentDraft: (draft) => aiStore.setCurrentDraft(draft),
+  clearPromptOptimizeResult: () => aiStore.clearPromptOptimizeResult(),
+  deleteDraft: (draftId) => aiStore.deleteDraft(draftId),
+  clearDraftHistory: () => aiStore.clearDraftHistory(),
+  resetPreview,
+})
 const duplicateReadyRuleCount = computed(() => duplicateRuleIds.value.size)
 const resultItems = computed(() =>
   mapAiDraftToResultItems(currentDraft.value).map((item) => {
@@ -412,16 +466,6 @@ const providerLabel = computed(() => {
   if (!aiStore.provider) return '未配置'
   return `${getProviderPresetLabel(aiStore.provider.provider_preset)} / ${aiStore.provider.model}`
 })
-const previewRows = computed<AbnormalResult[]>(() => {
-  const data = previewResult.value?.data
-  return data?.list ?? data?.abnormal_results ?? []
-})
-const previewTotal = computed(() => previewResult.value?.data.total ?? previewRows.value.length)
-const previewFailedSources = computed(() => previewResult.value?.meta.failed_sources ?? [])
-const previewExplanation = computed(() => buildAiPreviewExplanation(previewResult.value))
-const isPreviewSuccessful = computed(
-  () => Boolean(previewResult.value) && !previewError.value && previewFailedSources.value.length === 0,
-)
 const hasReadyRules = computed(
   () =>
     currentDraft.value?.verdict === 'ready' &&
@@ -568,11 +612,6 @@ function hasCompleteDualCompareDslDescription(text: string): boolean {
   return Boolean(leftFilter && rightFilter && key && compareFields)
 }
 
-function resetPreview(): void {
-  previewResult.value = null
-  previewError.value = ''
-}
-
 function clearAutoFillTimer(): void {
   if (autoFillTimer !== null) {
     clearTimeout(autoFillTimer)
@@ -587,12 +626,12 @@ function scheduleDescriptionHintAutoFill(): void {
   }
   autoFillTimer = setTimeout(() => {
     autoFillTimer = null
-    applyDescriptionHints()
+    void applyDescriptionHints()
   }, AUTO_FILL_DELAY_MS)
 }
 
-function applyDescriptionHints(): void {
-  const extracted = extractSmartRuleWorkflowHints(description.value)
+async function applyDescriptionHints(): Promise<void> {
+  const extracted = await resolveDescriptionHints()
   const extractedRecord = extracted as Partial<Record<SmartRuleHintKey, string>>
   let changed = false
   const autoResetKeys = new Set<SmartRuleHintKey>([
@@ -840,110 +879,15 @@ function buildPromptOptimizeTemplateContext(): Record<string, unknown> {
 }
 
 function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
-  const payload: AiRuleWorkflowHints = cloneWorkflowHints(templateWorkflowHints.value)
-  const putText = (key: keyof AiRuleWorkflowHints, value: string): void => {
-    const trimmed = value.trim()
-    if (trimmed) {
-      ;(payload as Record<string, unknown>)[key] = trimmed
-    }
-  }
-  const putKeyText = (key: keyof AiRuleWorkflowHints, value: string): void => {
-    if (!isPlaceholderKeyColumn(value)) {
-      putText(key, value)
-    }
-  }
-  const putList = (
-    key: keyof AiRuleWorkflowHints,
-    value: string,
-    options: { dropPlaceholderKey?: boolean } = {},
-  ): void => {
-    const items = value
-      .replaceAll('，', ',')
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => item && !(options.dropPlaceholderKey && isPlaceholderKeyColumn(item)))
-    if (items.length) {
-      ;(payload as Record<string, unknown>)[key] = Array.from(new Set(items))
-    }
-  }
-
-  putText('rule_type_hint', workflowHints.ruleTypeHint)
-  putText('target_variable_tag', workflowHints.targetVariableTag || selectedVariableTags.value[0] || '')
-  putText('left_variable_tag', workflowHints.leftVariableTag || selectedVariableTags.value[0] || '')
-  putText('reference_variable_tag', workflowHints.referenceVariableTag || selectedVariableTags.value[1] || '')
-  putText('right_variable_tag', workflowHints.rightVariableTag || selectedVariableTags.value[1] || '')
-  putText('source_id', workflowHints.sourceId)
-  putText('source_url', workflowHints.sourceUrl)
-  putText('sheet', workflowHints.sheet)
-  putText('target_field', workflowHints.targetField)
-  putText('display_field', workflowHints.displayField)
-  putText('filter_field', workflowHints.filterField)
-  putText('filter_value', workflowHints.filterValue)
-  putText('assertion_field', workflowHints.assertionField)
-  putText('assertion_value', workflowHints.assertionValue)
-  putText('assertion_expected_field', workflowHints.assertionExpectedField)
-  putText('operator', workflowHints.operator)
-  putText('expected_value', workflowHints.expectedValue)
-  putText('regex_pattern', workflowHints.regexPattern)
-  putText('sequence_step', workflowHints.sequenceStep)
-  putText('sequence_start_value', workflowHints.sequenceStartValue)
-  putKeyText('key_column', workflowHints.keyColumn)
-  putText('left_filter_field', workflowHints.leftFilterField)
-  putText('left_filter_value', workflowHints.leftFilterValue)
-  putText('right_filter_field', workflowHints.rightFilterField)
-  putText('right_filter_value', workflowHints.rightFilterValue)
-  putKeyText('left_key_field', workflowHints.leftKeyField)
-  putKeyText('right_key_field', workflowHints.rightKeyField)
-  putText('compare_operator', workflowHints.compareOperator)
-  putText('key_check_mode', workflowHints.keyCheckMode)
-  putList('composite_columns', workflowHints.compositeColumns, { dropPlaceholderKey: true })
-  putList('compare_fields', workflowHints.compareFields)
-
-  if (workflowHints.sourceUrl.trim().match(/^(https?:|svn:)/i)) {
-    payload.source_type = 'svn'
-  }
-  if (workflowHints.filterOperator.trim()) {
-    payload.filter_operator = workflowHints.filterOperator as AiRuleWorkflowHints['filter_operator']
-  }
-  if (workflowHints.assertionOperator.trim()) {
-    payload.assertion_operator = workflowHints.assertionOperator as AiRuleWorkflowHints['assertion_operator']
-  }
-  if (workflowHints.assertionValueSource.trim()) {
-    payload.assertion_value_source = workflowHints.assertionValueSource as AiRuleWorkflowHints['assertion_value_source']
-  }
-  if (workflowHints.expectedValueMode.trim()) {
-    payload.expected_value_mode = workflowHints.expectedValueMode as AiRuleWorkflowHints['expected_value_mode']
-  }
-  if (workflowHints.sequenceDirection.trim()) {
-    payload.sequence_direction = workflowHints.sequenceDirection as AiRuleWorkflowHints['sequence_direction']
-  }
-  if (workflowHints.sequenceStartMode.trim()) {
-    payload.sequence_start_mode = workflowHints.sequenceStartMode as AiRuleWorkflowHints['sequence_start_mode']
-  }
-  if (workflowHints.leftFilterOperator.trim()) {
-    payload.left_filter_operator = workflowHints.leftFilterOperator as AiRuleWorkflowHints['left_filter_operator']
-  }
-  if (workflowHints.rightFilterOperator.trim()) {
-    payload.right_filter_operator = workflowHints.rightFilterOperator as AiRuleWorkflowHints['right_filter_operator']
-  }
-  if (workflowHints.compareOperator.trim()) {
-    payload.compare_operator = workflowHints.compareOperator as AiRuleWorkflowHints['compare_operator']
-  }
-  if (workflowHints.keyCheckMode.trim()) {
-    payload.key_check_mode = workflowHints.keyCheckMode as AiRuleWorkflowHints['key_check_mode']
-  }
-  return payload
+  return serializeHintsToWorkflowHints(workflowHints, {
+    templateWorkflowHints: templateWorkflowHints.value,
+    dryRunWorkflowHints: dryRunWorkflowHints.value,
+    selectedVariableTags: selectedVariableTags.value,
+  })
 }
 
 function cloneWorkflowHints(hints: AiRuleWorkflowHints): AiRuleWorkflowHints {
   return JSON.parse(JSON.stringify(hints)) as AiRuleWorkflowHints
-}
-
-function isPlaceholderKeyColumn(value?: string): boolean {
-  if (!value?.trim()) return false
-  if (value.includes('未识别') || value.includes('需要用户确认')) return true
-  const compact = value.replace(/[\s:：=为是列字段、，。；;]/g, '').toLowerCase()
-  return ['key', '关联key', '业务key', '比对key', '对齐key', '主键', '唯一键', '索引'].includes(compact)
 }
 
 function cloneRule(rule: FixedRuleDefinition): FixedRuleDefinition {
@@ -1031,6 +975,7 @@ function handleApplyRuleTemplate(templateId: string): void {
 
 function applyRuleTemplateResult(result: AiRuleTemplateApplyResult): void {
   description.value = result.description
+  clearDryRunWorkflowHints()
   templateWorkflowHints.value = cloneWorkflowHints(result.workflowHints)
   applyTemplateWorkflowHints(result.workflowHints)
   if (result.allowAutoComplete) {
@@ -1044,6 +989,7 @@ function applyRuleTemplateResult(result: AiRuleTemplateApplyResult): void {
 
 function applyBusinessRuleFallbackExample(): void {
   templateWorkflowHints.value = {}
+  clearDryRunWorkflowHints()
   description.value = BUSINESS_RULE_EXAMPLE
   Object.assign(workflowHints, {
     ...createDefaultSmartRuleWorkflowHintsState(),
@@ -1053,57 +999,9 @@ function applyBusinessRuleFallbackExample(): void {
   extraHints.value = ''
   aiStore.clearPromptOptimizeResult()
   aiStore.clearCurrentDraft()
-  applyDescriptionHints()
+  void applyDescriptionHints()
   syncRoleHintsFromSelectedVariables()
   resetPreview()
-}
-
-function applyTemplateWorkflowHints(hints: AiRuleWorkflowHints): void {
-  setWorkflowHint('ruleTypeHint', hints.rule_type_hint)
-  setWorkflowHint('targetVariableTag', hints.target_variable_tag)
-  setWorkflowHint('referenceVariableTag', hints.reference_variable_tag)
-  setWorkflowHint('leftVariableTag', hints.left_variable_tag)
-  setWorkflowHint('rightVariableTag', hints.right_variable_tag)
-  setWorkflowHint('sourceId', hints.source_id)
-  setWorkflowHint('sourceUrl', hints.source_url)
-  setWorkflowHint('sheet', hints.sheet)
-  setWorkflowHint('targetField', hints.target_field)
-  setWorkflowHint('displayField', hints.display_field)
-  setWorkflowHint('filterField', hints.filter_field)
-  setWorkflowHint('filterOperator', hints.filter_operator)
-  setWorkflowHint('filterValue', hints.filter_value)
-  setWorkflowHint('assertionField', hints.assertion_field)
-  setWorkflowHint('assertionOperator', hints.assertion_operator)
-  setWorkflowHint('assertionValue', hints.assertion_value)
-  setWorkflowHint('operator', hints.operator)
-  setWorkflowHint('expectedValue', hints.expected_value)
-  setWorkflowHint('expectedValueMode', hints.expected_value_mode)
-  setWorkflowHint('regexPattern', hints.regex_pattern)
-  setWorkflowHint('sequenceDirection', hints.sequence_direction)
-  setWorkflowHint('sequenceStep', hints.sequence_step)
-  setWorkflowHint('sequenceStartMode', hints.sequence_start_mode)
-  setWorkflowHint('sequenceStartValue', hints.sequence_start_value)
-  setWorkflowHint('keyColumn', hints.key_column)
-  setWorkflowHint('compositeColumns', hints.composite_columns)
-  setWorkflowHint('leftFilterField', hints.left_filter_field)
-  setWorkflowHint('leftFilterOperator', hints.left_filter_operator)
-  setWorkflowHint('leftFilterValue', hints.left_filter_value)
-  setWorkflowHint('rightFilterField', hints.right_filter_field)
-  setWorkflowHint('rightFilterOperator', hints.right_filter_operator)
-  setWorkflowHint('rightFilterValue', hints.right_filter_value)
-  setWorkflowHint('leftKeyField', hints.left_key_field)
-  setWorkflowHint('rightKeyField', hints.right_key_field)
-  setWorkflowHint('compareOperator', hints.compare_operator)
-  setWorkflowHint('keyCheckMode', hints.key_check_mode)
-  setWorkflowHint('compareFields', hints.compare_fields)
-}
-
-function setWorkflowHint(key: SmartRuleHintKey, value: string | string[] | null | undefined): void {
-  if (Array.isArray(value)) {
-    workflowHints[key] = value.join(',')
-    return
-  }
-  workflowHints[key] = value ?? ''
 }
 
 function clearInput(): void {
@@ -1111,6 +1009,7 @@ function clearInput(): void {
   manuallyEditedHintKeys.clear()
   aiStore.clearPromptOptimizeResult()
   aiStore.clearCurrentDraft()
+  clearDryRunWorkflowHints()
   aiStore.resetSmartRuleInputDraft()
   resetPreview()
 }
@@ -1172,7 +1071,7 @@ function applyOptimizedDescription(): void {
   }
   clearAutoFillTimer()
   description.value = optimizedDescription
-  applyDescriptionHints()
+  void applyDescriptionHints()
   syncRoleHintsFromSelectedVariables()
   aiStore.clearPromptOptimizeResult()
   resetPreview()
@@ -1186,21 +1085,18 @@ function closePromptOptimizeResult(): void {
 async function generateDraft(adjustmentHints?: string | Event): Promise<void> {
   const previewAdjustmentHints = typeof adjustmentHints === 'string' ? adjustmentHints : ''
   if (!canGenerate.value) {
-    ElMessage.warning(
-      !isConfigured.value
-        ? '请先配置 AI 模型。'
-        : allowAutoComplete.value && autoCompleteMissingItems.value.length
-            ? `请先补齐：${autoCompleteMissingItems.value.join('、')}。`
-          : !hasRuleDescription.value
-            ? '请先输入规则描述。'
-            : '请先选择变量池变量，或开启 AI 自动补齐数据源/变量。',
-    )
+    ElMessage.warning(getSmartRuleGenerateBlockedMessage({
+      isConfigured: isConfigured.value,
+      allowAutoComplete: allowAutoComplete.value,
+      autoCompleteMissingItems: autoCompleteMissingItems.value,
+      hasRuleDescription: hasRuleDescription.value,
+    }))
     return
   }
 
   clearAutoFillTimer()
   syncRoleHintsFromSelectedVariables()
-  applyDescriptionHints()
+  await applyDescriptionHints()
   syncRoleHintsFromSelectedVariables()
   resetPreview()
   try {
@@ -1255,7 +1151,7 @@ async function autoCompleteAndApply(): Promise<void> {
 
   clearAutoFillTimer()
   syncRoleHintsFromSelectedVariables()
-  applyDescriptionHints()
+  await applyDescriptionHints()
   syncRoleHintsFromSelectedVariables()
   resetPreview()
   isAutoCompletingAndApplying.value = true
@@ -1292,151 +1188,6 @@ async function autoCompleteAndApply(): Promise<void> {
   } finally {
     isAutoCompletingAndApplying.value = false
   }
-}
-
-async function previewDraft(draft = currentDraft.value): Promise<boolean> {
-  if (!draft || draft.verdict !== 'ready') {
-    ElMessage.warning('当前没有可预校验的 ready 草稿。')
-    return false
-  }
-  if (!draft.draft.rules_to_add.length) {
-    ElMessage.warning('当前草稿没有可执行规则。')
-    return false
-  }
-
-  isPreviewing.value = true
-  previewError.value = ''
-  previewResult.value = null
-  try {
-    previewResult.value = await workbenchStore.previewAiRuleDraft(buildDraftPayloadForWorkflow(draft))
-    if (previewFailedSources.value.length) {
-      ElMessage.warning('预校验完成，但存在数据源读取失败。')
-    } else {
-      ElMessage.success('预校验完成，可查看结果后决定是否添加。')
-    }
-    return previewFailedSources.value.length === 0
-  } catch (error) {
-    previewError.value = error instanceof Error ? error.message : '预校验失败。'
-    ElMessage.error(previewError.value)
-    return false
-  } finally {
-    isPreviewing.value = false
-  }
-}
-
-async function applyDraft(options?: { execute?: boolean; rule?: FixedRuleDefinition }): Promise<void> {
-  const draft = currentDraft.value
-  if (!draft || draft.verdict !== 'ready') {
-    ElMessage.warning('当前没有可添加的规则草稿。')
-    return
-  }
-  if (!isPreviewSuccessful.value) {
-    ElMessage.warning('请先完成预校验，确认数据源和规则可执行后再添加。')
-    return
-  }
-  if (!draft.draft.rules_to_add.length) {
-    ElMessage.warning('当前草稿没有规则可添加。')
-    return
-  }
-  const candidateRules = options?.rule ? [options.rule] : draft.draft.rules_to_add
-  const rulesToApply = candidateRules.filter((rule) => !duplicateRuleIds.value.has(rule.rule_id))
-  const skippedCount = candidateRules.length - rulesToApply.length
-  if (!rulesToApply.length) {
-    ElMessage.warning('当前规则已存在，无需重复添加。')
-    return
-  }
-
-  isApplying.value = true
-  try {
-    const payload = buildDraftPayloadForWorkflow(draft, {
-      rules: rulesToApply,
-      ensureGroup: true,
-    })
-    const ruleIds = await workbenchStore.applyAiRuleDraft(payload)
-    if (!options?.rule || draft.draft.rules_to_add.length === 1) {
-      await aiStore.markApplied(draft.draft_id)
-    }
-    ElMessage.success(
-      skippedCount
-        ? `已跳过 ${skippedCount} 条已有规则，新增 ${ruleIds.length} 条规则并保存。`
-        : `已添加 ${ruleIds.length} 条规则并保存。`,
-    )
-    if (options?.execute) {
-      emit('applied-and-execute', ruleIds)
-    } else {
-      emit('applied', ruleIds)
-    }
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '添加规则失败。')
-  } finally {
-    isApplying.value = false
-  }
-}
-
-function hydrateHintsFromDraft(draft: AiRuleDraft): void {
-  manuallyEditedHintKeys.clear()
-  const firstSource = draft.draft.sources_to_add[0]
-  const firstVariable = draft.draft.variables_to_add[0]
-  const firstRule = draft.draft.rules_to_add[0]
-  const reusedTags = new Set(draft.draft.reuse_variable_tags)
-  draft.draft.rules_to_add.forEach((rule) => {
-    if (rule.target_variable_tag) reusedTags.add(rule.target_variable_tag)
-    if (rule.reference_variable_tag) reusedTags.add(rule.reference_variable_tag)
-  })
-  selectedVariableTags.value = Array.from(reusedTags)
-  workflowHints.ruleTypeHint = firstRule?.rule_type || workflowHints.ruleTypeHint
-  workflowHints.targetVariableTag = firstRule?.target_variable_tag || workflowHints.targetVariableTag
-  workflowHints.referenceVariableTag =
-    firstRule?.reference_variable_tag || workflowHints.referenceVariableTag
-  workflowHints.leftVariableTag = firstRule?.target_variable_tag || workflowHints.leftVariableTag
-  workflowHints.rightVariableTag = firstRule?.reference_variable_tag || workflowHints.rightVariableTag
-  workflowHints.sourceId = firstVariable?.source_id || firstSource?.id || workflowHints.sourceId
-  workflowHints.sourceUrl =
-    firstSource?.pathOrUrl || firstSource?.url || firstSource?.path || workflowHints.sourceUrl
-  workflowHints.sheet = firstVariable?.sheet || workflowHints.sheet
-  workflowHints.targetField =
-    firstVariable?.variable_kind === 'composite'
-      ? firstVariable.columns?.[0] ?? workflowHints.targetField
-      : firstVariable?.column || workflowHints.targetField
-  workflowHints.displayField = firstRule?.display_field || workflowHints.displayField
-  workflowHints.ruleGroupName = AI_RULE_GROUP_NAME
-  workflowHints.keyColumn = firstVariable?.key_column || workflowHints.keyColumn
-  workflowHints.compositeColumns =
-    firstVariable?.variable_kind === 'composite'
-      ? (firstVariable.columns ?? []).join(',')
-      : workflowHints.compositeColumns
-}
-
-function loadHistoryDraft(draft: AiRuleDraft): void {
-  aiStore.setCurrentDraft(draft)
-  aiStore.clearPromptOptimizeResult()
-  const originalDescription = draft.description?.trim()
-  if (originalDescription) {
-    description.value = originalDescription
-  }
-  hydrateHintsFromDraft(draft)
-  resetPreview()
-}
-
-async function deleteHistoryDraft(draft: AiRuleDraft): Promise<void> {
-  if (!draft.draft_id) return
-  await aiStore.deleteDraft(draft.draft_id)
-  ElMessage.success('草稿已删除。')
-}
-
-async function clearHistory(): Promise<void> {
-  try {
-    await ElMessageBox.confirm('确认清空最近 20 条 AI 草稿历史？', '清空草稿历史', {
-      confirmButtonText: '清空',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
-  await aiStore.clearDraftHistory()
-  resetPreview()
-  ElMessage.success('草稿历史已清空。')
 }
 
 function goProfile(): void {
