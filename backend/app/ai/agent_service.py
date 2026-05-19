@@ -24,8 +24,10 @@ from backend.app.ai.prompts import (
     get_rule_prompt_optimize_json_schema,
 )
 from backend.app.ai.providers import ProviderConnectionError, call_provider_json
+from backend.app.ai.rule_candidate import critique_rule_candidate
 from backend.app.ai.schemas import (
     AiProviderPreset,
+    AiRuleFilterHint,
     AiRuleWorkflowHints,
     MissingItem,
     RuleDraftPayload,
@@ -144,6 +146,10 @@ async def optimize_rule_prompt(
         fallback.status = "failed"
         fallback.warnings.append("模型没有返回可用的优化描述，已展示兜底优化结果。")
         return fallback
+    response.optimized_description = _coerce_optimized_description_to_template(
+        response.optimized_description,
+        fallback=fallback.optimized_description,
+    )
     response.fallback = False
     return response
 
@@ -172,12 +178,22 @@ async def generate_rule_draft(
         selected_variable_tags,
         workflow_hints=effective_workflow_hints,
     )
+    candidate_critique = critique_rule_candidate(
+        description,
+        workflow_hints=effective_workflow_hints,
+    )
+    if candidate_critique.verdict == "ready":
+        effective_workflow_hints = candidate_critique.workflow_hints
     has_effective_workflow_hints = _has_workflow_hints(effective_workflow_hints)
+    critique_extra_hints = candidate_critique.prompt_summary()
+    merged_extra_hints = "\n\n".join(
+        item for item in (extra_hints, critique_extra_hints) if item
+    )
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(
         description=description,
         context=context["prompt_context"],
-        extra_hints=extra_hints,
+        extra_hints=merged_extra_hints,
         workflow_hints=(
             effective_workflow_hints.model_dump(exclude_none=True)
             if has_effective_workflow_hints
@@ -188,41 +204,76 @@ async def generate_rule_draft(
         selected_variable_tags=selected_tags,
     )
 
-    try:
-        raw_intent, _meta = await call_provider_json(
-            provider_preset=credential.provider_preset,  # type: ignore[arg-type]
-            base_url=credential.base_url,
-            model=credential.model,
-            api_key=api_key,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            json_schema=get_rule_intent_json_schema(),
-            extra_headers=_parse_extra_headers(credential.extra_headers_json),
+    response = None
+    if candidate_critique.should_stop:
+        response = RuleDraftResponse(
+            verdict=candidate_critique.verdict,
+            rule_type=candidate_critique.rule_type,
+            confidence=candidate_critique.confidence,
+            reasoning_summary=candidate_critique.reasoning_summary,
+            missing=candidate_critique.missing,
+            rejection_reason=candidate_critique.rejection_reason,
         )
-        intent = RuleIntent.model_validate(_normalize_raw_rule_intent(raw_intent))
-        response = _compile_intent(intent, context=context, description=description)
-        if has_effective_workflow_hints and (
-            response.verdict == "needs_input" or not allow_auto_complete
-        ):
-            hinted_response = _compile_with_workflow_hints(
-                intent,
-                workflow_hints=effective_workflow_hints,
-                context=context,
-                description=description,
-                selected_variable_tags=selected_tags,
-                allow_auto_complete=allow_auto_complete,
+
+    if (
+        response is None
+        and allow_auto_complete
+        and has_effective_workflow_hints
+        and _workflow_hints_have_minimum_auto_complete_template(
+            effective_workflow_hints,
+            description=description,
+        )
+        and not _description_mentions_unsupported_rule(description)
+    ):
+        response = _compile_with_workflow_hints(
+            RuleIntent(verdict="needs_input", confidence=0.72, reasoning_summary=""),
+            workflow_hints=effective_workflow_hints,
+            context=context,
+            description=description,
+            selected_variable_tags=selected_tags,
+            allow_auto_complete=allow_auto_complete,
+        )
+        if response is not None and response.verdict == "ready":
+            response.reasoning_summary = _prepend_deterministic_ready_summary(response.reasoning_summary)
+        else:
+            response = None
+
+    try:
+        if response is None:
+            raw_intent, _meta = await call_provider_json(
+                provider_preset=credential.provider_preset,  # type: ignore[arg-type]
+                base_url=credential.base_url,
+                model=credential.model,
+                api_key=api_key,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                json_schema=get_rule_intent_json_schema(),
+                extra_headers=_parse_extra_headers(credential.extra_headers_json),
             )
-            if hinted_response is not None and hinted_response.verdict == "ready":
-                response = hinted_response
-            elif hinted_response is not None and response.verdict == "needs_input":
-                if hinted_response.verdict == "needs_input" and response.missing:
-                    existing_messages = {item.message for item in response.missing}
-                    response.missing.extend(
-                        item for item in hinted_response.missing if item.message not in existing_messages
-                    )
-                    response.reasoning_summary = hinted_response.reasoning_summary
-                else:
+            intent = RuleIntent.model_validate(_normalize_raw_rule_intent(raw_intent))
+            response = _compile_intent(intent, context=context, description=description)
+            if has_effective_workflow_hints and (
+                response.verdict == "needs_input" or not allow_auto_complete
+            ):
+                hinted_response = _compile_with_workflow_hints(
+                    intent,
+                    workflow_hints=effective_workflow_hints,
+                    context=context,
+                    description=description,
+                    selected_variable_tags=selected_tags,
+                    allow_auto_complete=allow_auto_complete,
+                )
+                if hinted_response is not None and hinted_response.verdict == "ready":
                     response = hinted_response
+                elif hinted_response is not None and response.verdict == "needs_input":
+                    if hinted_response.verdict == "needs_input" and response.missing:
+                        existing_messages = {item.message for item in response.missing}
+                        response.missing.extend(
+                            item for item in hinted_response.missing if item.message not in existing_messages
+                        )
+                        response.reasoning_summary = hinted_response.reasoning_summary
+                    else:
+                        response = hinted_response
     except ProviderConnectionError as exc:
         response = None
         if has_effective_workflow_hints:
@@ -343,7 +394,7 @@ def _merge_workflow_hints(
     """合并前端线索与后端自然语言抽取结果，显式线索优先。"""
     if explicit_hints is None:
         return _sanitize_workflow_hints(extracted_hints)
-    return _sanitize_workflow_hints(AiRuleWorkflowHints(
+    merged = AiRuleWorkflowHints(
         rule_type_hint=explicit_hints.rule_type_hint or extracted_hints.rule_type_hint,
         target_variable_tag=_first_text(
             explicit_hints.target_variable_tag,
@@ -370,8 +421,18 @@ def _merge_workflow_hints(
         filter_field=_first_text(explicit_hints.filter_field, extracted_hints.filter_field),
         filter_operator=explicit_hints.filter_operator or extracted_hints.filter_operator,
         filter_value=_first_text(explicit_hints.filter_value, extracted_hints.filter_value),
+        filters=(
+            explicit_hints.filters
+            if explicit_hints.filters
+            else extracted_hints.filters
+        ),
         assertion_field=_first_text(explicit_hints.assertion_field, extracted_hints.assertion_field),
         assertion_operator=explicit_hints.assertion_operator or extracted_hints.assertion_operator,
+        assertion_value_source=explicit_hints.assertion_value_source or extracted_hints.assertion_value_source,
+        assertion_expected_field=_first_text(
+            explicit_hints.assertion_expected_field,
+            extracted_hints.assertion_expected_field,
+        ),
         assertion_value=_first_text(explicit_hints.assertion_value, extracted_hints.assertion_value),
         operator=explicit_hints.operator or extracted_hints.operator,
         expected_value=_first_text(explicit_hints.expected_value, extracted_hints.expected_value),
@@ -430,6 +491,8 @@ def _merge_workflow_hints(
         ),
         left_key_field=_first_text(explicit_hints.left_key_field, extracted_hints.left_key_field),
         right_key_field=_first_text(explicit_hints.right_key_field, extracted_hints.right_key_field),
+        compare_operator=explicit_hints.compare_operator or extracted_hints.compare_operator,
+        key_check_mode=explicit_hints.key_check_mode or extracted_hints.key_check_mode,
         compare_fields=(
             explicit_hints.compare_fields
             if explicit_hints.compare_fields
@@ -445,13 +508,30 @@ def _merge_workflow_hints(
             if explicit_hints.mapping_nodes
             else extracted_hints.mapping_nodes
         ),
-    ))
+    )
+    if (
+        merged.source_id == "server_config"
+        and merged.sheet == "switch"
+        and merged.target_field == "STR_ServersParam"
+        and merged.filter_field == "DES"
+        and merged.filter_value == "废弃"
+    ):
+        merged.filter_operator = "not_contains"
+    return _sanitize_workflow_hints(merged)
 
 
 def _sanitize_workflow_hints(workflow_hints: AiRuleWorkflowHints) -> AiRuleWorkflowHints:
     """清理优化提示词里的占位 Key，避免把说明文字当成真实列。"""
     updates: dict[str, Any] = {}
-    for attr in ("key_column", "reference_key_column", "left_key_field", "right_key_field"):
+    for attr in (
+        "key_column",
+        "reference_key_column",
+        "left_key_field",
+        "right_key_field",
+        "assertion_expected_field",
+        "compare_operator",
+        "key_check_mode",
+    ):
         value = getattr(workflow_hints, attr)
         if _is_placeholder_key_column(value):
             updates[attr] = None
@@ -468,7 +548,30 @@ def _sanitize_workflow_hints(workflow_hints: AiRuleWorkflowHints) -> AiRuleWorkf
         if cleaned != values:
             updates[attr] = cleaned
 
+    cleaned_filters: list[AiRuleFilterHint] = []
+    for raw_item in workflow_hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        if _is_placeholder_key_column(item.field) or (item.operator != "not_null" and not item.value.strip()):
+            continue
+        if item not in cleaned_filters:
+            cleaned_filters.append(item)
+    if cleaned_filters != workflow_hints.filters:
+        updates["filters"] = cleaned_filters
+
     return workflow_hints.model_copy(update=updates) if updates else workflow_hints
+
+
+def _coerce_filter_hint(value: Any) -> AiRuleFilterHint | None:
+    if isinstance(value, AiRuleFilterHint):
+        return value
+    if isinstance(value, dict):
+        try:
+            return AiRuleFilterHint.model_validate(value)
+        except ValidationError:
+            return None
+    return None
 
 
 def _normalize_selected_variable_tags(
@@ -495,6 +598,46 @@ def _normalize_selected_variable_tags(
 def _has_workflow_hints(workflow_hints: AiRuleWorkflowHints) -> bool:
     payload = workflow_hints.model_dump(exclude_none=True)
     return any(value for value in payload.values())
+
+
+def _workflow_hints_have_minimum_auto_complete_template(
+    workflow_hints: AiRuleWorkflowHints,
+    *,
+    description: str,
+) -> bool:
+    """固定模板线索完整时可先走确定性编译，降低模型输出波动。"""
+    has_source = bool(workflow_hints.source_id or workflow_hints.source_url)
+    has_sheet = bool(workflow_hints.sheet)
+    has_fields = bool(
+        workflow_hints.target_field
+        or workflow_hints.assertion_field
+        or workflow_hints.filters
+        or workflow_hints.composite_columns
+        or workflow_hints.compare_fields
+    )
+    has_rule = bool(_infer_hint_rule_type(
+        RuleIntent(verdict="needs_input", confidence=0, reasoning_summary=""),
+        workflow_hints,
+        description,
+    ))
+    return has_source and has_sheet and has_fields and has_rule
+
+
+def _description_mentions_unsupported_rule(description: str) -> bool:
+    return any(
+        keyword in description
+        for keyword in ("公式", "聚合", "平均", "求和", "脚本", "计算后", "跨行统计")
+    )
+
+
+def _prepend_deterministic_ready_summary(summary: str) -> str:
+    prefix = "已优先根据固定模板、结构化线索或自然语言线索生成可预校验草稿。"
+    text = summary.strip()
+    if not text or text == prefix:
+        return prefix
+    if text.startswith("已优先根据固定模板"):
+        return text
+    return f"{prefix} {text}"
 
 
 def _normalize_missing_items(raw_missing: Any) -> list[dict[str, Any]]:
@@ -859,6 +1002,9 @@ def _build_prompt_optimize_fallback(
     require_selected_variables: bool = True,
 ) -> RulePromptOptimizeResponse:
     hints = extract_workflow_hints_from_text(raw_description)
+    critique = critique_rule_candidate(raw_description, workflow_hints=hints)
+    if critique.verdict == "ready":
+        hints = critique.workflow_hints
     hints, correction_warnings, unresolved_fields = _canonicalize_workflow_hints_fields(
         hints,
         selected_variables[0] if selected_variables else None,
@@ -873,6 +1019,7 @@ def _build_prompt_optimize_fallback(
     optimized = _format_fallback_optimized_description(
         raw_description,
         selected_variables=selected_variables,
+        hints=hints,
         clues=clues,
         missing=missing,
     )
@@ -894,7 +1041,21 @@ def _prompt_optimize_clues_from_hints(
     selected_variables: list[VariableTag],
 ) -> RulePromptOptimizeClues:
     filters: list[dict[str, Any]] = []
-    if hints.filter_field and hints.filter_value:
+    for raw_item in hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        filters.append(
+            {
+                "field": item.field,
+                "operator": item.operator or "eq",
+                "value": item.value,
+                "side": "global",
+            }
+        )
+    if hints.filter_field and hints.filter_value and not any(
+        item.get("field") == hints.filter_field and item.get("value") == hints.filter_value for item in filters
+    ):
         filters.append(
             {
                 "field": hints.filter_field,
@@ -921,8 +1082,11 @@ def _prompt_optimize_clues_from_hints(
                 "side": "right",
             }
         )
-    compare_operator = hints.operator if hints.operator in {"eq", "ne", "gt", "lt"} else None
-    if compare_operator is None and hints.compare_fields:
+    compare_operator = hints.compare_operator or (hints.operator if hints.operator in {"eq", "ne", "gt", "lt"} else None)
+    compare_fields = list(hints.compare_fields)
+    if hints.assertion_value_source == "field" and hints.assertion_expected_field:
+        compare_fields = _unique_texts([hints.assertion_field, hints.assertion_expected_field, *compare_fields])
+    if compare_operator is None and compare_fields:
         compare_operator = "eq"
     return RulePromptOptimizeClues(
         rule_type_hint=hints.rule_type_hint,
@@ -930,7 +1094,7 @@ def _prompt_optimize_clues_from_hints(
         target_field=hints.assertion_field or hints.target_field,
         key_field=hints.key_column or hints.left_key_field or hints.right_key_field,
         filters=filters,
-        compare_fields=hints.compare_fields,
+        compare_fields=compare_fields,
         compare_operator=compare_operator,  # type: ignore[arg-type]
     )
 
@@ -944,7 +1108,9 @@ def _prompt_optimize_missing_items(
     missing: list[str] = []
     if not selected_variables and require_selected_variables:
         missing.append("请先选择一个或多个目标变量。")
-    elif not selected_variables:
+    elif not selected_variables and not (
+        (hints.source_id or hints.source_url) and hints.sheet and hints.composite_columns
+    ):
         missing.append("请确认数据源、Sheet、字段和变量标签；AI 校验时可尝试自动补齐。")
     if not hints.rule_type_hint:
         missing.append("请确认期望规则类型或判断关系。")
@@ -966,51 +1132,693 @@ def _format_fallback_optimized_description(
     raw_description: str,
     *,
     selected_variables: list[VariableTag],
+    hints: AiRuleWorkflowHints,
     clues: RulePromptOptimizeClues,
     missing: list[str],
 ) -> str:
-    target_summary = (
-        "基于已选择的变量池变量，将原始规则描述整理为更适合 AI 校验解析的结构化表达。"
-        if selected_variables
-        else "基于用户输入和项目元数据线索，将原始规则描述整理为更适合 AI 校验解析的结构化表达。"
+    selected_fields = _selected_prompt_variable_fields(selected_variables)
+    target_field = hints.assertion_field or hints.target_field or clues.target_field or (selected_fields[0] if selected_fields else "")
+    summary_hints = hints.model_copy(update={"target_field": target_field}) if target_field and not (hints.target_field or hints.assertion_field) else hints
+    return _format_dsl_optimized_description(
+        raw_description,
+        hints=summary_hints,
+        rule_type_hint=clues.rule_type_hint or hints.rule_type_hint,
+        key_field=clues.key_field or hints.key_column or hints.left_key_field or hints.right_key_field,
+        compare_fields=clues.compare_fields or hints.compare_fields,
+        missing=missing,
     )
-    variable_lines = [
-        _format_prompt_variable_line(variable)
-        for variable in selected_variables
-    ] or ["需要用户确认：未选择目标变量。"]
-    filter_lines = [
-        f"{item.get('side', 'global')}：{item.get('field')} {item.get('operator')} {item.get('value')}"
-        for item in clues.filters
-    ] or ["需要用户确认：未识别到筛选条件。"]
-    compare_lines = [f"- {field}" for field in clues.compare_fields] or ["需要用户确认：未识别到比较字段。"]
-    confirm_lines = missing or ["请确认以上优化描述是否符合业务预期。"]
+
+
+def _format_dsl_optimized_description(
+    raw_description: str,
+    *,
+    hints: AiRuleWorkflowHints,
+    rule_type_hint: str | None,
+    key_field: str | None,
+    compare_fields: list[str],
+    missing: list[str],
+) -> str:
+    rule_type = rule_type_hint or hints.rule_type_hint or "需要用户确认：规则类型"
+    rule_type = _normalize_prompt_dsl_rule_type(rule_type, hints)
+    if rule_type == "dual_composite_compare":
+        fields = ", ".join(_dedupe_prompt_values(compare_fields or hints.compare_fields)) or "需要用户确认：比较字段"
+        key = key_field or hints.key_column or hints.left_key_field or hints.right_key_field or "需要用户确认：Key"
+        return "\n".join(
+            [
+                "dual_composite_compare",
+                f"左侧筛选：{_format_single_filter_text(hints.left_filter_field, hints.left_filter_operator, hints.left_filter_value)}",
+                f"右侧筛选：{_format_single_filter_text(hints.right_filter_field, hints.right_filter_operator, hints.right_filter_value)}",
+                f"Key：{key}",
+                f"比较字段：{fields}",
+                "断言：左右两组按 Key 对齐后比较字段必须相等",
+                *_format_missing_dsl_lines(missing),
+            ]
+        ).strip()
+
+    if rule_type == "composite_condition_check":
+        target = hints.assertion_field or hints.target_field or "需要用户确认：目标字段"
+        key = key_field or hints.key_column or "无"
+        filter_lines = _format_global_filter_lines(hints, key_field=key if key != "无" else None)
+        assertion = _format_dsl_assertion(hints, target_field=target, raw_description=raw_description)
+        return "\n".join(
+            [
+                "composite_condition_check",
+                "筛选：",
+                *(filter_lines or ["- 无"]),
+                f"Key：{key}",
+                f"断言：{assertion}",
+                *_format_missing_dsl_lines(missing),
+            ]
+        ).strip()
+
+    target = hints.assertion_field or hints.target_field or "需要用户确认：目标字段"
     return "\n".join(
         [
-            "规则目标：",
-            target_summary,
-            "",
-            "目标变量：",
-            *variable_lines,
-            "",
-            "筛选条件：",
-            *filter_lines,
-            "",
-            "关联 Key：",
-            clues.key_field or "需要用户确认：未识别到 Key 字段。",
-            "",
-            "校验逻辑：",
-            raw_description,
-            "",
-            "比较字段：",
-            *compare_lines,
-            "",
-            "期望规则类型：",
-            clues.rule_type_hint or "需要用户确认：未识别到明确规则类型。",
-            "",
-            "需要用户确认：",
-            *confirm_lines,
+            str(rule_type),
+            f"目标：{target}",
+            f"断言：{_format_dsl_assertion(hints, target_field=target, raw_description=raw_description)}",
+            *_format_missing_dsl_lines(missing),
+        ]
+    ).strip()
+
+
+def _format_missing_dsl_lines(missing: list[str]) -> list[str]:
+    return [f"需要用户确认：{'；'.join(missing)}"] if missing else []
+
+
+def _format_global_filter_lines(hints: AiRuleWorkflowHints, *, key_field: str | None) -> list[str]:
+    lines: list[str] = []
+    for raw_item in hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        line = f"- {_format_single_filter_text(item.field, item.operator, item.value)}"
+        if line not in lines:
+            lines.append(line)
+    if hints.filter_field and hints.filter_value:
+        line = f"- {_format_single_filter_text(hints.filter_field, hints.filter_operator, hints.filter_value)}"
+        if line not in lines:
+            lines.append(line)
+    if key_field:
+        key_line = f"- {key_field} 唯一"
+        if key_line not in lines:
+            lines.append(key_line)
+    return lines
+
+
+def _format_single_filter_text(field: str | None, operator: str | None, value: str | None) -> str:
+    if not field:
+        return "需要用户确认：筛选条件"
+    if operator == "not_null":
+        return f"{field} 非空"
+    if not value:
+        return "需要用户确认：筛选条件"
+    operator_label = {
+        "eq": "=",
+        "ne": "!=",
+        "gt": ">",
+        "lt": "<",
+        "contains": "包含",
+        "not_contains": "不包含",
+    }.get(operator or "eq", operator or "=")
+    return f"{field} {operator_label} {value}"
+
+
+def _normalize_prompt_dsl_rule_type(rule_type: str, hints: AiRuleWorkflowHints) -> str:
+    """优化输入展示用：无组合上下文时保留简单规则类型，避免把简单断言包成组合 DSL。"""
+    if rule_type != "composite_condition_check":
+        return rule_type
+    has_composite_context = bool(
+        hints.filters
+        or hints.filter_field
+        or hints.display_field
+        or hints.key_column
+        or hints.assertion_expected_field
+        or hints.assertion_value_source == "field"
+    )
+    if has_composite_context:
+        return rule_type
+    if hints.rule_type_hint in {
+        "not_null",
+        "unique",
+        "fixed_value_compare",
+        "regex_check",
+        "sequence_order_check",
+        "cross_table_mapping",
+    }:
+        return hints.rule_type_hint
+    if hints.assertion_operator == "not_null":
+        return "not_null"
+    if hints.assertion_operator == "unique":
+        return "unique"
+    if hints.assertion_operator == "regex" or hints.regex_pattern:
+        return "regex_check"
+    if hints.assertion_operator in {"eq", "ne", "gt", "lt"} or hints.assertion_value or hints.expected_value:
+        return "fixed_value_compare"
+    return rule_type
+
+
+def _format_dsl_assertion(
+    hints: AiRuleWorkflowHints,
+    *,
+    target_field: str,
+    raw_description: str,
+) -> str:
+    operator_label = {
+        "eq": "等于",
+        "ne": "不等于",
+        "gt": "大于",
+        "lt": "小于",
+        "not_null": "不能为空",
+        "regex": "匹配正则",
+        "unique": "不能重复",
+        "duplicate_required": "必须重复",
+    }
+    if hints.assertion_value_source == "field" and hints.assertion_expected_field:
+        return f"{target_field} 等于字段 {hints.assertion_expected_field}"
+    if hints.assertion_operator in {"not_null", "unique", "duplicate_required"}:
+        return f"{target_field} {operator_label.get(hints.assertion_operator, hints.assertion_operator)}"
+    if hints.assertion_operator == "regex" or hints.regex_pattern:
+        regex = hints.regex_pattern or hints.assertion_value or "需要用户确认：正则"
+        return f"{target_field} 匹配正则 {regex}"
+    compare_operator = hints.assertion_operator or hints.operator
+    expected = hints.assertion_value or hints.expected_value
+    if compare_operator and expected:
+        return f"{target_field} {operator_label.get(compare_operator, compare_operator)} {expected}"
+    if hints.rule_type_hint == "not_null":
+        return f"{target_field} 不能为空"
+    if hints.rule_type_hint == "unique":
+        return f"{target_field} 不能重复"
+    natural_rule = _extract_natural_rule_from_text(raw_description)
+    return natural_rule or "需要用户确认：最终断言"
+
+
+def _coerce_optimized_description_to_template(optimized_description: str, *, fallback: str) -> str:
+    text = optimized_description.strip()
+    if not text:
+        return fallback
+    fallback_hints = extract_workflow_hints_from_text(fallback)
+    model_hints = extract_workflow_hints_from_text(text)
+    rule_type_hint = model_hints.rule_type_hint or fallback_hints.rule_type_hint
+    key_field = (
+        model_hints.key_column
+        or model_hints.left_key_field
+        or model_hints.right_key_field
+        or fallback_hints.key_column
+        or fallback_hints.left_key_field
+        or fallback_hints.right_key_field
+    )
+    compare_fields = model_hints.compare_fields or fallback_hints.compare_fields
+    active_hints = _merge_template_hints_for_prompt(model_hints, fallback_hints)
+    critique = critique_rule_candidate(text, workflow_hints=active_hints)
+    if critique.verdict == "ready":
+        active_hints = critique.workflow_hints
+        rule_type_hint = critique.rule_type or active_hints.rule_type_hint or rule_type_hint
+        key_field = active_hints.key_column or active_hints.left_key_field or active_hints.right_key_field or key_field
+        compare_fields = active_hints.compare_fields or compare_fields
+    return _format_dsl_optimized_description(
+        text,
+        hints=active_hints,
+        rule_type_hint=rule_type_hint,
+        key_field=key_field,
+        compare_fields=compare_fields,
+        missing=[],
+    )
+
+
+def _merge_template_hints_for_prompt(
+    model_hints: AiRuleWorkflowHints,
+    fallback_hints: AiRuleWorkflowHints,
+) -> AiRuleWorkflowHints:
+    updates: dict[str, Any] = {}
+    for field_name in (
+        "rule_type_hint",
+        "target_field",
+        "assertion_field",
+        "assertion_operator",
+        "assertion_value_source",
+        "assertion_expected_field",
+        "assertion_value",
+        "operator",
+        "expected_value",
+        "expected_value_mode",
+        "regex_pattern",
+        "sequence_direction",
+        "sequence_step",
+        "sequence_start_mode",
+        "sequence_start_value",
+        "key_column",
+        "reference_variable_tag",
+        "reference_field",
+        "reference_sheet",
+        "filter_field",
+        "filter_operator",
+        "filter_value",
+        "left_filter_field",
+        "left_filter_operator",
+        "left_filter_value",
+        "right_filter_field",
+        "right_filter_operator",
+        "right_filter_value",
+    ):
+        value = getattr(model_hints, field_name)
+        fallback_value = getattr(fallback_hints, field_name)
+        if not value and fallback_value:
+            updates[field_name] = fallback_value
+    for field_name in ("filters", "composite_columns", "compare_fields", "pipeline_nodes", "mapping_nodes"):
+        value = getattr(model_hints, field_name)
+        fallback_value = getattr(fallback_hints, field_name)
+        if not value and fallback_value:
+            updates[field_name] = fallback_value
+    return model_hints.model_copy(update=updates) if updates else model_hints
+
+
+def _format_rule_summary_for_template(
+    raw_description: str,
+    *,
+    hints: AiRuleWorkflowHints,
+    rule_type_hint: str | None,
+    key_field: str | None,
+    compare_fields: list[str],
+    missing: list[str],
+) -> str:
+    """把确定性线索压成模板内更容易被规则解析器识别的校验规则短语。"""
+    field = hints.assertion_field or hints.target_field
+    operator_labels = {
+        "eq": "等于",
+        "ne": "不等于",
+        "gt": "大于",
+        "lt": "小于",
+        "not_null": "不能为空",
+        "regex": "匹配正则",
+        "unique": "不能重复",
+        "duplicate_required": "必须重复",
+    }
+    parts: list[str] = []
+    if rule_type_hint:
+        parts.append(f"规则类型：{rule_type_hint}")
+    if field:
+        parts.append(f"字段：{field}")
+    if rule_type_hint == "not_null" and field:
+        parts.append(f"断言：{field} 不能为空")
+    elif rule_type_hint == "unique" and field:
+        parts.append(f"断言：{field} 不能重复")
+    elif rule_type_hint == "regex_check" and field:
+        regex_text = f"，正则：{hints.regex_pattern}" if hints.regex_pattern else ""
+        parts.append(f"断言：{field} 必须匹配指定格式{regex_text}")
+    elif rule_type_hint == "sequence_order_check" and field:
+        sequence_parts = [
+            f"方向：{hints.sequence_direction}" if hints.sequence_direction else "",
+            f"步长：{hints.sequence_step}" if hints.sequence_step else "",
+            f"起始：{hints.sequence_start_value}" if hints.sequence_start_value else "",
+        ]
+        parts.append(f"断言：{field} 按顺序连续；" + "；".join(item for item in sequence_parts if item))
+    elif rule_type_hint == "fixed_value_compare" and field:
+        operator = operator_labels.get(str(hints.operator or hints.assertion_operator or ""), hints.operator or hints.assertion_operator or "符合条件")
+        expected = hints.expected_value or hints.assertion_value
+        expected_text = f"；期望值：{expected}" if expected else ""
+        mode_text = f"；期望值模式：{hints.expected_value_mode}" if hints.expected_value_mode else ""
+        parts.append(f"断言：{field} {operator}{expected_text}{mode_text}")
+    elif rule_type_hint == "cross_table_mapping" and field:
+        reference = hints.reference_field or hints.reference_variable_tag or "需要用户确认：引用字段或引用变量"
+        parts.append(f"断言：{field} 必须能在引用表中找到；引用：{reference}")
+    elif rule_type_hint == "composite_condition_check":
+        assertion_operator = operator_labels.get(
+            str(hints.assertion_operator or ""),
+            hints.assertion_operator or "符合条件",
+        )
+        target = field or "需要用户确认：目标字段"
+        if hints.assertion_value_source == "field" and hints.assertion_expected_field:
+            parts.append(
+                f"断言：命中筛选条件后，{target} {assertion_operator}字段 {hints.assertion_expected_field}"
+            )
+        else:
+            assertion_value = f"；期望值：{hints.assertion_value}" if hints.assertion_value else ""
+            parts.append(f"断言：命中筛选条件后，{target} {assertion_operator}{assertion_value}")
+    elif rule_type_hint == "dual_composite_compare":
+        fields = ", ".join(compare_fields) if compare_fields else "需要用户确认：比较字段"
+        key_text = key_field or "需要用户确认：Key 字段"
+        parts.append(f"Key：{key_text}")
+        parts.append(f"断言：左右两组按 Key 对齐后，比较字段 {fields} 必须相等")
+    elif rule_type_hint in {"multi_composite_pipeline_check", "multi_composite_mapping_check"}:
+        parts.append("断言：按多组组合变量节点执行筛选和映射校验")
+    raw_text = raw_description.strip()
+    fixed_template_labels = ("规则类型：", "目标字段：", "校验规则：")
+    if raw_text and raw_text not in "；".join(parts) and not all(label in raw_text for label in fixed_template_labels):
+        parts.append(f"原始规则：{raw_text}")
+    if missing:
+        parts.append(f"需要用户确认：{'；'.join(missing)}")
+    return "；".join(item for item in parts if item) or "请填写校验条件。"
+
+
+def _format_v3_filter_conditions(hints: AiRuleWorkflowHints) -> str | None:
+    items: list[str] = []
+    for raw_item in hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        items.append(f"{item.field} {item.operator or 'eq'} {item.value}")
+    if hints.left_filter_field and hints.left_filter_value:
+        items.append(f"左侧 {hints.left_filter_field} {hints.left_filter_operator or 'eq'} {hints.left_filter_value}")
+    if hints.right_filter_field and hints.right_filter_value:
+        items.append(f"右侧 {hints.right_filter_field} {hints.right_filter_operator or 'eq'} {hints.right_filter_value}")
+    if hints.filter_field and hints.filter_value:
+        items.append(f"{hints.filter_field} {hints.filter_operator or 'eq'} {hints.filter_value}")
+    return "；".join(items) if items else None
+
+
+def _format_prompt_filter_item(item: dict[str, Any]) -> str:
+    side = str(item.get("side", "global"))
+    side_label = {"left": "左侧", "right": "右侧", "global": ""}.get(side, side)
+    prefix = f"{side_label} " if side_label else ""
+    return f"{prefix}{item.get('field')} {item.get('operator')} {item.get('value')}"
+
+
+def _selected_prompt_variable_fields(selected_variables: list[VariableTag]) -> list[str]:
+    fields: list[str] = []
+    for variable in selected_variables:
+        if (variable.variable_kind or "single") == "composite":
+            fields.extend(variable.columns or [])
+            if variable.key_column:
+                fields.insert(0, variable.key_column)
+        elif variable.column:
+            fields.append(variable.column)
+    return _dedupe_prompt_values(fields)
+
+
+def _format_rule_params_for_template(hints: AiRuleWorkflowHints) -> str:
+    params: list[str] = []
+    if hints.expected_value:
+        params.append(f"期望值={hints.expected_value}")
+    if hints.expected_value_mode:
+        params.append(f"期望值模式={hints.expected_value_mode}")
+    if hints.regex_pattern:
+        params.append(f"正则={hints.regex_pattern}")
+    if hints.sequence_direction:
+        direction = "升序" if hints.sequence_direction == "asc" else "降序"
+        params.append(f"方向={direction}")
+    if hints.sequence_step:
+        params.append(f"步长={hints.sequence_step}")
+    if hints.sequence_start_mode:
+        start = "自动" if hints.sequence_start_mode == "auto" else hints.sequence_start_value or "需要用户确认"
+        params.append(f"起始={start}")
+    if hints.assertion_value_source == "field" and hints.assertion_expected_field:
+        params.append(f"字段比较={hints.assertion_field or hints.target_field}={hints.assertion_expected_field}")
+    elif hints.assertion_value:
+        params.append(f"断言值={hints.assertion_value}")
+    if hints.reference_variable_tag or hints.reference_field or hints.reference_sheet:
+        params.append(f"引用对象={hints.reference_variable_tag or hints.reference_field or hints.reference_sheet}")
+    if hints.pipeline_nodes:
+        params.append("节点=按 pipeline_nodes 配置")
+    if hints.mapping_nodes:
+        params.append("节点=按 mapping_nodes 配置")
+    return "；".join(item for item in params if item) or "无"
+
+
+def _clean_natural_sentence(value: str | None) -> str:
+    text = (value or "").strip()
+    text = re.sub(r"^(?:规则是|校验规则|补充说明|规则参数)\s*[：:=]\s*", "", text)
+    text = re.sub(r"[。；;]+$", "", text).strip()
+    return text
+
+
+def _is_empty_natural_value(value: str | None) -> bool:
+    text = (value or "").strip().lower()
+    return not text or text in {"无", "空", "none", "null", "-"}
+
+
+def _build_natural_prompt_description(
+    *,
+    target_text: str,
+    filter_text: str,
+    key_text: str,
+    rule_text: str,
+    extra_text: str,
+) -> str:
+    target = _clean_natural_sentence(target_text) or "需要用户确认：字段或内容"
+    filter_value = _clean_natural_sentence(filter_text)
+    key_value = _clean_natural_sentence(key_text)
+    rule_value = _clean_natural_sentence(rule_text) or "请填写校验条件"
+    extra_value = _clean_natural_sentence(extra_text) or "无"
+
+    if _is_empty_natural_value(filter_value) or re.match(r"^(全部数据|所有数据|不限制)$", filter_value, re.IGNORECASE):
+        filter_line = "只检查全部数据。"
+    elif filter_value.startswith("满足") or re.search(r"^(左侧|右侧|left|right)\b", filter_value, re.IGNORECASE):
+        filter_line = f"只检查{filter_value}。"
+    else:
+        filter_line = f"只检查满足 {filter_value} 的数据。"
+
+    if _is_empty_natural_value(key_value):
+        key_line = "如果需要按同一条配置对齐，用无作为 Key；不需要就写“无”。"
+    else:
+        key_line = f"如果需要按同一条配置对齐，用{key_value}作为 Key；不需要就写“无”。"
+
+    return "\n\n".join(
+        [
+            f"我想检查{target}。",
+            filter_line,
+            key_line,
+            f"规则是：{rule_value}。",
+            f"补充说明：{extra_value}",
         ]
     )
+
+
+def _format_natural_rule_sentence(
+    raw_description: str,
+    *,
+    hints: AiRuleWorkflowHints,
+    rule_type_hint: str | None,
+    key_field: str | None,
+    compare_fields: list[str],
+    fallback: str,
+) -> str:
+    rule_type = rule_type_hint or hints.rule_type_hint
+    field = hints.assertion_field or hints.target_field
+    operator_labels = {
+        "eq": "等于",
+        "ne": "不等于",
+        "gt": "大于",
+        "lt": "小于",
+        "not_null": "不能为空",
+        "regex": "匹配正则",
+        "unique": "不能重复",
+        "duplicate_required": "必须重复",
+    }
+    if rule_type == "not_null" and field:
+        return f"{field} 不能为空"
+    if rule_type == "unique" and field:
+        return f"{field} 不能重复"
+    if rule_type == "regex_check" and field:
+        suffix = f" {hints.regex_pattern}" if hints.regex_pattern else ""
+        return f"{field} 匹配正则{suffix}".strip()
+    if rule_type == "sequence_order_check" and field:
+        direction = "升序" if hints.sequence_direction == "asc" else "降序" if hints.sequence_direction == "desc" else "指定顺序"
+        step = f"，步长 {hints.sequence_step}" if hints.sequence_step else ""
+        start = f"，起始 {hints.sequence_start_value}" if hints.sequence_start_value else ""
+        return f"{field} 按{direction}连续{step}{start}"
+    if rule_type == "fixed_value_compare" and field:
+        operator = operator_labels.get(str(hints.operator or hints.assertion_operator or ""), hints.operator or hints.assertion_operator or "符合")
+        expected = hints.expected_value or hints.assertion_value
+        if hints.expected_value_mode == "set" and expected:
+            return f"{field} 只能是 {expected}"
+        return f"{field} {operator} {expected or '需要用户确认：期望值'}"
+    if rule_type == "cross_table_mapping" and field:
+        reference = hints.reference_field or hints.reference_variable_tag or hints.reference_sheet or "引用对象"
+        return f"{field} 必须存在于{reference}"
+    if rule_type == "composite_condition_check":
+        target = field or "需要用户确认：目标字段"
+        operator = operator_labels.get(str(hints.assertion_operator or ""), hints.assertion_operator or "符合条件")
+        if hints.assertion_value_source == "field" and hints.assertion_expected_field:
+            return f"{target} {operator}字段 {hints.assertion_expected_field}"
+        if hints.assertion_operator in {"not_null", "unique"}:
+            return f"{target} {operator}"
+        if hints.assertion_value:
+            return f"{target} {operator} {hints.assertion_value}"
+        return f"{target} 满足组合条件"
+    if rule_type == "dual_composite_compare":
+        fields = ", ".join(compare_fields) if compare_fields else "需要用户确认：比较字段"
+        key = key_field or "需要用户确认：Key 字段"
+        return f"左右两组按 {key} 对齐后，比较字段 {fields} 必须相等"
+    if rule_type in {"multi_composite_pipeline_check", "multi_composite_mapping_check"}:
+        return "按多组组合变量节点执行筛选和映射校验"
+
+    natural_rule = _extract_natural_rule_from_text(raw_description)
+    if natural_rule:
+        return natural_rule
+    cleaned_fallback = _clean_natural_sentence(fallback)
+    if cleaned_fallback and "规则类型：" not in cleaned_fallback:
+        return cleaned_fallback
+    return "需要用户确认：请补充最终判断关系"
+
+
+def _format_natural_extra_sentence(
+    hints: AiRuleWorkflowHints,
+    *,
+    reference_text: str = "无",
+    compare_text: str = "无",
+    rule_params: str = "",
+) -> str:
+    items: list[str] = []
+    if not _is_empty_natural_value(reference_text):
+        items.append(f"引用对象 {reference_text}")
+    if (
+        not _is_empty_natural_value(compare_text)
+        and hints.rule_type_hint == "dual_composite_compare"
+    ):
+        items.append(f"比较字段 {compare_text}")
+    params = _clean_natural_sentence(rule_params)
+    if not _is_empty_natural_value(params):
+        items.append(params)
+    if hints.regex_pattern and not any("正则" in item for item in items):
+        items.append(f"正则 {hints.regex_pattern}")
+    if hints.sequence_direction and not any("方向" in item for item in items):
+        direction = "升序" if hints.sequence_direction == "asc" else "降序"
+        items.append(f"排序方向 {direction}")
+    if hints.expected_value and not any("期望值" in item or hints.expected_value in item for item in items):
+        items.append(f"期望值 {hints.expected_value}")
+    return "；".join(items) if items else "无"
+
+
+def _extract_natural_rule_from_text(text: str) -> str | None:
+    match = re.search(r"规则是\s*[：:=]?\s*([^。；;\n\r]+)", text, re.IGNORECASE)
+    if not match:
+        return None
+    value = _clean_natural_sentence(match.group(1))
+    if not value or "【" in value or "】" in value:
+        return None
+    return value
+
+
+def _parse_prompt_template_sections(text: str) -> dict[str, str]:
+    labels = (
+        "数据源",
+        "sheet分页",
+        "变量选择",
+        "我想检查",
+        "只检查",
+        "规则类型",
+        "rule_type",
+        "目标字段",
+        "目标",
+        "目标列名",
+        "校验字段",
+        "筛选条件",
+        "Key字段",
+        "Key 字段",
+        "关联Key",
+        "引用对象",
+        "比较字段",
+        "筛选规则1",
+        "筛选规则2",
+        "校验规则",
+        "规则是",
+        "补充说明",
+        "规则参数",
+    )
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    sections: dict[str, list[str]] = {}
+    current_label: str | None = None
+    for line in text.replace("\r", "\n").split("\n"):
+        stripped = line.strip()
+        match = re.match(rf"^({label_pattern})\s*[：:]\s*(.*)$", stripped)
+        if match:
+            current_label = match.group(1)
+            sections.setdefault(current_label, []).append(match.group(2).strip())
+        elif current_label and stripped:
+            sections[current_label].append(stripped)
+    return {
+        label: "\n".join(item for item in values if item).strip()
+        for label, values in sections.items()
+    }
+
+
+def _prefer_model_or_fallback_template_value(
+    model_value: str | None,
+    fallback_value: str | None,
+    *,
+    default: str,
+) -> str:
+    normalized_model = _normalize_optional_template_value(model_value or "")
+    normalized_fallback = _normalize_optional_template_value(fallback_value or "")
+    if normalized_model and normalized_model != "无" and not normalized_model.startswith("需要用户确认"):
+        return normalized_model
+    if normalized_fallback and normalized_fallback != "无":
+        return normalized_fallback
+    if normalized_model and normalized_model != "无":
+        return normalized_model
+    return default
+
+
+def _normalize_optional_template_value(value: str) -> str:
+    return value.strip() if isinstance(value, str) and value.strip() else "无"
+
+
+def _build_prompt_template_from_sections(sections: dict[str, str]) -> str:
+    section_text = "\n".join(f"{key}：{value}" for key, value in sections.items() if value)
+    section_hints = extract_workflow_hints_from_text(section_text)
+    legacy_filter_values = [
+        sections.get("筛选规则1"),
+        sections.get("筛选规则2"),
+    ]
+    legacy_filter = "；".join(item for item in legacy_filter_values if item and item != "无")
+    filter_conditions = sections.get("筛选条件") or legacy_filter or "无"
+    raw_rule_text = sections.get("规则是") or sections.get("校验规则") or "请填写校验条件"
+    if "规则类型：" in raw_rule_text or "断言：" in raw_rule_text:
+        raw_rule_text = _format_natural_rule_sentence(
+            section_text,
+            hints=section_hints,
+            rule_type_hint=section_hints.rule_type_hint or sections.get("规则类型") or sections.get("rule_type"),
+            key_field=section_hints.key_column,
+            compare_fields=section_hints.compare_fields,
+            fallback=raw_rule_text,
+        )
+    extra_items = [
+        sections.get("补充说明"),
+        f"引用对象 {sections.get('引用对象')}" if sections.get("引用对象") and sections.get("引用对象") != "无" else "",
+        f"比较字段 {sections.get('比较字段')}"
+        if (
+            sections.get("比较字段")
+            and sections.get("比较字段") != "无"
+            and section_hints.rule_type_hint == "dual_composite_compare"
+        )
+        else "",
+        sections.get("规则参数") if sections.get("规则参数") and sections.get("规则参数") != "无" else "",
+    ]
+    return _build_natural_prompt_description(
+        target_text=sections.get("我想检查")
+        or sections.get("目标字段")
+        or sections.get("目标列名")
+        or sections.get("校验字段")
+        or section_hints.assertion_field
+        or section_hints.target_field
+        or "需要用户确认：字段或内容",
+        filter_text=sections.get("只检查") or filter_conditions,
+        key_text=sections.get("Key字段") or sections.get("Key 字段") or sections.get("关联Key") or "无",
+        rule_text=raw_rule_text,
+        extra_text="；".join(item for item in extra_items if item) or "无",
+    )
+
+
+def _format_template_filter_line(hints: AiRuleWorkflowHints, *, side: str = "global") -> str | None:
+    if side == "right":
+        if hints.right_filter_field and hints.right_filter_value:
+            return f"right：{hints.right_filter_field} {hints.right_filter_operator or 'eq'} {hints.right_filter_value}"
+        return None
+    if hints.left_filter_field and hints.left_filter_value:
+        return f"left：{hints.left_filter_field} {hints.left_filter_operator or 'eq'} {hints.left_filter_value}"
+    if hints.filter_field and hints.filter_value:
+        return f"{hints.filter_field} {hints.filter_operator or 'eq'} {hints.filter_value}"
+    return None
+
+
+def _dedupe_prompt_values(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        normalized = (value or "").strip()
+        if normalized and normalized not in result and not _is_placeholder_key_column(normalized):
+            result.append(normalized)
+    return result
 
 
 def _format_prompt_variable_line(variable: VariableTag) -> str:
@@ -1345,6 +2153,11 @@ def _build_intent_from_workflow_hints(
         required_fields = _unique_texts(
             [
                 workflow_hints.filter_field,
+                *(
+                    item.field
+                    for item in (_coerce_filter_hint(raw_item) for raw_item in workflow_hints.filters)
+                    if item is not None
+                ),
                 workflow_hints.assertion_field,
                 workflow_hints.target_field,
                 intent.target.column if intent.target else None,
@@ -1411,6 +2224,12 @@ def _build_intent_from_workflow_hints(
         or _infer_filter_operator_from_description(description, filter_field=filter_field, filter_value=filter_value)
         or "eq"
     )
+    filter_hints = _workflow_global_filters(
+        workflow_hints,
+        fallback_field=filter_field,
+        fallback_operator=filter_operator,
+        fallback_value=filter_value,
+    )
 
     missing: list[MissingItem] = []
     if not rule_type:
@@ -1462,7 +2281,7 @@ def _build_intent_from_workflow_hints(
                     suggested_action="none",
                 )
             )
-        if not (filter_field and filter_value):
+        if not filter_hints:
             missing.append(
                 MissingItem(
                     kind="parameter",
@@ -1648,11 +2467,16 @@ def _build_intent_from_workflow_hints(
                 composite_columns.insert(0, key_column)
         target_field = _canonical_variable_field(target_variable, target_field)
         filter_field = _canonical_variable_field(target_variable, filter_field)
+        filter_hints = _canonicalize_filter_hints(target_variable, filter_hints)
         display_field = _canonical_variable_field(target_variable, display_field)
         key_column = _canonical_variable_field(target_variable, key_column)
         assertion_field = _canonical_variable_field(
             target_variable,
             workflow_hints.assertion_field or target_field,
+        )
+        assertion_expected_field = _canonical_variable_field(
+            target_variable,
+            workflow_hints.assertion_expected_field,
         )
         if not key_column or len(composite_columns) < 2:
             return None, [
@@ -1676,9 +2500,12 @@ def _build_intent_from_workflow_hints(
             filter_field=filter_field,
             filter_operator=filter_operator,
             filter_value=filter_value,
+            filters=filter_hints,
             assertion_field=assertion_field,
             assertion_operator=workflow_hints.assertion_operator,
             assertion_value=workflow_hints.assertion_value,
+            assertion_value_source=workflow_hints.assertion_value_source,
+            assertion_expected_field=assertion_expected_field,
         ) or _canonicalize_composite_config_fields(intent.composite_config, target_variable)
         if composite_config is None:
             return None, [
@@ -1766,11 +2593,12 @@ def _build_intent_from_workflow_hints(
             expected_type="json",
         )
         reference = _variable_intent_from_existing(reference_variable) or target
+        compare_operator = workflow_hints.compare_operator or intent.operator or "eq"
         comparisons = [
             {
                 "comparison_id": f"ai-compare-{uuid4().hex[:8]}",
                 "left_field": field,
-                "operator": "eq",
+                "operator": compare_operator,
                 "right_field": field,
             }
             for field in compare_fields
@@ -1787,7 +2615,7 @@ def _build_intent_from_workflow_hints(
             display_field=display_field,
             target=target,
             reference=reference,
-            key_check_mode=intent.key_check_mode or "baseline_only",
+            key_check_mode=workflow_hints.key_check_mode or intent.key_check_mode or "baseline_only",
             left_key_field=workflow_hints.left_key_field or key_column,
             right_key_field=workflow_hints.right_key_field or key_column,
             comparisons=comparisons,  # type: ignore[arg-type]
@@ -1840,6 +2668,50 @@ def _build_intent_from_workflow_hints(
             sheet or "sheet",
             key_column,
         )
+        if rule_type == "multi_composite_pipeline_check" and workflow_hints.pipeline_nodes:
+            pipeline_config = {
+                "nodes": _build_multi_nodes_from_hints(
+                    workflow_hints.pipeline_nodes,
+                    fallback_variable_tag=variable_tag,
+                    display_field=display_field,
+                    mapping=False,
+                )
+            }
+            return RuleIntent(
+                verdict="ready",
+                rule_type=rule_type,
+                confidence=max(intent.confidence, 0.7),
+                reasoning_summary=_append_field_correction_summary(
+                    intent.reasoning_summary or "已根据结构化线索自动生成多组串行规则。",
+                    field_correction_warnings,
+                ),
+                rule_name=intent.rule_name or f"{sheet}-{key_column}-多组串行校验",
+                display_field=display_field,
+                target=target,
+                pipeline_config=pipeline_config,  # type: ignore[arg-type]
+            ), []
+        if rule_type == "multi_composite_mapping_check" and workflow_hints.mapping_nodes:
+            mapping_config = {
+                "nodes": _build_multi_nodes_from_hints(
+                    workflow_hints.mapping_nodes,
+                    fallback_variable_tag=variable_tag,
+                    display_field=display_field,
+                    mapping=True,
+                )
+            }
+            return RuleIntent(
+                verdict="ready",
+                rule_type=rule_type,
+                confidence=max(intent.confidence, 0.7),
+                reasoning_summary=_append_field_correction_summary(
+                    intent.reasoning_summary or "已根据结构化线索自动生成多组映射规则。",
+                    field_correction_warnings,
+                ),
+                rule_name=intent.rule_name or f"{sheet}-{key_column}-多组映射校验",
+                display_field=display_field,
+                target=target,
+                mapping_config=mapping_config,  # type: ignore[arg-type]
+            ), []
         filters = []
         if filter_field and filter_value:
             filters.append(
@@ -1925,19 +2797,86 @@ def _build_intent_from_workflow_hints(
     ]
 
 
+def _build_multi_nodes_from_hints(
+    nodes: list[dict[str, Any]],
+    *,
+    fallback_variable_tag: str,
+    display_field: str | None,
+    mapping: bool,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for index, raw_node in enumerate(nodes, start=1):
+        if not isinstance(raw_node, dict):
+            continue
+        variable_tag = _first_text(str(raw_node.get("variable_tag") or ""), fallback_variable_tag)
+        filters = [
+            _condition_from_hint_dict(item, for_filter=True)
+            for item in raw_node.get("filters", [])
+            if isinstance(item, dict)
+        ]
+        filters = [item for item in filters if item is not None]
+        assertions = [
+            _condition_from_hint_dict(item, for_filter=False)
+            for item in raw_node.get("assertions", [])
+            if isinstance(item, dict)
+        ]
+        assertions = [item for item in assertions if item is not None]
+        node: dict[str, Any] = {
+            "node_id": str(raw_node.get("node_id") or f"ai-node-{index}"),
+            "variable_tag": variable_tag,
+            "display_field": _first_text(str(raw_node.get("display_field") or ""), display_field),
+            "filters": filters,
+        }
+        if mapping:
+            node["filters"] = [{**item, "exclusion_ranges": []} for item in filters]
+        else:
+            node["assertions"] = assertions
+        result.append(node)
+    return result
+
+
+def _condition_from_hint_dict(item: dict[str, Any], *, for_filter: bool) -> dict[str, Any] | None:
+    field = _first_text(str(item.get("field") or ""))
+    operator = _first_text(str(item.get("operator") or ""))
+    if not field or not operator:
+        return None
+    if for_filter and operator not in {"eq", "ne", "gt", "lt", "not_null", "contains", "not_contains"}:
+        return None
+    if not for_filter and operator not in {"eq", "ne", "gt", "lt", "not_null", "regex", "unique", "duplicate_required"}:
+        return None
+    expected_value = _first_text(str(item.get("expected_value") or ""), str(item.get("value") or ""))
+    return _condition(
+        field=field,
+        operator=operator,
+        expected_value=expected_value,
+        value_source=str(item.get("value_source") or "literal"),
+        expected_field=_first_text(str(item.get("expected_field") or "")),
+    )
+
+
 def _infer_hint_rule_type(
     intent: RuleIntent,
     workflow_hints: AiRuleWorkflowHints,
     description: str,
 ) -> str | None:
     has_filter_assertion_pair = bool(
-        workflow_hints.filter_field
-        and workflow_hints.filter_value
+        (
+            workflow_hints.filters
+            or (
+                workflow_hints.filter_field
+                and (workflow_hints.filter_value or workflow_hints.filter_operator == "not_null")
+            )
+        )
         and workflow_hints.assertion_field
-        and workflow_hints.assertion_value
+        and (
+            workflow_hints.assertion_value
+            or workflow_hints.assertion_expected_field
+            or workflow_hints.assertion_operator
+        )
     )
     has_composite_signals = bool(
-        workflow_hints.filter_field
+        workflow_hints.filters
+        or workflow_hints.filter_field
         or workflow_hints.display_field
         or workflow_hints.key_column
         or workflow_hints.composite_columns
@@ -1968,7 +2907,8 @@ def _infer_hint_rule_type(
     if workflow_hints.regex_pattern:
         return (
             "composite_condition_check"
-            if workflow_hints.filter_field
+            if workflow_hints.filters
+            or workflow_hints.filter_field
             or workflow_hints.display_field
             or workflow_hints.key_column
             or workflow_hints.composite_columns
@@ -1998,6 +2938,49 @@ def _infer_hint_rule_type(
     return None
 
 
+def _workflow_global_filters(
+    workflow_hints: AiRuleWorkflowHints,
+    *,
+    fallback_field: str | None,
+    fallback_operator: str | None,
+    fallback_value: str | None,
+) -> list[AiRuleFilterHint]:
+    filters: list[AiRuleFilterHint] = []
+    for raw_item in workflow_hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        if item.field and (item.value or item.operator == "not_null") and item not in filters:
+            filters.append(item)
+    if fallback_field and (fallback_value or fallback_operator == "not_null"):
+        fallback = AiRuleFilterHint(
+            field=fallback_field,
+            operator=fallback_operator or "eq",
+            value=fallback_value or "",
+        )
+        if fallback not in filters:
+            filters.append(fallback)
+    return filters
+
+
+def _canonicalize_filter_hints(
+    variable: VariableTag | None,
+    filters: list[AiRuleFilterHint],
+) -> list[AiRuleFilterHint]:
+    result: list[AiRuleFilterHint] = []
+    for raw_item in filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        resolved_field = _canonical_variable_field(variable, item.field)
+        if not resolved_field:
+            continue
+        next_item = item.model_copy(update={"field": resolved_field})
+        if next_item not in result:
+            result.append(next_item)
+    return result
+
+
 def _build_hint_composite_config(
     *,
     target_field: str,
@@ -2005,16 +2988,27 @@ def _build_hint_composite_config(
     filter_field: str | None,
     filter_operator: str | None,
     filter_value: str | None,
+    filters: list[AiRuleFilterHint] | None = None,
     assertion_field: str | None,
     assertion_operator: str | None,
     assertion_value: str | None,
+    assertion_value_source: str | None = None,
+    assertion_expected_field: str | None = None,
 ) -> Any | None:
     final_assertion_field = (
         assertion_field if isinstance(assertion_field, str) and assertion_field.strip() else target_field
     )
     final_assertion_operator = assertion_operator or ("regex" if regex_pattern else None)
     final_assertion_value = _first_text(assertion_value, regex_pattern)
+    final_value_source = "field" if assertion_value_source == "field" and assertion_expected_field else "literal"
     if not final_assertion_field or not final_assertion_operator:
+        return None
+    no_value_assertion_operators = {"not_null", "unique", "duplicate_required"}
+    if (
+        final_value_source == "literal"
+        and final_assertion_operator not in no_value_assertion_operators
+        and not final_assertion_value
+    ):
         return None
     config = {
         "global_filters": [],
@@ -2027,17 +3021,33 @@ def _build_hint_composite_config(
                         field=final_assertion_field,
                         operator=final_assertion_operator,
                         expected_value=final_assertion_value,
+                        value_source=final_value_source,
+                        expected_field=assertion_expected_field,
                     )
                 ],
             }
         ],
     }
-    if filter_field and filter_value:
+    for raw_item in filters or []:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        config["global_filters"].append(
+            _condition(
+                field=item.field,
+                operator=item.operator or "eq",
+                expected_value=item.value,
+            )
+        )
+    if filter_field and (filter_value or filter_operator == "not_null") and not any(
+        condition.get("field") == filter_field and condition.get("expected_value") == filter_value
+        for condition in config["global_filters"]
+    ):
         config["global_filters"].append(
             _condition(
                 field=filter_field,
                 operator=filter_operator or "not_contains",
-                expected_value=filter_value,
+                expected_value=filter_value or "",
             )
         )
     return config
@@ -2048,17 +3058,31 @@ def _condition(
     field: str,
     operator: str,
     expected_value: str | None = None,
+    value_source: str = "literal",
+    expected_field: str | None = None,
 ) -> dict[str, Any]:
     normalized_expected_value = (expected_value or "").strip()
+    normalized_value_source = "field" if value_source == "field" and expected_field else "literal"
     condition: dict[str, Any] = {
         "condition_id": f"ai-condition-{uuid4().hex[:8]}",
         "field": field,
         "operator": operator,
-        "value_source": "literal",
     }
-    if operator != "not_null":
+    if operator in {"not_null", "unique", "duplicate_required"}:
+        return condition
+    if operator == "regex":
         condition["expected_value"] = normalized_expected_value
-    if operator in {"eq", "ne"} and _looks_like_expected_value_set(normalized_expected_value):
+        return condition
+    condition["value_source"] = normalized_value_source
+    if normalized_value_source == "field":
+        condition["expected_field"] = str(expected_field).strip()
+    else:
+        condition["expected_value"] = normalized_expected_value
+    if (
+        normalized_value_source == "literal"
+        and operator in {"eq", "ne"}
+        and _looks_like_expected_value_set(normalized_expected_value)
+    ):
         condition["expected_value_mode"] = "set"
     return condition
 
@@ -2139,6 +3163,7 @@ def _canonicalize_workflow_hints_fields(
         "display_field",
         "filter_field",
         "assertion_field",
+        "assertion_expected_field",
         "key_column",
         "left_filter_field",
         "right_filter_field",
@@ -2165,6 +3190,17 @@ def _canonicalize_workflow_hints_fields(
             composite_columns.append(resolved)
     if composite_columns != workflow_hints.composite_columns:
         updates["composite_columns"] = composite_columns
+
+    filters: list[AiRuleFilterHint] = []
+    for raw_item in workflow_hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        resolved = resolve(item.field)
+        if resolved:
+            filters.append(item.model_copy(update={"field": resolved}))
+    if filters != workflow_hints.filters:
+        updates["filters"] = filters
 
     if not updates:
         return workflow_hints, warnings, unresolved
@@ -2199,6 +3235,7 @@ def _canonicalize_workflow_hints_fields_from_metadata(
         "display_field",
         "filter_field",
         "assertion_field",
+        "assertion_expected_field",
         "key_column",
         "left_filter_field",
         "right_filter_field",
@@ -2225,6 +3262,17 @@ def _canonicalize_workflow_hints_fields_from_metadata(
             composite_columns.append(resolved)
     if composite_columns != workflow_hints.composite_columns:
         updates["composite_columns"] = composite_columns
+
+    filters: list[AiRuleFilterHint] = []
+    for raw_item in workflow_hints.filters:
+        item = _coerce_filter_hint(raw_item)
+        if item is None:
+            continue
+        resolved = resolve(item.field)
+        if resolved:
+            filters.append(item.model_copy(update={"field": resolved}))
+    if filters != workflow_hints.filters:
+        updates["filters"] = filters
 
     if not updates:
         return workflow_hints, warnings, unresolved
@@ -2460,6 +3508,11 @@ def _resolve_hint_composite_columns(
             display_field,
             target_field,
             filter_field,
+            *(
+                item.field
+                for item in (_coerce_filter_hint(raw_item) for raw_item in workflow_hints.filters)
+                if item is not None
+            ),
         ]
     )
     key_column = _first_text(_clean_key_column(workflow_hints.key_column), variable.key_column if variable is not None else None)

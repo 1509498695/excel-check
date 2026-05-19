@@ -193,6 +193,42 @@
   flex: 1 1 420px;
 }
 
+.smart-rule-auto-complete-fields {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.smart-rule-auto-complete-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smart-rule-auto-complete-field > span {
+  color: var(--color-text-body, #475569);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.smart-rule-input-gate {
+  flex: 1 1 100%;
+  border: 1px solid var(--color-warning-soft, #fff1e8);
+  border-radius: 10px;
+  background: #fffaf5;
+  padding: 8px 10px;
+  color: var(--color-warning, #ff7a1a);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.smart-rule-input-gate span {
+  color: var(--color-text-subtle, #94a3b8);
+  font-weight: 600;
+}
+
 .smart-rule-template-panel {
   margin-top: 14px;
   border: 1px solid var(--color-border-light, #e5eaf3);
@@ -1264,6 +1300,7 @@
 }
 
 @media (max-width: 900px) {
+  .smart-rule-auto-complete-fields,
   .smart-rule-hints__grid,
   .pending-config-preview__grid,
   .ai-preview-result__stats {

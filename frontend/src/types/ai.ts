@@ -75,7 +75,7 @@ export interface RulePromptOptimizeClues {
   key_field?: string | null
   filters: Array<Record<string, unknown>>
   compare_fields: string[]
-  compare_operator?: 'eq' | 'ne' | 'gt' | 'lt' | null
+  compare_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | null
 }
 
 export interface RulePromptOptimizeResult {
@@ -104,6 +104,11 @@ export interface AiRuleWorkflowHints {
   filter_field?: string | null
   filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'contains' | 'not_contains' | null
   filter_value?: string | null
+  filters?: Array<{
+    field: string
+    operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | 'contains' | 'not_contains'
+    value: string
+  }>
   assertion_field?: string | null
   assertion_operator?:
     | 'eq'
@@ -115,6 +120,8 @@ export interface AiRuleWorkflowHints {
     | 'unique'
     | 'duplicate_required'
     | null
+  assertion_value_source?: 'literal' | 'field' | null
+  assertion_expected_field?: string | null
   assertion_value?: string | null
   operator?: 'eq' | 'ne' | 'gt' | 'lt' | null
   expected_value?: string | null
@@ -134,13 +141,15 @@ export interface AiRuleWorkflowHints {
   reference_key_column?: string | null
   reference_composite_columns?: string[]
   left_filter_field?: string | null
-  left_filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'contains' | 'not_contains' | null
+  left_filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | 'contains' | 'not_contains' | null
   left_filter_value?: string | null
   right_filter_field?: string | null
-  right_filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'contains' | 'not_contains' | null
+  right_filter_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | 'contains' | 'not_contains' | null
   right_filter_value?: string | null
   left_key_field?: string | null
   right_key_field?: string | null
+  compare_operator?: 'eq' | 'ne' | 'gt' | 'lt' | 'not_null' | null
+  key_check_mode?: 'baseline_only' | 'bidirectional' | null
   compare_fields?: string[]
   pipeline_nodes?: Record<string, unknown>[]
   mapping_nodes?: Record<string, unknown>[]

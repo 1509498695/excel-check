@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { ArrowDown, ArrowUp, Delete, MagicStick, Refresh, Setting } from '@element-plus/icons-vue'
 
 import PrimaryButton from '../shell/PrimaryButton.vue'
 import SecondaryButton from '../shell/SecondaryButton.vue'
 import type { VariableTag } from '../../types/workbench'
 import type { AiRuleTemplate } from '../../utils/aiRuleTemplates'
+import { AI_RULE_DESCRIPTION_TEMPLATE } from '../../utils/aiRuleInputDraft'
 
 const props = defineProps<{
   description: string
   selectedVariableTags: string[]
   allowAutoComplete: boolean
+  autoCompleteSource: string
+  autoCompleteSheet: string
+  autoCompleteVariables: string
   variables: VariableTag[]
   providerLabel: string
   isConfigured: boolean
   isGenerating: boolean
   isOptimizing: boolean
   canGenerate: boolean
+  autoCompleteMissingItems: string[]
   maxLength: number
   promptText: string
   templates: AiRuleTemplate[]
@@ -27,6 +32,9 @@ const emit = defineEmits<{
   (e: 'update:description', value: string): void
   (e: 'update:selectedVariableTags', value: string[]): void
   (e: 'update:allowAutoComplete', value: boolean): void
+  (e: 'update:autoCompleteSource', value: string): void
+  (e: 'update:autoCompleteSheet', value: string): void
+  (e: 'update:autoCompleteVariables', value: string): void
   (e: 'optimize'): void
   (e: 'generate'): void
   (e: 'clear'): void
@@ -39,15 +47,13 @@ const emit = defineEmits<{
 
 const showPrompt = ref(false)
 const templatesExpanded = ref(false)
+const descriptionInputRef = ref()
 
 const descriptionCount = computed(() => props.description.length)
 const visibleTemplates = computed(() => props.templates.slice(0, 10))
 const visibleRecommendedTemplates = computed(() => props.recommendedTemplates.slice(0, 6))
 const templateCountText = computed(() => `${visibleTemplates.value.length} 个模板`)
-const placeholder = `推荐格式：
-筛选DESC3=升级p1建筑到p2级p4次,完成p2等级的p1科研，两种类型。STR_ABSwitch字段=GreenServer:0 or SLG2:0。
-
-也可以写：目标字段不能为空 / 字段不能重复 / 字段只能是 A,B,C / 按 Key 对比两组配置是否相等。`
+const placeholder = AI_RULE_DESCRIPTION_TEMPLATE
 
 const variableOptions = computed(() =>
   props.variables.map((variable) => ({
@@ -59,6 +65,23 @@ const variableOptions = computed(() =>
 
 function updateDescription(value: string): void {
   emit('update:description', value)
+}
+
+async function focusDescriptionTail(): Promise<void> {
+  if (props.description !== AI_RULE_DESCRIPTION_TEMPLATE) {
+    return
+  }
+  await nextTick()
+  const textarea = descriptionInputRef.value?.textarea
+  if (
+    !textarea ||
+    typeof textarea.value !== 'string' ||
+    typeof textarea.setSelectionRange !== 'function'
+  ) {
+    return
+  }
+  const position = textarea.value.length
+  textarea.setSelectionRange(position, position)
 }
 
 function updateAllowAutoComplete(value: string | number | boolean): void {
@@ -144,6 +167,43 @@ function buildVariableDetail(variable: VariableTag): string {
           </div>
         </el-option>
       </el-select>
+
+      <div v-if="allowAutoComplete" class="smart-rule-auto-complete-fields">
+        <label class="smart-rule-auto-complete-field">
+          <span>数据源</span>
+          <el-input
+            :model-value="autoCompleteSource"
+            placeholder="配置表链接"
+            clearable
+            @update:model-value="(value: string) => emit('update:autoCompleteSource', value)"
+          />
+        </label>
+        <label class="smart-rule-auto-complete-field">
+          <span>sheet分页</span>
+          <el-input
+            :model-value="autoCompleteSheet"
+            placeholder="sheet名"
+            clearable
+            @update:model-value="(value: string) => emit('update:autoCompleteSheet', value)"
+          />
+        </label>
+        <label class="smart-rule-auto-complete-field">
+          <span>变量选择</span>
+          <el-input
+            :model-value="autoCompleteVariables"
+            placeholder="变量1,变量2"
+            clearable
+            @update:model-value="(value: string) => emit('update:autoCompleteVariables', value)"
+          />
+        </label>
+      </div>
+      <div
+        v-if="allowAutoComplete && autoCompleteMissingItems.length"
+        class="smart-rule-input-gate"
+      >
+        <span>请先补齐：</span>
+        <strong>{{ autoCompleteMissingItems.join('、') }}</strong>
+      </div>
     </div>
 
     <div v-if="visibleRecommendedTemplates.length" class="smart-rule-template-panel is-recommended">
@@ -222,12 +282,14 @@ function buildVariableDetail(variable: VariableTag): string {
 
     <div class="smart-rule-textarea-wrap">
       <el-input
+        ref="descriptionInputRef"
         :model-value="description"
         type="textarea"
         :rows="6"
         resize="vertical"
         :maxlength="maxLength"
         :placeholder="placeholder"
+        @focus="focusDescriptionTail"
         @update:model-value="updateDescription"
       />
       <div class="smart-rule-counter">{{ descriptionCount }} / {{ maxLength }}</div>

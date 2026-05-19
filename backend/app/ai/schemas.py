@@ -46,6 +46,25 @@ MissingAction = Literal[
     "edit_description",
     "none",
 ]
+AiFilterOperator = Literal["eq", "ne", "gt", "lt", "not_null", "contains", "not_contains"]
+AiDualCompareOperator = Literal["eq", "ne", "gt", "lt", "not_null"]
+
+
+class AiRuleFilterHint(BaseModel):
+    """AI 工作流中一条可编译的筛选线索。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    operator: AiFilterOperator = "eq"
+    value: str = ""
+
+    @field_validator("field", "operator", "value", mode="before")
+    @classmethod
+    def _strip_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class AiProviderConfigIn(BaseModel):
@@ -109,10 +128,13 @@ class AiRuleWorkflowHints(BaseModel):
     target_field: str | None = None
     display_field: str | None = None
     filter_field: str | None = None
-    filter_operator: Literal["eq", "ne", "gt", "lt", "contains", "not_contains"] | None = None
+    filter_operator: AiFilterOperator | None = None
     filter_value: str | None = None
+    filters: list[AiRuleFilterHint] = Field(default_factory=list)
     assertion_field: str | None = None
     assertion_operator: Literal["eq", "ne", "gt", "lt", "not_null", "regex", "unique", "duplicate_required"] | None = None
+    assertion_value_source: Literal["literal", "field"] | None = None
+    assertion_expected_field: str | None = None
     assertion_value: str | None = None
     operator: FixedRuleOperator | None = None
     expected_value: str | None = None
@@ -132,13 +154,15 @@ class AiRuleWorkflowHints(BaseModel):
     reference_key_column: str | None = None
     reference_composite_columns: list[str] = Field(default_factory=list)
     left_filter_field: str | None = None
-    left_filter_operator: Literal["eq", "ne", "gt", "lt", "contains", "not_contains"] | None = None
+    left_filter_operator: AiFilterOperator | None = None
     left_filter_value: str | None = None
     right_filter_field: str | None = None
-    right_filter_operator: Literal["eq", "ne", "gt", "lt", "contains", "not_contains"] | None = None
+    right_filter_operator: AiFilterOperator | None = None
     right_filter_value: str | None = None
     left_key_field: str | None = None
     right_key_field: str | None = None
+    compare_operator: AiDualCompareOperator | None = None
+    key_check_mode: Literal["baseline_only", "bidirectional"] | None = None
     compare_fields: list[str] = Field(default_factory=list)
     pipeline_nodes: list[dict[str, Any]] = Field(default_factory=list)
     mapping_nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -160,6 +184,8 @@ class AiRuleWorkflowHints(BaseModel):
         "filter_value",
         "assertion_field",
         "assertion_operator",
+        "assertion_value_source",
+        "assertion_expected_field",
         "assertion_value",
         "operator",
         "expected_value",
@@ -184,6 +210,8 @@ class AiRuleWorkflowHints(BaseModel):
         "right_filter_value",
         "left_key_field",
         "right_key_field",
+        "compare_operator",
+        "key_check_mode",
         mode="before",
     )
     @classmethod
@@ -297,7 +325,7 @@ class RulePromptOptimizeClues(BaseModel):
     key_field: str | None = None
     filters: list[dict[str, Any]] = Field(default_factory=list)
     compare_fields: list[str] = Field(default_factory=list)
-    compare_operator: FixedRuleOperator | None = None
+    compare_operator: AiDualCompareOperator | None = None
 
 
 class RulePromptOptimizeResponse(BaseModel):

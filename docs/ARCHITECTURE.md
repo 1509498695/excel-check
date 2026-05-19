@@ -52,7 +52,7 @@ Excel Check 解决游戏 / 配置类项目中「同一份配置表反复需要�
 - 多项目数据隔离：项目校验按 `project_id`、个人校验配置按 `project_id + user_id`。
 - 个人校验四步工作流：数据源 → 变量池 → 规则编排 → 结果；可刷新当前用户个人配置中的 SVN 来源。
 - 个人校验步骤 03 可将已勾选手动规则导入项目校验：先预检数据源 / 字段 / 变量 / 重复规则，用户可调整本次导入草稿数据源，确认后只写入兼容规则，不覆盖项目已有配置。
-- 个人校验步骤 03 的 AI Agent 工作流：目标变量多选 + 规则描述 → 模型意图草稿 / 后端自然语言兜底解析 → 确定性编译 → 返回 `ready / needs_input / rejected`；默认只复用用户选择的变量池变量，不自动新增数据源或变量，用户也可开启“允许 AI 自动补齐数据源/变量”后不强制选择目标变量。`ready` 草稿会先由前端临时合并为 `TaskTree` 并在面板内预校验，用户确认后才复用现有数据源、变量池、规则编排 store 一键添加并立即保存。
+- 个人校验步骤 03 的 AI Agent 工作流：目标变量多选 + 短模板规则描述 → `workflow_hints` 线索抽取 → 规则候选批判与收窄 → 后端优先确定性编译或调用模型补语义 → 返回 `ready / needs_input / rejected`；默认只复用用户选择的变量池变量，不自动新增数据源或变量，用户也可开启“允许 AI 自动补齐数据源/变量”后不强制选择目标变量。开启自动补齐时，前端会在独立输入区要求补齐 `数据源 / sheet分页 / 变量选择`，规则描述推荐填写 `筛选：- 字段=值 / - 字段唯一`、`Key值选择：字段名`、`判定：字段必须重复`，后端在线索完整且未命中公式 / 聚合等不支持能力时可先跳过模型直接生成草稿。“优化输入”会把短模板或自然句规范为规则 DSL：`composite_condition_check` 支持多行 `筛选`、`Key` 和 `断言`，`dual_composite_compare` 支持左右筛选、Key 和比较字段。候选批判会先按当前 10 类规则打分，识别多个最终断言、规则类型歧义和不支持能力，明确候选会回写 `rule_type_hint`，高风险输入会直接返回 `needs_input` 或 `rejected`。旧自然句模板、旧 v3 技术模板和旧三段模板继续兼容，但不再作为默认输入展示。`ready` 草稿会先由前端临时合并为 `TaskTree` 并在面板内预校验，用户确认后才复用现有数据源、变量池、规则编排 store 一键添加并立即保存。
 - 项目校验页独立 `version=6` 配置：`sources / variables / groups / rules` 一体化保存，并兼容历史路径替换字段。
 - 10 类规则：`not_null / unique / regex_check / sequence_order_check / fixed_value_compare / cross_table_mapping / composite_condition_check / dual_composite_compare / multi_composite_pipeline_check / multi_composite_mapping_check`。
 - 组合变量：同一数据源同 Sheet 的多列组合，支持 `key_column` 与 JSON 映射。
@@ -253,7 +253,7 @@ AI 模型凭据和规则草稿都进入 SQLite 运行库，并沿用现有 Ferne
 | `POST` | `/ai/drafts/{draft_id}/apply` | 标记草稿已被前端应用。 |
 | `DELETE` | `/ai/drafts/{draft_id}` / `/ai/drafts` | 删除单条或清空当前项目当前用户草稿。 |
 
-`/ai/agents/rule-draft` 在调用模型前只发送元数据上下文：数据源 ID / 类型 / Sheet / 列名、变量池 schema、现有规则摘要，不发送单元格业务值。当前前端默认携带 `input_mode=free_text`、`allow_auto_complete=false`、`selected_variable_tags` 和变量角色线索；用户开启自动补齐开关时会发送 `allow_auto_complete=true`，目标变量可为空。旧调用仍兼容 `workflow_hints` 的结构化字段。`allow_auto_complete=false` 时，后端会强制草稿只引用 `selected_variable_tags` 中的变量，不返回待新增数据源或变量；`allow_auto_complete=true` 时沿用既有自动补齐能力，可返回待新增数据源 / 变量草稿。后端自然语言兜底解析支持 `筛选字段=值1,值2` 和 `字段=值1 or 值2` 这类集合表达，并按变量池真实列名回写字段。变量未选、变量类型不匹配、字段或参数不足时返回 `needs_input`，当前 10 类规则无法表达时返回 `rejected` 并携带 `extension_suggestions`。前端对 `ready` 草稿的预校验复用现有 `/engine/execute`，但不写入个人配置、不覆盖正式结果面板。
+`/ai/agents/rule-draft` 在调用模型前只发送元数据上下文：数据源 ID / 类型 / Sheet / 列名、变量池 schema、现有规则摘要，不发送单元格业务值。当前前端默认携带 `input_mode=free_text`、`allow_auto_complete=false`、`selected_variable_tags` 和变量角色线索；用户开启自动补齐开关时会发送 `allow_auto_complete=true`，目标变量可为空。旧调用仍兼容 `workflow_hints` 的结构化字段。`allow_auto_complete=false` 时，后端会强制草稿只引用 `selected_variable_tags` 中的变量，不返回待新增数据源或变量；`allow_auto_complete=true` 时沿用既有自动补齐能力，可返回待新增数据源 / 变量草稿。后端自然语言兜底解析支持短模板 `筛选 / Key值选择 / 判定`，也继续兼容 `我想检查 / 筛选条件 / Key / 规则是 / 补充说明`、`筛选字段=值1,值2`、`字段=值1 or 值2`、旧三段模板以及 v3 规则语义模板；`数据源 / sheet分页 / 变量选择` 来自独立输入区、`workflow_hints` 或历史旧模板，并按变量池或真实表头回写字段。`workflow_hints.filters` 可承载多条全局筛选，旧的 `filter_field / filter_operator / filter_value` 继续兼容，筛选操作符覆盖 `eq / ne / gt / lt / contains / not_contains / not_null`；`筛选` 区里的 `FIELD 唯一` 只作为 Key / 唯一性前置条件，不生成最终 `unique` 规则。`判定：A 等于字段 B`、`规则是：A 等于字段 B`、DSL `断言：A 等于字段 B` 或旧 `校验规则：A=B` 若两侧都是字段，会通过 `workflow_hints.assertion_value_source=field` 与 `assertion_expected_field` 编译为组合分支字段对字段断言；组合断言还可抽取 `not_null / regex / unique / duplicate_required / eq / ne / gt / lt`。`dual_composite_compare` 额外识别 `workflow_hints.compare_operator` 和 `key_check_mode`，用于表达非等值比较和“基准为准 / 双向检查”。固定模板线索足够时，后端会先做规则类型推断、元数据匹配和字段纠偏；若可确定生成 `ready` 草稿，则无需等待模型输出。变量未选、变量类型不匹配、字段或参数不足时返回 `needs_input`，当前 10 类规则无法表达时返回 `rejected` 并携带 `extension_suggestions`。前端对 `ready` 草稿的预校验复用现有 `/engine/execute`，但不写入个人配置、不覆盖正式结果面板。
 
 ### 5.6 项目校验 `/fixed-rules`
 
@@ -336,7 +336,7 @@ def handle_composite(ctx): ...
 | `sequence_order_check` | 单变量 | 按原始行序检查数值连续性 |
 | `fixed_value_compare` | 单变量 | 与常量值的 `eq / ne / gt / lt` 比较 |
 | `cross_table_mapping` | 单变量 | 跨表映射（值需在另一变量集合中）；个人校验规则弹窗中的 `包含 (in)` 前端保存时复用该规则 |
-| `composite_condition_check` | 组合变量 | 全局筛选 + 分支筛选 + 分支校验，校验操作符覆盖 `eq / ne / gt / lt / not_null / regex / unique / duplicate_required`；分支 `not_null` 会识别 Excel 空单元格、`NaN`、空字符串和纯空白字符串，且空 `key_column` 行仍参与组合分支断言 |
+| `composite_condition_check` | 组合变量 | 全局筛选 + 分支筛选 + 分支校验，校验操作符覆盖 `eq / ne / gt / lt / not_null / regex / unique / duplicate_required`；断言值可来自字面量或同一组合变量内字段（`value_source=field + expected_field`）；分支 `not_null` 会识别 Excel 空单元格、`NaN`、空字符串和纯空白字符串，且空 `key_column` 行仍参与组合分支断言 |
 | `dual_composite_compare` | 组合变量 | 对左右组合变量分别应用可选筛选后按 `left_key_field / right_key_field` 对齐，再执行多字段 AND 比较；缺省按 `__key__` 兼容旧规则，同一组合变量模式要求左右筛选都非空 |
 | `multi_composite_pipeline_check` | 组合变量 | 1..N 个组合变量节点串行执行，首个失败节点短路后续节点 |
 | `multi_composite_mapping_check` | 组合变量 | 1..N 个组合变量节点独立执行；每条筛选条件独立检查失败行，并可按筛选失败排除行号范围移除预期异常 |

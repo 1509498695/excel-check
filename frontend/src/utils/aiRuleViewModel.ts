@@ -240,6 +240,20 @@ function getMissingActionGuide(missing?: AiMissingItem): string {
   return guides[missing.suggested_action]
 }
 
+function getMissingReasonCategory(missing?: AiMissingItem): string {
+  const message = missing?.message ?? ''
+  if (missing?.kind === 'source' || /数据源|配置表|路径/.test(message)) return '缺数据源'
+  if (/Sheet|sheet|分页|页签/.test(message)) return '缺 Sheet'
+  if (/字段不存在|不存在或无法唯一匹配|缺少列|缺列|缺少目标字段|列名/.test(message)) {
+    return '缺字段或字段不存在'
+  }
+  if (/Key|key|主键|唯一键/.test(message)) return '需要 Key 字段'
+  if (missing?.kind === 'ability' || /能力|不支持|无法表达/.test(message)) return '规则类型不支持'
+  if (missing?.kind === 'parameter' || /参数|操作符|比较值|筛选值|正则/.test(message)) return '缺规则参数'
+  if (missing?.kind === 'variable') return '缺变量'
+  return '输入信息不足'
+}
+
 function getPrefillSummary(prefill?: Record<string, unknown>): string {
   const entries = Object.entries(prefill ?? {})
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
@@ -257,9 +271,15 @@ function buildMissingExplanation(
 > {
   const kindLabel = getMissingKindLabel(missing?.kind)
   const actionText = getMissingActionLabel(missing?.suggested_action)
+  const category = getMissingReasonCategory(missing)
   return {
     explanationTitle: `还缺${kindLabel}`,
     explanationItems: [
+      {
+        label: '失败归类',
+        text: category,
+        tone: 'warning',
+      },
       {
         label: '缺口说明',
         text: missing?.message || '当前输入还不足以生成可预校验的规则草稿。',
@@ -437,14 +457,14 @@ export function mapAiDraftToResultItems(draft: AiRuleDraft | null): AiRuleResult
   const missingItems: AiRuleResultViewModel[] = draft.missing.map((item, index) => ({
     id: `missing-${item.kind}-${index}`,
     status: 'needs_input' as const,
-    title: '信息不足，暂不能自动添加',
+    title: `${getMissingReasonCategory(item)}，暂不能自动添加`,
     ruleTypeLabel: getAiRuleTypeLabel(draft.rule_type),
     sourceLabel: '-',
     sheetLabel: '-',
     fieldLabel: '-',
     variableLabel: '-',
     groupLabel: 'AI生成规则组',
-    metaText: `缺口类型 ${item.kind}`,
+    metaText: `缺口类型 ${item.kind} / ${getMissingReasonCategory(item)}`,
     missingText: item.message,
     reasonText: '',
     ...buildMissingExplanation(item, draft.rule_type),

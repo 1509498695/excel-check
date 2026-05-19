@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from sqlalchemy import select
 
 from backend.app.ai.hint_extractor import extract_workflow_hints_from_text
+from backend.app.ai.prompts import build_prompt_optimize_system_prompt
 from backend.app.ai.providers import ProviderConnectionError
 from backend.app.database import async_session_factory
 from backend.app.models import (
@@ -44,6 +45,12 @@ BPCHERKS_COMMA_DUAL_DESCRIPTION = (
     "INT_FreeRewardSubType, INT_FreeRewardValue, INT_FreeRewardSubType1, INT_FreeRewardValue1, "
     "INT_FreeRewardSubType2, INT_FreeRewardValue2等字段的值相等"
 )
+BPCHERKS_SHORT_TEMPLATE_DUAL_DESCRIPTION = """筛选：
+- INT_Index = 1012,1010
+
+Key值选择：INT_Level
+
+判定：INT_FreeRewardSubType,INT_FreeRewardValue,INT_FreeRewardSubType1,INT_FreeRewardValue1,INT_FreeRewardSubType2,INT_FreeRewardValue2 在 INT_Index=1012 和 INT_Index=1010 两组中必须相等"""
 BPCHERKS_COMPARE_FIELDS = [
     "INT_FreeRewardSubType",
     "INT_FreeRewardValue",
@@ -81,6 +88,14 @@ composite_condition_check
 
 需要用户确认：
 请确认数据源、Sheet、字段和变量标签；AI 校验时可尝试自动补齐。"""
+
+
+def test_rule_prompt_optimize_system_prompt_documents_unsupported_aggregation() -> None:
+    """优化提示词要明确聚合类规则不能硬套到现有规则类型。"""
+    prompt = build_prompt_optimize_system_prompt()
+    assert "聚合" in prompt
+    assert "平均值" in prompt
+    assert "不要强行映射成已支持类型" in prompt
 
 
 @pytest.fixture(autouse=True)
@@ -192,6 +207,9 @@ def _create_quests_workbook(path: Path) -> Path:
     sheet.title = "Quest"
     sheet.append(["INT_ID", "DESC3", "STR_ABSwitch  "])
     sheet.append([1, "升级p1建筑到p2级p4次", "GreenServer:0"])
+    strategic = workbook.create_sheet("Strategic_slg2")
+    strategic.append(["INT_ID", "INT_Faction", "INT_Group"])
+    strategic.append([1, 0, 1])
     workbook.save(path)
     return path
 
@@ -218,6 +236,28 @@ def _create_battlepass_workbook(path: Path) -> Path:
     return path
 
 
+def _create_battlepass_user_regression_workbook(path: Path) -> Path:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "level_reward"
+    sheet.append(
+        [
+            "INT_Index",
+            "INT_Level",
+            "INT_FreeRewardSubType",
+            "INT_FreeRewardValue",
+            "INT_FreeRewardSubType1",
+            "INT_FreeRewardValue1",
+            "INT_FreeRewardSubType2",
+            "INT_FreeRewardValue2",
+        ]
+    )
+    sheet.append([1012, 1, 10, 100, 11, 101, 12, 102])
+    sheet.append([1010, 1, 10, 100, 11, 101, 12, 102])
+    workbook.save(path)
+    return path
+
+
 async def _seed_quests_source_only_config(project_id: int, user_id: int, workbook_path: Path) -> None:
     config = {
         "version": 1,
@@ -225,6 +265,40 @@ async def _seed_quests_source_only_config(project_id: int, user_id: int, workboo
         "sources": [
             {
                 "id": "quests",
+                "type": "local_excel",
+                "pathOrUrl": str(workbook_path),
+            }
+        ],
+        "variables": [],
+        "groups": [
+            {
+                "group_id": "ungrouped",
+                "group_name": "默认规则组",
+                "builtin": True,
+            }
+        ],
+        "rules": [],
+        "local_path_replacement_presets": [],
+        "svn_path_replacement_presets": [],
+    }
+    async with async_session_factory() as session:
+        session.add(
+            WorkbenchConfigRecord(
+                project_id=project_id,
+                user_id=user_id,
+                config_json=json.dumps(config, ensure_ascii=False),
+            )
+        )
+        await session.commit()
+
+
+async def _seed_battlepass_source_only_config(project_id: int, user_id: int, workbook_path: Path) -> None:
+    config = {
+        "version": 1,
+        "configured": True,
+        "sources": [
+            {
+                "id": "battlepass",
                 "type": "local_excel",
                 "pathOrUrl": str(workbook_path),
             }
@@ -586,6 +660,136 @@ async def test_rule_prompt_optimize_auto_complete_allows_empty_variables(
     assert data["status"] == "optimized"
     assert data["detected_clues"]["target_field"] == "STR_ServersParam"
     assert "allow_auto_complete" in captured["user_prompt"]
+    assert "optimized_description 必须使用解析友好的 DSL" in captured["system_prompt"]
+    assert "聚合、平均值、求和" in captured["system_prompt"]
+
+
+@pytest.mark.anyio
+async def test_rule_prompt_optimize_fills_fixed_template_fields_from_input(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """模型返回固定模板但配置线索为空时，应优先用用户固定模板输入补齐。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        return {
+            "status": "optimized",
+            "raw_description": "Quest STR_ABSwitch 不能为空",
+            "optimized_description": "\n".join(
+                [
+                    "数据源：需要用户确认：配置表链接或已有数据源标识",
+                    "sheet分页：需要用户确认：sheet名",
+                    "变量选择：需要用户确认：变量1,变量2",
+                    "",
+                    "筛选规则1：无",
+                    "",
+                    "筛选规则2：无",
+                    "",
+                    "校验规则：规则类型：not_null；断言：STR_ABSwitch 不能为空",
+                ]
+            ),
+            "detected_clues": {
+                "rule_type_hint": "not_null",
+                "involved_variables": [],
+                "target_field": "STR_ABSwitch",
+                "key_field": None,
+                "filters": [],
+                "compare_fields": [],
+                "compare_operator": None,
+            },
+            "missing": [],
+            "warnings": [],
+            "confidence": 0.91,
+            "fallback": False,
+        }, {}
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-prompt-optimize",
+        json={
+            "raw_description": "\n".join(
+                [
+                    "数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls",
+                    "sheet分页：Quest",
+                    "变量选择：STR_ABSwitch",
+                    "",
+                    "筛选规则1：",
+                    "",
+                    "筛选规则2：",
+                    "",
+                    "校验规则：STR_ABSwitch 不能为空",
+                ]
+            ),
+            "selected_variable_tags": [],
+            "allow_auto_complete": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "optimized"
+    assert not data["optimized_description"].startswith("数据源：")
+    assert "sheet分页：Quest" not in data["optimized_description"]
+    assert "变量选择：STR_ABSwitch" not in data["optimized_description"]
+    assert data["optimized_description"].startswith("not_null")
+    assert "目标：STR_ABSwitch" in data["optimized_description"]
+    assert "断言：STR_ABSwitch 不能为空" in data["optimized_description"]
+
+
+@pytest.mark.anyio
+async def test_rule_prompt_optimize_scattered_model_text_becomes_parser_friendly_template(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """模型仍返回散段落时，后端要归一成带规则类型短语的固定模板。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        return {
+            "status": "optimized",
+            "raw_description": "ID 不能为空",
+            "optimized_description": "规则目标：校验 ID 字段不能为空，请后续 AI 校验。",
+            "detected_clues": {
+                "rule_type_hint": "not_null",
+                "involved_variables": ["[src_demo-items-ID]"],
+                "target_field": "ID",
+                "key_field": None,
+                "filters": [],
+                "compare_fields": [],
+                "compare_operator": None,
+            },
+            "missing": [],
+            "warnings": [],
+            "confidence": 0.84,
+            "fallback": False,
+        }, {}
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-prompt-optimize",
+        json={
+            "raw_description": "ID 不能为空",
+            "selected_variable_tags": ["[src_demo-items-ID]"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "optimized"
+    optimized_description = data["optimized_description"]
+    assert optimized_description.startswith("not_null")
+    assert "变量选择：ID" not in optimized_description
+    assert "目标：ID" in optimized_description
+    assert "断言：ID 不能为空" in optimized_description
 
 
 @pytest.mark.anyio
@@ -611,6 +815,39 @@ async def test_rule_prompt_optimize_without_provider_returns_failed_fallback(
     assert data["fallback"] is True
     assert "AI 模型未配置" in " ".join(data["warnings"])
     assert "ID 不能为空" in data["optimized_description"]
+
+
+@pytest.mark.anyio
+async def test_rule_prompt_optimize_short_template_fallback_outputs_dsl(
+    auth_client: AsyncClient,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """模型不可用时，短模板也应兜底优化成组合分支 DSL。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-prompt-optimize",
+        json={
+            "raw_description": "筛选：INT_ID唯一，INT_Faction!=0，Key值选择：INT_ID，判定：INT_Group必须重复",
+            "selected_variable_tags": [],
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "failed"
+    assert data["fallback"] is True
+    assert data["detected_clues"]["rule_type_hint"] == "composite_condition_check"
+    assert data["detected_clues"]["key_field"] == "INT_ID"
+    assert data["detected_clues"]["filters"] == [{"field": "INT_Faction", "operator": "ne", "value": "0", "side": "global"}]
+    assert data["optimized_description"].startswith("composite_condition_check")
+    assert "- INT_Faction != 0" in data["optimized_description"]
+    assert "- INT_ID 唯一" in data["optimized_description"]
+    assert "Key：INT_ID" in data["optimized_description"]
+    assert "断言：INT_Group 必须重复" in data["optimized_description"]
 
 
 @pytest.mark.anyio
@@ -641,12 +878,48 @@ async def test_rule_prompt_optimize_bpcherks_fallback_recognizes_dual_compare(
         {"field": "INT_Index", "operator": "eq", "value": "1012", "side": "left"},
         {"field": "INT_Index", "operator": "eq", "value": "1010", "side": "right"},
     ]
-    assert "left：INT_Index eq 1012" in data["optimized_description"]
-    assert "right：INT_Index eq 1010" in data["optimized_description"]
+    assert "左侧筛选：INT_Index = 1012" in data["optimized_description"]
+    assert "右侧筛选：INT_Index = 1010" in data["optimized_description"]
+    assert "断言：左右两组按 Key 对齐后比较字段必须相等" in data["optimized_description"]
     assert "INT_PayRewardSubType1" in data["optimized_description"]
     assert "已根据变量池字段将 INT_FreeRewardSubType1 修正为 INT_PayRewardSubType1" in " ".join(
         data["warnings"]
     )
+
+
+@pytest.mark.anyio
+async def test_rule_prompt_optimize_short_template_bpcherks_recognizes_dual_compare(
+    auth_client: AsyncClient,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """短模板的集合筛选 + Key + 多字段相等应优化为双组 Key 对比 DSL。"""
+    user_id = await _get_test_user_id()
+    await _seed_bpcherks_composite_variable_config(test_project_id, user_id)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-prompt-optimize",
+        json={
+            "raw_description": BPCHERKS_SHORT_TEMPLATE_DUAL_DESCRIPTION,
+            "selected_variable_tags": ["bpcherks"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["status"] == "failed"
+    assert data["fallback"] is True
+    assert data["detected_clues"]["rule_type_hint"] == "dual_composite_compare"
+    assert data["detected_clues"]["key_field"] == "INT_Level"
+    assert data["detected_clues"]["compare_fields"] == BPCHERKS_COMPARE_FIELDS
+    assert data["detected_clues"]["filters"] == [
+        {"field": "INT_Index", "operator": "eq", "value": "1012", "side": "left"},
+        {"field": "INT_Index", "operator": "eq", "value": "1010", "side": "right"},
+    ]
+    assert data["optimized_description"].startswith("dual_composite_compare")
+    assert "左侧筛选：INT_Index = 1012" in data["optimized_description"]
+    assert "右侧筛选：INT_Index = 1010" in data["optimized_description"]
+    assert "断言：左右两组按 Key 对齐后比较字段必须相等" in data["optimized_description"]
 
 
 @pytest.mark.anyio
@@ -712,7 +985,9 @@ async def test_rule_prompt_optimize_model_response_and_no_side_effects(
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["status"] == "optimized"
-    assert data["optimized_description"].startswith("规则目标")
+    assert data["optimized_description"].startswith("not_null")
+    assert "目标：ID" in data["optimized_description"]
+    assert "断言：ID 不能为空" in data["optimized_description"]
     assert data["detected_clues"]["rule_type_hint"] == "not_null"
     assert data["confidence"] == 0.88
     assert "minimal_rules" not in captured["user_prompt"]
@@ -818,6 +1093,132 @@ async def test_rule_draft_ready_compiles_to_existing_not_null_rule(
     assert data["draft"]["reuse_variable_tags"] == ["[src_demo-items-ID]"]
     assert data["draft"]["rules_to_add"][0]["rule_type"] == "not_null"
     assert "sk-test-secret" not in json.dumps(data, ensure_ascii=False)
+
+
+@pytest.mark.anyio
+async def test_rule_draft_complete_template_prefers_deterministic_compile(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """固定模板线索完整时应先确定性生成草稿，避免模型输出波动。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整固定模板不应先调用模型")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": """数据源：src_demo
+sheet分页：items
+变量选择：ID
+
+筛选规则1：
+
+筛选规则2：
+
+校验规则：ID 不能为空""",
+            "input_mode": "template",
+            "allow_auto_complete": True,
+            "selected_variable_tags": [],
+            "workflow_hints": {
+                "source_id": "src_demo",
+                "sheet": "items",
+                "target_field": "ID",
+                "rule_type_hint": "not_null",
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "not_null"
+    assert data["draft"]["rules_to_add"][0]["target_variable_tag"] == "[src_demo-items-ID]"
+    assert "结构化线索" in data["reasoning_summary"]
+
+
+@pytest.mark.anyio
+async def test_rule_draft_candidate_critique_blocks_conflicting_assertions_before_model(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """候选批判发现同一规则混合多个最终断言时，不应继续调用模型误添加。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("candidate critique should stop before provider call")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": "\n".join(
+                [
+                    "数据源：demo.xls",
+                    "sheet分页：items",
+                    "变量选择：Status",
+                    "",
+                    "校验规则：Status 只能是 A,B 且不能为空",
+                ]
+            ),
+            "allow_auto_complete": True,
+            "selected_variable_tags": [],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "needs_input"
+    assert data["draft"]["rules_to_add"] == []
+    assert "多个最终断言" in data["missing"][0]["message"]
+
+
+@pytest.mark.anyio
+async def test_rule_draft_candidate_hint_overrides_wrong_model_rule_type(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """模型返回相近但错误的类型时，候选收窄后的 workflow_hints 应覆盖为更可信规则。"""
+    user_id = await _get_test_user_id()
+    await _seed_workbench_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        return {
+            "verdict": "ready",
+            "rule_type": "unique",
+            "confidence": 0.91,
+            "reasoning_summary": "错误地判断成唯一校验。",
+            "target": {"tag": "[src_demo-items-ID]"},
+        }, {}
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": "ID 不能为空",
+            "selected_variable_tags": ["[src_demo-items-ID]"],
+            "allow_auto_complete": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "not_null"
+    assert data["draft"]["rules_to_add"][0]["rule_type"] == "not_null"
 
 
 @pytest.mark.anyio
@@ -1030,6 +1431,52 @@ async def test_rule_draft_bpcherks_comma_dual_filter_reuses_selected_variable(
     assert [item["right_field"] for item in rule["comparisons"]] == BPCHERKS_COMPARE_FIELDS
 
 
+@pytest.mark.anyio
+async def test_rule_draft_bpcherks_short_template_reuses_selected_variable(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """短模板输入应复用已选组合变量，直接生成双组 Key 对比规则。"""
+    user_id = await _get_test_user_id()
+    await _seed_bpcherks_composite_variable_config(test_project_id, user_id)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise ProviderConnectionError(status_code=504, category="timeout", message="调用大模型超时，请稍后重试。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": BPCHERKS_SHORT_TEMPLATE_DUAL_DESCRIPTION,
+            "input_mode": "free_text",
+            "allow_auto_complete": False,
+            "selected_variable_tags": ["bpcherks"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "dual_composite_compare"
+    assert data["draft"]["reuse_variable_tags"] == ["bpcherks"]
+
+    rule = data["draft"]["rules_to_add"][0]
+    assert rule["target_variable_tag"] == "bpcherks"
+    assert rule["reference_variable_tag"] == "bpcherks"
+    assert rule["left_key_field"] == "INT_Level"
+    assert rule["right_key_field"] == "INT_Level"
+    assert rule["left_filters"][0]["field"] == "INT_Index"
+    assert rule["left_filters"][0]["expected_value"] == "1012"
+    assert rule["right_filters"][0]["field"] == "INT_Index"
+    assert rule["right_filters"][0]["expected_value"] == "1010"
+    assert [item["left_field"] for item in rule["comparisons"]] == BPCHERKS_COMPARE_FIELDS
+    assert [item["right_field"] for item in rule["comparisons"]] == BPCHERKS_COMPARE_FIELDS
+
+
 def test_hint_extractor_keeps_set_filter_and_fixed_value_out_of_dual_compare() -> None:
     """只有同时具备左右筛选、Key 和字段相等语义时才识别为跨组变量校验。"""
     composite_hints = extract_workflow_hints_from_text(
@@ -1061,6 +1508,170 @@ def test_hint_extractor_optimized_description_ignores_meta_fixed_value() -> None
     assert hints.key_column is None
     assert "Key" not in hints.composite_columns
     assert hints.expected_value is None
+
+
+def test_hint_extractor_fixed_template_sections_are_structured() -> None:
+    """固定模板里的三项配置和筛选/校验段应直接进入结构化线索。"""
+    hints = extract_workflow_hints_from_text(
+        """数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/battlepass.xls
+sheet分页：level_reward
+变量选择：INT_Level,INT_Index,INT_PayRewardValue
+
+筛选规则1：INT_Index=1012
+
+筛选规则2：INT_Index=1010
+
+校验规则：以 INT_Level 为 Key，判断 INT_PayRewardValue 字段是否相等"""
+    )
+    assert hints.source_id == "battlepass"
+    assert hints.source_url and hints.source_url.endswith("battlepass.xls")
+    assert hints.sheet == "level_reward"
+    assert hints.left_filter_field == "INT_Index"
+    assert hints.left_filter_value == "1012"
+    assert hints.right_filter_field == "INT_Index"
+    assert hints.right_filter_value == "1010"
+    assert hints.key_column == "INT_Level"
+    assert hints.rule_type_hint == "dual_composite_compare"
+    assert "INT_PayRewardValue" in hints.composite_columns
+
+
+def test_hint_extractor_fixed_template_field_compare_uses_key_precondition() -> None:
+    """固定模板不能串段；筛选唯一字段作为 Key，校验 A=B 作为字段对字段断言。"""
+    hints = extract_workflow_hints_from_text(
+        """数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls
+sheet分页：Strategic_slg2
+变量选择：INT_ID,INT_Faction,INT_Group
+
+筛选规则1：INT_ID唯一
+
+筛选规则2：INT_Faction=0
+
+校验规则：INT_Group=INT_ID"""
+    )
+
+    assert hints.rule_type_hint == "composite_condition_check"
+    assert hints.source_id == "quests"
+    assert hints.sheet == "Strategic_slg2"
+    assert hints.key_column == "INT_ID"
+    assert hints.filter_field == "INT_Faction"
+    assert hints.filter_value == "0"
+    assert hints.assertion_field == "INT_Group"
+    assert hints.assertion_operator == "eq"
+    assert hints.assertion_value is None
+    assert hints.assertion_value_source == "field"
+    assert hints.assertion_expected_field == "INT_ID"
+    assert hints.composite_columns == ["INT_ID", "INT_Group", "INT_Faction"]
+
+
+def test_hint_extractor_v3_template_field_compare_uses_typed_slots() -> None:
+    """v3 模板按固定槽位抽取规则类型、筛选、Key 和字段对字段断言。"""
+    hints = extract_workflow_hints_from_text(
+        """数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls
+sheet分页：Strategic_slg2
+变量选择：INT_ID,INT_Faction,INT_Group
+
+规则类型：组合分支
+
+目标字段：INT_Group
+筛选条件：INT_Faction=0
+Key字段：INT_ID
+引用对象：无
+比较字段：无
+
+校验规则：INT_Group=INT_ID
+规则参数：无"""
+    )
+
+    assert hints.rule_type_hint == "composite_condition_check"
+    assert hints.source_id == "quests"
+    assert hints.sheet == "Strategic_slg2"
+    assert hints.target_field == "INT_Group"
+    assert hints.filter_field == "INT_Faction"
+    assert hints.filter_value == "0"
+    assert hints.key_column == "INT_ID"
+    assert hints.assertion_field == "INT_Group"
+    assert hints.assertion_value_source == "field"
+    assert hints.assertion_expected_field == "INT_ID"
+    assert hints.composite_columns == ["INT_ID", "INT_Group", "INT_Faction"]
+
+
+def test_hint_extractor_natural_template_field_compare_uses_key_and_filter() -> None:
+    """自然句模板应抽取目标字段、筛选条件、Key 和字段对字段断言。"""
+    hints = extract_workflow_hints_from_text(
+        """我想检查INT_Group。
+
+只检查满足 INT_Faction=0 的数据。
+
+如果需要按同一条配置对齐，用INT_ID作为 Key；不需要就写“无”。
+
+规则是：INT_Group 必须等于字段 INT_ID。
+
+补充说明：无"""
+    )
+
+    assert hints.rule_type_hint == "composite_condition_check"
+    assert hints.target_field == "INT_Group"
+    assert hints.filter_field == "INT_Faction"
+    assert hints.filter_value == "0"
+    assert hints.key_column == "INT_ID"
+    assert hints.assertion_field == "INT_Group"
+    assert hints.assertion_operator == "eq"
+    assert hints.assertion_value_source == "field"
+    assert hints.assertion_expected_field == "INT_ID"
+    assert hints.expected_value is None
+
+
+def test_hint_extractor_short_template_uses_key_selection_and_judgement() -> None:
+    """短模板应把 Key值选择 / 判定 识别为 Key 和最终断言。"""
+    hints = extract_workflow_hints_from_text(
+        "筛选：INT_ID唯一，INT_Faction!=0，Key值选择：INT_ID，判定：INT_Group必须重复"
+    )
+
+    assert hints.rule_type_hint == "composite_condition_check"
+    assert hints.key_column == "INT_ID"
+    assert hints.filter_field == "INT_Faction"
+    assert hints.filter_operator == "ne"
+    assert hints.filter_value == "0"
+    assert hints.filters[0].field == "INT_Faction"
+    assert hints.filters[0].operator == "ne"
+    assert hints.filters[0].value == "0"
+    assert hints.assertion_field == "INT_Group"
+    assert hints.assertion_operator == "duplicate_required"
+    assert hints.composite_columns == ["INT_ID", "INT_Group", "INT_Faction"]
+
+
+@pytest.mark.parametrize(
+    ("rule_type_text", "body", "expected_rule_type"),
+    [
+        ("非空 / not_null", "目标字段：ID\n筛选条件：无\nKey字段：无\n引用对象：无\n比较字段：无\n\n校验规则：ID 不能为空\n规则参数：无", "not_null"),
+        ("唯一 / unique", "目标字段：ID\n筛选条件：无\nKey字段：无\n引用对象：无\n比较字段：无\n\n校验规则：ID 不能重复\n规则参数：无", "unique"),
+        ("固定值比较 / fixed_value_compare", "目标字段：Status\n筛选条件：无\nKey字段：无\n引用对象：无\n比较字段：无\n\n校验规则：Status 只能是 0,1\n规则参数：期望值=0,1；期望值模式=set", "fixed_value_compare"),
+        ("正则 / regex_check", "目标字段：Code\n筛选条件：无\nKey字段：无\n引用对象：无\n比较字段：无\n\n校验规则：Code 匹配正则\n规则参数：正则=^[A-Z]+$", "regex_check"),
+        ("顺序 / sequence_order_check", "目标字段：Level\n筛选条件：无\nKey字段：无\n引用对象：无\n比较字段：无\n\n校验规则：Level 按升序连续\n规则参数：方向=升序；步长=1；起始=自动", "sequence_order_check"),
+        ("引用存在 / cross_table_mapping", "目标字段：ItemID\n筛选条件：无\nKey字段：无\n引用对象：Item_ItemID\n比较字段：无\n\n校验规则：ItemID 必须存在于引用对象\n规则参数：引用对象=Item_ItemID", "cross_table_mapping"),
+        ("组合分支 / composite_condition_check", "目标字段：Code\n筛选条件：Status=1\nKey字段：ID\n引用对象：无\n比较字段：无\n\n校验规则：Code 匹配正则\n规则参数：正则=^[A-Z]+$", "composite_condition_check"),
+        ("跨组变量 / dual_composite_compare", "目标字段：无\n筛选条件：左侧 Type=1；右侧 Type=2\nKey字段：ID\n引用对象：无\n比较字段：Value\n\n校验规则：左右两组按 Key 对齐后比较字段必须相等\n规则参数：无", "dual_composite_compare"),
+        ("多组串行 / multi_composite_pipeline_check", "目标字段：Code\n筛选条件：无\nKey字段：ID\n引用对象：无\n比较字段：无\n\n校验规则：按多组串行节点执行筛选和断言\n规则参数：节点1 -> 节点2", "multi_composite_pipeline_check"),
+        ("多组映射 / multi_composite_mapping_check", "目标字段：Code\n筛选条件：无\nKey字段：ID\n引用对象：无\n比较字段：无\n\n校验规则：按多组映射节点独立筛选和判断\n规则参数：节点1：变量=A；筛选=Type=1", "multi_composite_mapping_check"),
+    ],
+)
+def test_hint_extractor_v3_template_rule_type_aliases(
+    rule_type_text: str,
+    body: str,
+    expected_rule_type: str,
+) -> None:
+    """v3 模板中的中英文规则类型别名应归一到当前 10 类规则。"""
+    hints = extract_workflow_hints_from_text(
+        f"""数据源：demo.xls
+sheet分页：items
+变量选择：ID,Status,Code,Type,Value
+
+规则类型：{rule_type_text}
+
+{body}"""
+    )
+
+    assert hints.rule_type_hint == expected_rule_type
 
 
 @pytest.mark.anyio
@@ -1818,6 +2429,266 @@ async def test_rule_draft_workflow_hints_auto_complete_composite_rule(
 
 
 @pytest.mark.anyio
+async def test_rule_draft_fixed_template_key_filter_field_compare_generates_field_assertion(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """FIELD唯一 + FIELD=VALUE + A=B 应生成组合分支字段对字段比较，不再提示规则不足。"""
+    await _save_provider(auth_client)
+    description = """数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls
+sheet分页：Strategic_slg2
+变量选择：INT_ID,INT_Faction,INT_Group
+
+筛选规则1：INT_ID唯一
+
+筛选规则2：INT_Faction=0
+
+校验规则：INT_Group=INT_ID"""
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整固定模板应由确定性候选算法直接编译，不需要调用模型。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": description,
+            "input_mode": "free_text",
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "composite_condition_check"
+    assert data["missing"] == []
+
+    variable = data["draft"]["variables_to_add"][0]
+    assert variable["source_id"] == "quests"
+    assert variable["sheet"] == "Strategic_slg2"
+    assert variable["variable_kind"] == "composite"
+    assert variable["key_column"] == "INT_ID"
+    assert variable["columns"] == ["INT_ID", "INT_Group", "INT_Faction"]
+
+    rule = data["draft"]["rules_to_add"][0]
+    assert rule["rule_type"] == "composite_condition_check"
+    global_filter = rule["composite_config"]["global_filters"][0]
+    assert global_filter["field"] == "INT_Faction"
+    assert global_filter["operator"] == "eq"
+    assert global_filter["expected_value"] == "0"
+    assertion = rule["composite_config"]["branches"][0]["assertions"][0]
+    assert assertion["field"] == "INT_Group"
+    assert assertion["operator"] == "eq"
+    assert assertion["value_source"] == "field"
+    assert assertion["expected_field"] == "INT_ID"
+    assert assertion["expected_value"] is None
+
+
+@pytest.mark.anyio
+async def test_rule_draft_user_regression_quests_set_filter_and_assertion(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """用户回归 1：Quest 页多值筛选 + 多值断言应直接生成组合分支规则。"""
+    user_id = await _get_test_user_id()
+    workbook_path = _create_quests_workbook(tmp_path / "quests.xlsx")
+    await _seed_quests_source_only_config(test_project_id, user_id, workbook_path)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整 Quest 回归样例应由确定性链路直接编译。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": (
+                "校验https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls配置表的Quest分页，"
+                "筛选DESC3=升级p1建筑到p2级p4次,完成p2等级的p1科研，两种类型。"
+                "STR_ABSwitch字段=GreenServer:0 or SLG2:0。"
+            ),
+            "input_mode": "free_text",
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "composite_condition_check"
+    rule = data["draft"]["rules_to_add"][0]
+    global_filter = rule["composite_config"]["global_filters"][0]
+    assert global_filter["field"] == "DESC3"
+    assert global_filter["operator"] == "eq"
+    assert global_filter["expected_value_mode"] == "set"
+    assert global_filter["expected_value"] == "升级p1建筑到p2级p4次,完成p2等级的p1科研"
+    assertion = rule["composite_config"]["branches"][0]["assertions"][0]
+    assert assertion["field"] == "STR_ABSwitch  "
+    assert assertion["operator"] == "eq"
+    assert assertion["expected_value_mode"] == "set"
+    assert assertion["expected_value"] == "GreenServer:0,SLG2:0"
+
+
+@pytest.mark.anyio
+async def test_rule_draft_user_regression_battlepass_dual_compare_six_fields(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """用户回归 2：battlepass 两组筛选 + Key + 6 字段相等应生成跨组变量校验。"""
+    user_id = await _get_test_user_id()
+    workbook_path = _create_battlepass_user_regression_workbook(tmp_path / "battlepass.xlsx")
+    await _seed_battlepass_source_only_config(test_project_id, user_id, workbook_path)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整 battlepass 回归样例应由确定性链路直接编译。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": (
+                "校验https://samosvn/data/project/samo/GameDatas/datas_qa88/battlepass.xls表的level_reward分页，"
+                "筛选INT_Index=1012,1010,以INT_Level为key值，判断"
+                "INT_FreeRewardSubType,INT_FreeRewardValue,INT_FreeRewardSubType1,INT_FreeRewardValue1,"
+                "INT_FreeRewardSubType2,INT_FreeRewardValue2。6个字段值相等"
+            ),
+            "input_mode": "free_text",
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "dual_composite_compare"
+    rule = data["draft"]["rules_to_add"][0]
+    assert rule["left_key_field"] == "INT_Level"
+    assert rule["right_key_field"] == "INT_Level"
+    assert rule["left_filters"][0]["field"] == "INT_Index"
+    assert rule["left_filters"][0]["expected_value"] == "1012"
+    assert rule["right_filters"][0]["field"] == "INT_Index"
+    assert rule["right_filters"][0]["expected_value"] == "1010"
+    assert [item["left_field"] for item in rule["comparisons"]] == [
+        "INT_FreeRewardSubType",
+        "INT_FreeRewardValue",
+        "INT_FreeRewardSubType1",
+        "INT_FreeRewardValue1",
+        "INT_FreeRewardSubType2",
+        "INT_FreeRewardValue2",
+    ]
+
+
+@pytest.mark.anyio
+async def test_rule_draft_user_regression_strategic_slg2_multi_filter_key_compare(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """用户回归 3：INT_ID 唯一是 Key 前置条件，不生成最终唯一规则。"""
+    user_id = await _get_test_user_id()
+    workbook_path = _create_quests_workbook(tmp_path / "quests.xlsx")
+    await _seed_quests_source_only_config(test_project_id, user_id, workbook_path)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整 Strategic_slg2 回归样例应由确定性链路直接编译。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": (
+                "校验https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls配置表的Strategic_slg2分页，"
+                "INT_ID唯一，INT_Faction=0，INT_Group=INT_ID"
+            ),
+            "input_mode": "free_text",
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "composite_condition_check"
+    assert data["draft"]["rules_to_add"][0]["rule_type"] == "composite_condition_check"
+    variable = data["draft"]["variables_to_add"][0]
+    assert variable["key_column"] == "INT_ID"
+    rule = data["draft"]["rules_to_add"][0]
+    assert rule["composite_config"]["global_filters"][0]["field"] == "INT_Faction"
+    assert rule["composite_config"]["global_filters"][0]["expected_value"] == "0"
+    assertion = rule["composite_config"]["branches"][0]["assertions"][0]
+    assert assertion["field"] == "INT_Group"
+    assert assertion["value_source"] == "field"
+    assert assertion["expected_field"] == "INT_ID"
+
+
+@pytest.mark.anyio
+async def test_rule_draft_short_template_duplicate_required_ready(
+    auth_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    test_project_id: int,
+    test_db,
+) -> None:
+    """短模板输入应直接生成组合分支必须重复草稿。"""
+    user_id = await _get_test_user_id()
+    workbook_path = _create_quests_workbook(tmp_path / "quests.xlsx")
+    await _seed_quests_source_only_config(test_project_id, user_id, workbook_path)
+    await _save_provider(auth_client)
+
+    async def fake_call_provider_json(**_: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise AssertionError("完整短模板应由确定性链路直接编译。")
+
+    monkeypatch.setattr("backend.app.ai.agent_service.call_provider_json", fake_call_provider_json)
+
+    response = await auth_client.post(
+        "/api/v1/ai/agents/rule-draft",
+        json={
+            "description": "\n".join(
+                [
+                    "数据源：https://samosvn/data/project/samo/GameDatas/datas_qa88/quests.xls",
+                    "sheet分页：Strategic_slg2",
+                    "变量选择：INT_ID,INT_Faction,INT_Group",
+                    "",
+                    "筛选：INT_ID唯一，INT_Faction!=0，Key值选择：INT_ID，判定：INT_Group必须重复",
+                ]
+            ),
+            "input_mode": "template",
+            "allow_auto_complete": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["verdict"] == "ready"
+    assert data["rule_type"] == "composite_condition_check"
+    rule = data["draft"]["rules_to_add"][0]
+    assert rule["composite_config"]["global_filters"][0]["field"] == "INT_Faction"
+    assert rule["composite_config"]["global_filters"][0]["operator"] == "ne"
+    assert rule["composite_config"]["global_filters"][0]["expected_value"] == "0"
+    assertion = rule["composite_config"]["branches"][0]["assertions"][0]
+    assert assertion["field"] == "INT_Group"
+    assert assertion["operator"] == "duplicate_required"
+    assert assertion["expected_value"] is None
+
+
+@pytest.mark.anyio
 async def test_rule_draft_description_hints_auto_complete_wrapped_model_target(
     auth_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1949,7 +2820,8 @@ async def test_rule_draft_workflow_hints_do_not_override_rejected(
     data = response.json()["data"]
     assert data["verdict"] == "rejected"
     assert data["draft"]["rules_to_add"] == []
-    assert data["rejection_reason"] == "当前 10 类规则无法表达跨行聚合平均值判断。"
+    assert "聚合" in data["rejection_reason"]
+    assert "现有 10 类规则" in data["rejection_reason"]
 
 
 @pytest.mark.anyio

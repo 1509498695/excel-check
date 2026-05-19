@@ -66,6 +66,40 @@ const VARIABLE_KIND_LABELS: Record<AiRuleTemplateVariableKind, string> = {
   any: '任意变量',
 }
 
+function buildShortRuleDescription(options: {
+  ruleType: FixedRuleType
+  targetField?: string
+  filterCondition?: string
+  keyField?: string
+  referenceObject?: string
+  compareFields?: string
+  validationRule: string
+  ruleParams?: string
+}): string {
+  const targetText = options.targetField?.trim()
+  const filterText = options.filterCondition && options.filterCondition !== '无' ? options.filterCondition : '无'
+  const keyText = options.keyField && options.keyField !== '无' ? options.keyField : '无'
+  const assertion = targetText && !options.validationRule.includes(targetText)
+    ? `${targetText} ${options.validationRule}`
+    : options.validationRule
+  const extraItems = [
+    options.referenceObject && options.referenceObject !== '无' ? `引用对象=${options.referenceObject}` : '',
+    options.compareFields && options.compareFields !== '无' ? `比较字段=${options.compareFields}` : '',
+    options.ruleParams && options.ruleParams !== '无' ? options.ruleParams : '',
+  ].filter(Boolean)
+  return [
+    '筛选：',
+    `- ${filterText}`,
+    keyText !== '无' ? `- ${keyText} 唯一` : '',
+    '',
+    `Key值选择：${keyText}`,
+    '',
+    `判定：${assertion}`,
+    '',
+    extraItems.length ? `补充说明：${extraItems.join('；')}` : '',
+  ].filter((line, index, array) => line || (array[index - 1] && array[index + 1])).join('\n')
+}
+
 const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
   template({
     id: 'single-not-null',
@@ -74,7 +108,11 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'basic',
     variableKind: 'single',
     ruleType: 'not_null',
-    descriptionTemplate: '校验 {targetField} 字段不能为空。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'not_null',
+      targetField: '{targetField}',
+      validationRule: '{targetField} 不能为空',
+    }),
     workflowHints: {
       rule_type_hint: 'not_null',
     },
@@ -86,7 +124,11 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'basic',
     variableKind: 'single',
     ruleType: 'unique',
-    descriptionTemplate: '校验 {targetField} 字段不能重复。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'unique',
+      targetField: '{targetField}',
+      validationRule: '{targetField} 不能重复',
+    }),
     workflowHints: {
       rule_type_hint: 'unique',
     },
@@ -98,7 +140,12 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'compare',
     variableKind: 'single',
     ruleType: 'fixed_value_compare',
-    descriptionTemplate: '校验 {targetField} 字段只能是 0,1,2。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'fixed_value_compare',
+      targetField: '{targetField}',
+      validationRule: '{targetField} 只能是 0,1,2',
+      ruleParams: '期望值=0,1,2；期望值模式=set',
+    }),
     workflowHints: {
       rule_type_hint: 'fixed_value_compare',
       operator: 'eq',
@@ -113,7 +160,12 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'format',
     variableKind: 'single',
     ruleType: 'regex_check',
-    descriptionTemplate: '校验 {targetField} 字段必须匹配正则 ^[A-Za-z0-9_]+$。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'regex_check',
+      targetField: '{targetField}',
+      validationRule: '{targetField} 匹配正则',
+      ruleParams: '正则=^[A-Za-z0-9_]+$',
+    }),
     workflowHints: {
       rule_type_hint: 'regex_check',
       regex_pattern: '^[A-Za-z0-9_]+$',
@@ -126,7 +178,12 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'compare',
     variableKind: 'single',
     ruleType: 'sequence_order_check',
-    descriptionTemplate: '校验 {targetField} 字段按升序连续，步长为 1，起始值使用首行自动识别。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'sequence_order_check',
+      targetField: '{targetField}',
+      validationRule: '{targetField} 按升序连续',
+      ruleParams: '方向=升序；步长=1；起始=自动',
+    }),
     workflowHints: {
       rule_type_hint: 'sequence_order_check',
       sequence_direction: 'asc',
@@ -141,7 +198,12 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'mapping',
     variableKind: 'single',
     ruleType: 'cross_table_mapping',
-    descriptionTemplate: '校验 {targetField} 字段的值必须存在于引用变量 {referenceTag} 中。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'cross_table_mapping',
+      targetField: '{targetField}',
+      referenceObject: '{referenceTag}',
+      validationRule: '{targetField} 必须存在于引用对象',
+    }),
     workflowHints: {
       rule_type_hint: 'cross_table_mapping',
     },
@@ -154,12 +216,84 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'composite',
     variableKind: 'composite',
     ruleType: 'composite_condition_check',
-    descriptionTemplate: '在 {targetTag} 中，筛选 {filterField}=示例值 后，校验 {assertionField} 字段不能为空。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: '{assertionField}',
+      filterCondition: '{filterField}=示例值',
+      keyField: '{keyColumn}',
+      validationRule: '{assertionField} 不能为空',
+    }),
     workflowHints: {
       rule_type_hint: 'composite_condition_check',
       filter_operator: 'eq',
       filter_value: '示例值',
       assertion_operator: 'not_null',
+    },
+  }),
+  template({
+    id: 'composite-condition-duplicate-required',
+    title: '筛选后字段必须重复',
+    summary: '适合“命中条件的数据里，某字段至少出现一组重复值”。',
+    category: 'composite',
+    variableKind: 'composite',
+    ruleType: 'composite_condition_check',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: '{assertionField}',
+      filterCondition: '{filterField}!=示例值',
+      keyField: '{keyColumn}',
+      validationRule: '{assertionField} 必须重复',
+    }),
+    workflowHints: {
+      rule_type_hint: 'composite_condition_check',
+      filter_operator: 'ne',
+      filter_value: '示例值',
+      assertion_operator: 'duplicate_required',
+    },
+  }),
+  template({
+    id: 'composite-condition-regex',
+    title: '筛选后字段格式匹配',
+    summary: '适合“满足条件后，字段必须符合正则格式”。',
+    category: 'format',
+    variableKind: 'composite',
+    ruleType: 'composite_condition_check',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: '{assertionField}',
+      filterCondition: '{filterField}=示例值',
+      keyField: '{keyColumn}',
+      validationRule: '{assertionField} 匹配正则',
+      ruleParams: '正则=^[A-Za-z0-9_]+$',
+    }),
+    workflowHints: {
+      rule_type_hint: 'composite_condition_check',
+      filter_operator: 'eq',
+      filter_value: '示例值',
+      assertion_operator: 'regex',
+      regex_pattern: '^[A-Za-z0-9_]+$',
+    },
+  }),
+  template({
+    id: 'composite-condition-compare',
+    title: '筛选后字段比较',
+    summary: '适合“命中条件后，字段需要大于/小于/不等于某值”。',
+    category: 'compare',
+    variableKind: 'composite',
+    ruleType: 'composite_condition_check',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: '{assertionField}',
+      filterCondition: '{filterField}>示例值',
+      keyField: '{keyColumn}',
+      validationRule: '{assertionField} 不等于 0',
+    }),
+    workflowHints: {
+      rule_type_hint: 'composite_condition_check',
+      filter_operator: 'gt',
+      filter_value: '示例值',
+      assertion_operator: 'ne',
+      assertion_value: '0',
     },
   }),
   template({
@@ -169,8 +303,13 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'composite',
     variableKind: 'dual_composite',
     ruleType: 'dual_composite_compare',
-    descriptionTemplate:
-      '筛选左侧 {leftFilterField}=示例A 和右侧 {rightFilterField}=示例B，以 {keyColumn} 为 Key，对比 {compareFields} 字段是否相等。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'dual_composite_compare',
+      filterCondition: '左侧 {leftFilterField}=示例A；右侧 {rightFilterField}=示例B',
+      keyField: '{keyColumn}',
+      compareFields: '{compareFields}',
+      validationRule: '左右两组按 Key 对齐后比较字段必须相等',
+    }),
     workflowHints: {
       rule_type_hint: 'dual_composite_compare',
       left_filter_operator: 'eq',
@@ -181,13 +320,44 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     minSelectedVariables: 2,
   }),
   template({
+    id: 'dual-composite-not-equal',
+    title: '两组配置按 Key 不等值对比',
+    summary: '适合左右筛选后按 Key 对齐，字段必须不相等的场景。',
+    category: 'composite',
+    variableKind: 'dual_composite',
+    ruleType: 'dual_composite_compare',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'dual_composite_compare',
+      filterCondition: '左侧 {leftFilterField}=示例A；右侧 {rightFilterField}=示例B',
+      keyField: '{keyColumn}',
+      compareFields: '{compareFields}',
+      validationRule: '左右两组按 Key 对齐后比较字段必须不相等',
+      ruleParams: 'Key检查=双向检查',
+    }),
+    workflowHints: {
+      rule_type_hint: 'dual_composite_compare',
+      left_filter_operator: 'eq',
+      left_filter_value: '示例A',
+      right_filter_operator: 'eq',
+      right_filter_value: '示例B',
+      compare_operator: 'ne',
+      key_check_mode: 'bidirectional',
+    },
+    minSelectedVariables: 2,
+  }),
+  template({
     id: 'multi-composite-pipeline',
     title: '多组串行检查',
     summary: '按节点顺序检查多个组合变量。',
     category: 'composite',
     variableKind: 'multi_composite',
     ruleType: 'multi_composite_pipeline_check',
-    descriptionTemplate: '按顺序检查 {targetTag} 等组合变量：每个节点先按条件过滤，再校验目标字段不能为空。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'multi_composite_pipeline_check',
+      targetField: '目标字段',
+      validationRule: '按多组串行节点执行筛选和断言',
+      ruleParams: '节点1 -> 节点2 -> 节点3；每个节点填写变量、筛选和断言',
+    }),
     workflowHints: {
       rule_type_hint: 'multi_composite_pipeline_check',
     },
@@ -199,7 +369,12 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'mapping',
     variableKind: 'multi_composite',
     ruleType: 'multi_composite_mapping_check',
-    descriptionTemplate: '检查 {targetTag} 等组合变量的多组映射条件，每个节点按筛选条件独立判断异常。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'multi_composite_mapping_check',
+      targetField: '目标字段',
+      validationRule: '按多组映射节点独立筛选和判断',
+      ruleParams: '节点1：变量={targetTag}；筛选=...；断言=...；排除范围=无',
+    }),
     workflowHints: {
       rule_type_hint: 'multi_composite_mapping_check',
     },
@@ -211,8 +386,13 @@ const AI_RULE_TEMPLATES: AiRuleTemplate[] = [
     category: 'auto_complete',
     variableKind: 'any',
     ruleType: 'composite_condition_check',
-    descriptionTemplate:
-      '从 SVN 或 Excel 路径中读取配置表，Sheet=请填写Sheet，筛选字段=请填写条件，校验目标字段=请填写字段不能为空。',
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: '请填写字段',
+      filterCondition: '请填写条件',
+      keyField: '无',
+      validationRule: '请填写字段不能为空',
+    }),
     workflowHints: {
       rule_type_hint: 'composite_condition_check',
       filter_operator: 'eq',
@@ -404,7 +584,11 @@ function buildSingleVariableRecommendations(variable: VariableTag): AiRuleTempla
       category: 'basic',
       variableKind: 'single',
       ruleType: 'not_null',
-      descriptionTemplate: `校验 ${field} 字段不能为空。`,
+      descriptionTemplate: buildShortRuleDescription({
+        ruleType: 'not_null',
+        targetField: field,
+        validationRule: `${field} 不能为空`,
+      }),
       workflowHints: {
         ...baseHints,
         rule_type_hint: 'not_null',
@@ -421,7 +605,11 @@ function buildSingleVariableRecommendations(variable: VariableTag): AiRuleTempla
       category: 'basic',
       variableKind: 'single',
       ruleType: 'unique',
-      descriptionTemplate: `校验 ${field} 字段不能重复。`,
+      descriptionTemplate: buildShortRuleDescription({
+        ruleType: 'unique',
+        targetField: field,
+        validationRule: `${field} 不能重复`,
+      }),
       workflowHints: {
         ...baseHints,
         rule_type_hint: 'unique',
@@ -438,7 +626,12 @@ function buildSingleVariableRecommendations(variable: VariableTag): AiRuleTempla
       category: 'format',
       variableKind: 'single',
       ruleType: 'regex_check',
-      descriptionTemplate: `校验 ${field} 字段必须匹配正则 ^[A-Za-z0-9_]+$。`,
+      descriptionTemplate: buildShortRuleDescription({
+        ruleType: 'regex_check',
+        targetField: field,
+        validationRule: `${field} 匹配正则`,
+        ruleParams: '正则=^[A-Za-z0-9_]+$',
+      }),
       workflowHints: {
         ...baseHints,
         rule_type_hint: 'regex_check',
@@ -456,7 +649,12 @@ function buildSingleVariableRecommendations(variable: VariableTag): AiRuleTempla
       category: 'compare',
       variableKind: 'single',
       ruleType: 'fixed_value_compare',
-      descriptionTemplate: `校验 ${field} 字段只能是 ${expectedSet}。`,
+      descriptionTemplate: buildShortRuleDescription({
+        ruleType: 'fixed_value_compare',
+        targetField: field,
+        validationRule: `${field} 只能是 ${expectedSet}`,
+        ruleParams: `期望值=${expectedSet}；期望值模式=set`,
+      }),
       workflowHints: {
         ...baseHints,
         rule_type_hint: 'fixed_value_compare',
@@ -476,7 +674,12 @@ function buildSingleVariableRecommendations(variable: VariableTag): AiRuleTempla
       category: 'compare',
       variableKind: 'single',
       ruleType: 'sequence_order_check',
-      descriptionTemplate: `校验 ${field} 字段按升序连续，步长为 1，起始值使用首行自动识别。`,
+      descriptionTemplate: buildShortRuleDescription({
+        ruleType: 'sequence_order_check',
+        targetField: field,
+        validationRule: `${field} 按升序连续`,
+        ruleParams: '方向=升序；步长=1；起始=自动',
+      }),
       workflowHints: {
         ...baseHints,
         rule_type_hint: 'sequence_order_check',
@@ -500,7 +703,13 @@ function buildCrossTableRecommendation(targetVariable: VariableTag, referenceVar
     category: 'mapping',
     variableKind: 'single',
     ruleType: 'cross_table_mapping',
-    descriptionTemplate: `校验 ${targetField} 字段的值必须存在于引用变量 ${referenceVariable.tag} 中。`,
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'cross_table_mapping',
+      targetField,
+      referenceObject: referenceVariable.tag,
+      validationRule: `${targetField} 必须存在于引用对象`,
+      ruleParams: `引用对象=${referenceVariable.tag}；引用字段=${referenceField}`,
+    }),
     workflowHints: {
       ...buildSingleVariableHints(targetVariable),
       rule_type_hint: 'cross_table_mapping',
@@ -523,7 +732,13 @@ function buildCompositeConditionRecommendation(variable: VariableTag): AiRuleTem
     category: 'composite',
     variableKind: 'composite',
     ruleType: 'composite_condition_check',
-    descriptionTemplate: `在 ${variable.tag} 中，筛选 ${filterField}=示例值 后，校验 ${assertionField} 字段不能为空。`,
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'composite_condition_check',
+      targetField: assertionField,
+      filterCondition: `${filterField}=示例值`,
+      keyField: variable.key_column || '无',
+      validationRule: `${assertionField} 不能为空`,
+    }),
     workflowHints: {
       ...buildCompositeVariableHints(variable),
       rule_type_hint: 'composite_condition_check',
@@ -553,7 +768,13 @@ function buildDualCompositeRecommendation(leftVariable: VariableTag, rightVariab
     category: 'composite',
     variableKind: 'dual_composite',
     ruleType: 'dual_composite_compare',
-    descriptionTemplate: `以 ${keyField} 为 Key，对比 ${leftVariable.tag} 与 ${rightVariable.tag} 的 ${compareFields.join(',') || '共同字段'} 字段是否相等。`,
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'dual_composite_compare',
+      filterCondition: `左侧 ${leftFilterField}=示例A；右侧 ${rightFilterField}=示例B`,
+      keyField,
+      compareFields: compareFields.join(',') || '共同字段',
+      validationRule: '左右两组按 Key 对齐后比较字段必须相等',
+    }),
     workflowHints: {
       ...buildCompositeVariableHints(leftVariable),
       rule_type_hint: 'dual_composite_compare',
@@ -586,7 +807,12 @@ function buildMultiCompositePipelineRecommendation(variables: VariableTag[]): Ai
     category: 'composite',
     variableKind: 'multi_composite',
     ruleType: 'multi_composite_pipeline_check',
-    descriptionTemplate: `按顺序检查 ${tags}：每个节点先按条件过滤，再校验目标字段不能为空。`,
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'multi_composite_pipeline_check',
+      targetField: '目标字段',
+      validationRule: '按多组串行节点执行筛选和断言',
+      ruleParams: `节点1 -> 节点2；变量=${tags}；每个节点填写筛选和断言`,
+    }),
     workflowHints: {
       ...buildCompositeVariableHints(variables[0]),
       rule_type_hint: 'multi_composite_pipeline_check',
@@ -606,7 +832,12 @@ function buildMultiCompositeMappingRecommendation(variables: VariableTag[]): AiR
     category: 'mapping',
     variableKind: 'multi_composite',
     ruleType: 'multi_composite_mapping_check',
-    descriptionTemplate: `检查 ${tags} 的多组映射条件，每个节点按筛选条件独立判断异常。`,
+    descriptionTemplate: buildShortRuleDescription({
+      ruleType: 'multi_composite_mapping_check',
+      targetField: '目标字段',
+      validationRule: '按多组映射节点独立筛选和判断',
+      ruleParams: `变量=${tags}；每个节点填写筛选、断言和排除范围`,
+    }),
     workflowHints: {
       ...buildCompositeVariableHints(variables[0]),
       rule_type_hint: 'multi_composite_mapping_check',
@@ -825,3 +1056,4 @@ function buildMappingNodes(variables: VariableTag[]): Record<string, unknown>[] 
     ],
   }))
 }
+

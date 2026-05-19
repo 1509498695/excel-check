@@ -1,6 +1,13 @@
 import type { AiRuleWorkflowHints } from '../types/ai'
 
 export const AI_RULE_INPUT_DEFAULT_GROUP_NAME = 'AI生成规则组'
+export const AI_RULE_DESCRIPTION_TEMPLATE = `筛选：
+- 字段=值
+- 字段唯一
+
+Key值选择：字段名
+
+判定：字段不能为空 / 字段不能重复 / 字段必须重复 / 字段=值 / 字段等于字段X`
 
 export interface SmartRuleWorkflowHintsState {
   ruleTypeHint: string
@@ -18,6 +25,8 @@ export interface SmartRuleWorkflowHintsState {
   filterValue: string
   assertionField: string
   assertionOperator: string
+  assertionValueSource: string
+  assertionExpectedField: string
   assertionValue: string
   operator: string
   expectedValue: string
@@ -38,6 +47,8 @@ export interface SmartRuleWorkflowHintsState {
   rightFilterValue: string
   leftKeyField: string
   rightKeyField: string
+  compareOperator: string
+  keyCheckMode: string
   compareFields: string
 }
 
@@ -67,6 +78,8 @@ export function createDefaultSmartRuleWorkflowHintsState(): SmartRuleWorkflowHin
     filterValue: '',
     assertionField: '',
     assertionOperator: '',
+    assertionValueSource: '',
+    assertionExpectedField: '',
     assertionValue: '',
     operator: '',
     expectedValue: '',
@@ -87,13 +100,15 @@ export function createDefaultSmartRuleWorkflowHintsState(): SmartRuleWorkflowHin
     rightFilterValue: '',
     leftKeyField: '',
     rightKeyField: '',
+    compareOperator: '',
+    keyCheckMode: '',
     compareFields: '',
   }
 }
 
 export function createDefaultAiRuleInputDraftState(): AiRuleInputDraftState {
   return {
-    description: '',
+    description: AI_RULE_DESCRIPTION_TEMPLATE,
     extraHints: '',
     selectedVariableTags: [],
     allowAutoComplete: false,

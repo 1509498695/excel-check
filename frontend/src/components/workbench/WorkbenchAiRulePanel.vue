@@ -34,8 +34,10 @@ import {
   applyAiRuleTemplate,
   getAvailableAiRuleTemplates,
   getRecommendedAiRuleTemplates,
+  type AiRuleTemplateApplyResult,
 } from '../../utils/aiRuleTemplates'
 import {
+  AI_RULE_DESCRIPTION_TEMPLATE,
   AI_RULE_INPUT_DEFAULT_GROUP_NAME,
   createDefaultSmartRuleWorkflowHintsState,
   type SmartRuleWorkflowHintsState,
@@ -55,8 +57,14 @@ const emit = defineEmits<{
 const AI_RULE_GROUP_NAME = AI_RULE_INPUT_DEFAULT_GROUP_NAME
 const DESCRIPTION_MAX_LENGTH = 800
 const AUTO_FILL_DELAY_MS = 350
-const BUSINESS_RULE_EXAMPLE =
-  '校验规则筛选DESC3=升级p1建筑到p2级p4次,完成p2等级的p1科研，两种类型。STR_ABSwitch字段=GreenServer:0 or SLG2:0。'
+const BUSINESS_RULE_EXAMPLE = [
+  '筛选：',
+  '- DESC3 = 升级p1建筑到p2级p4次,完成p2等级的p1科研',
+  '',
+  'Key值选择：无',
+  '',
+  '判定：STR_ABSwitch = GreenServer:0,SLG2:0',
+].join('\n')
 
 const COMMON_WORKFLOW_PROMPT = `你是 Excel Check 项目的规则工作流 Agent。你的任务是把用户的自然语言导表检查需求，转换成当前系统可执行的个人校验配置，并严格按“先校验、后确认、再添加”的流程执行。
 
@@ -254,6 +262,18 @@ const allowAutoComplete = computed({
   },
 })
 const workflowHints = aiStore.smartRuleInputDraft.workflowHints
+const autoCompleteSourceInput = computed({
+  get: () => workflowHints.sourceUrl || workflowHints.sourceId,
+  set: (value: string) => updateAutoCompleteSource(value),
+})
+const autoCompleteSheetInput = computed({
+  get: () => workflowHints.sheet,
+  set: (value: string) => updateAutoCompleteSheet(value),
+})
+const autoCompleteVariablesInput = computed({
+  get: () => workflowHints.compositeColumns || workflowHints.targetField,
+  set: (value: string) => updateAutoCompleteVariables(value),
+})
 const templateWorkflowHints = computed({
   get: () => aiStore.smartRuleInputDraft.templateWorkflowHints,
   set: (value: AiRuleWorkflowHints) => {
@@ -263,18 +283,90 @@ const templateWorkflowHints = computed({
 
 type SmartRuleHintKey = keyof SmartRuleWorkflowHintsState
 
+const RULE_DESCRIPTION_TEMPLATE_LABELS = [
+  '数据源',
+  'sheet分页',
+  '变量选择',
+  '规则类型',
+  '目标字段',
+  '目标',
+  '筛选条件',
+  '筛选',
+  '左侧筛选',
+  '右侧筛选',
+  'Key字段',
+  'Key 字段',
+  'Key值选择',
+  'Key选择',
+  'Key值',
+  '选择Key',
+  'Key',
+  '关联Key',
+  '引用对象',
+  '比较字段',
+  '筛选规则1',
+  '筛选规则2',
+  '校验规则',
+  '最终判定',
+  '校验判定',
+  '判定',
+  '断言',
+  '规则参数',
+  '我想检查',
+  '只检查',
+  '规则是',
+  '补充说明',
+]
+
 const manuallyEditedHintKeys = new Set<SmartRuleHintKey>()
 let autoFillTimer: ReturnType<typeof setTimeout> | null = null
 
 const currentDraft = computed(() => aiStore.currentDraft)
 const promptOptimizeResult = computed(() => aiStore.promptOptimizeResult)
 const isConfigured = computed(() => aiStore.isConfigured)
-const hasRuleDescription = computed(() => description.value.trim().length >= 4)
+const validationRuleText = computed(
+  () => {
+    const value =
+      extractDescriptionTemplateSection(description.value, '校验规则') ||
+      extractDescriptionTemplateSection(description.value, '规则是') ||
+      extractDescriptionTemplateSection(description.value, '判定') ||
+      extractDescriptionTemplateSection(description.value, '最终判定') ||
+      extractDescriptionTemplateSection(description.value, '校验判定') ||
+      extractDescriptionTemplateSection(description.value, '断言')
+    return isDescriptionTemplatePlaceholder(value) ? '' : value
+  },
+)
+const hasCompleteDualCompareDsl = computed(() =>
+  hasCompleteDualCompareDslDescription(description.value),
+)
+const hasRuleDescription = computed(() => {
+  const rawDescription = description.value.trim()
+  if (!rawDescription || rawDescription === AI_RULE_DESCRIPTION_TEMPLATE.trim()) {
+    return false
+  }
+  if (hasStructuredDescriptionTemplate(rawDescription)) {
+    return validationRuleText.value.length >= 2 || hasCompleteDualCompareDsl.value
+  }
+  return rawDescription.length >= 4
+})
+const autoCompleteMissingItems = computed(() => {
+  if (!allowAutoComplete.value) return []
+  const missing: string[] = []
+  if (!autoCompleteSourceInput.value.trim()) missing.push('数据源')
+  if (!autoCompleteSheetInput.value.trim()) missing.push('sheet分页')
+  if (!autoCompleteVariablesInput.value.trim()) missing.push('变量选择')
+  if (!validationRuleText.value && !hasCompleteDualCompareDsl.value) {
+    missing.push('判定/断言或完整双组比较字段')
+  }
+  return missing
+})
 const canGenerate = computed(
   () =>
     isConfigured.value &&
     hasRuleDescription.value &&
-    (allowAutoComplete.value || selectedVariableTags.value.length > 0),
+    (allowAutoComplete.value
+      ? autoCompleteMissingItems.value.length === 0
+      : selectedVariableTags.value.length > 0),
 )
 const duplicateRuleIds = computed(() => {
   if (!currentDraft.value?.draft.rules_to_add.length) {
@@ -446,6 +538,36 @@ function buildAiResultSummaryFromItems(items: AiRuleResultViewModel[]): AiResult
   }
 }
 
+function extractDescriptionTemplateSection(text: string, label: string): string {
+  const stopLabels = RULE_DESCRIPTION_TEMPLATE_LABELS
+    .filter((item) => item !== label)
+    .map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = text.match(new RegExp(`${escapedLabel}\\s*[：:=]\\s*([\\s\\S]*?)(?=\\s*(?:${stopLabels})\\s*[：:=]|$)`, 'i'))
+  const value = match?.[1]?.trim() ?? ''
+  return value.replace(/[；;。]$/, '').trim()
+}
+
+function hasStructuredDescriptionTemplate(text: string): boolean {
+  return /(?:规则类型|目标字段|筛选条件|筛选|左侧筛选|右侧筛选|Key\s*字段|Key值选择|Key选择|Key值|选择Key|引用对象|比较字段|校验规则|最终判定|校验判定|判定|断言|规则参数|筛选规则1|筛选规则2|规则是|补充说明)\s*[：:=]/.test(text) || /我想检查|只检查/.test(text)
+}
+
+function hasCompleteDualCompareDslDescription(text: string): boolean {
+  const rawDescription = text.trim()
+  if (!/^\s*dual_composite_compare\b/i.test(rawDescription)) {
+    return false
+  }
+  const leftFilter = extractDescriptionTemplateSection(rawDescription, '左侧筛选')
+  const rightFilter = extractDescriptionTemplateSection(rawDescription, '右侧筛选')
+  const key =
+    extractDescriptionTemplateSection(rawDescription, 'Key') ||
+    extractDescriptionTemplateSection(rawDescription, 'Key值选择') ||
+    extractDescriptionTemplateSection(rawDescription, 'Key字段')
+  const compareFields = extractDescriptionTemplateSection(rawDescription, '比较字段')
+  return Boolean(leftFilter && rightFilter && key && compareFields)
+}
+
 function resetPreview(): void {
   previewResult.value = null
   previewError.value = ''
@@ -489,6 +611,8 @@ function applyDescriptionHints(): void {
     'assertionField',
     'assertionOperator',
     'assertionValue',
+    'assertionValueSource',
+    'assertionExpectedField',
     'operator',
     'expectedValue',
     'expectedValueMode',
@@ -508,6 +632,8 @@ function applyDescriptionHints(): void {
     'rightFilterValue',
     'leftKeyField',
     'rightKeyField',
+    'compareOperator',
+    'keyCheckMode',
     'compareFields',
   ])
   autoResetKeys.forEach((key) => {
@@ -546,6 +672,58 @@ function updateAllowAutoComplete(value: boolean): void {
   resetPreview()
 }
 
+function updateAutoCompleteSource(value: string): void {
+  const trimmed = value.trim()
+  manuallyEditedHintKeys.add('sourceId')
+  manuallyEditedHintKeys.add('sourceUrl')
+  if (!trimmed) {
+    workflowHints.sourceId = ''
+    workflowHints.sourceUrl = ''
+  } else if (looksLikeSourcePathOrUrl(trimmed)) {
+    workflowHints.sourceUrl = trimmed
+    workflowHints.sourceId = ''
+  } else {
+    workflowHints.sourceId = trimmed
+    workflowHints.sourceUrl = ''
+  }
+  resetPreview()
+}
+
+function updateAutoCompleteSheet(value: string): void {
+  manuallyEditedHintKeys.add('sheet')
+  workflowHints.sheet = value.trim()
+  resetPreview()
+}
+
+function updateAutoCompleteVariables(value: string): void {
+  const nextValue = value.replaceAll('，', ',')
+  const [firstColumn = ''] = splitColumnList(nextValue)
+  manuallyEditedHintKeys.add('compositeColumns')
+  manuallyEditedHintKeys.add('targetField')
+  workflowHints.compositeColumns = nextValue
+  workflowHints.targetField = firstColumn
+  resetPreview()
+}
+
+function looksLikeSourcePathOrUrl(value: string): boolean {
+  return (
+    /^(https?:|svn:)/i.test(value) ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    /^\\\\/.test(value) ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    /\.xls[xm]?($|[?#])/i.test(value)
+  )
+}
+
+function splitColumnList(value: string): string[] {
+  return value
+    .replaceAll('，', ',')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function syncRoleHintsFromSelectedVariables(): void {
   const [firstTag = '', secondTag = ''] = selectedVariableTags.value
   workflowHints.targetVariableTag = firstTag
@@ -558,9 +736,15 @@ function buildStructuredHintsText(): string {
   const variableMode = allowAutoComplete.value
     ? '允许 AI 自动补齐数据源和变量，已选变量仅作为优先上下文'
     : '仅使用已选变量池变量'
+  const autoCompleteSource = autoCompleteSourceInput.value.trim()
+  const autoCompleteSheet = autoCompleteSheetInput.value.trim()
+  const autoCompleteVariables = autoCompleteVariablesInput.value.trim()
   const lines = [
     '输入模式：目标变量 + 规则描述',
     `变量来源：${variableMode}`,
+    allowAutoComplete.value && autoCompleteSource ? `数据源：${autoCompleteSource}` : '',
+    allowAutoComplete.value && autoCompleteSheet ? `sheet分页：${autoCompleteSheet}` : '',
+    allowAutoComplete.value && autoCompleteVariables ? `变量选择：${autoCompleteVariables}` : '',
     selectedVariableTags.value.length ? `已选变量：${selectedVariableTags.value.join(',')}` : '',
     workflowHints.targetVariableTag ? `目标变量：${workflowHints.targetVariableTag}` : '',
     workflowHints.referenceVariableTag ? `引用变量：${workflowHints.referenceVariableTag}` : '',
@@ -584,6 +768,75 @@ function buildDescriptionPayload(): string {
   if (rawDescription) return rawDescription
   const structuredHints = buildStructuredHintsText()
   return structuredHints || '按结构化表单生成个人校验规则。'
+}
+
+function buildPromptOptimizeInput(): string {
+  const rawDescription = description.value.trim()
+  if (!allowAutoComplete.value) {
+    return rawDescription
+  }
+  return [
+    '【固定模板配置线索】',
+    `数据源：${autoCompleteSourceInput.value.trim()}`,
+    `sheet分页：${autoCompleteSheetInput.value.trim()}`,
+    `变量选择：${autoCompleteVariablesInput.value.trim()}`,
+    '',
+    '【固定模板规则描述】',
+    rawDescription,
+  ].join('\n').trim()
+}
+
+function getDescriptionTemplateSection(label: string): string {
+  const stopLabels = RULE_DESCRIPTION_TEMPLATE_LABELS
+    .filter((item) => item !== label)
+    .map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`${escapedLabel}\\s*[：:=]\\s*([\\s\\S]*?)(?=\\n\\s*(?:${stopLabels})\\s*[：:=]|$)`, 'i')
+  const match = description.value.match(pattern)
+  return match?.[1]?.trim() ?? ''
+}
+
+function isDescriptionTemplatePlaceholder(value: string): boolean {
+  const trimmed = value.trim()
+  return !trimmed || /【|】/.test(trimmed)
+}
+
+function buildPromptOptimizeTemplateContext(): Record<string, unknown> {
+  return {
+    template_name: 'ai_rule_short_template_v4',
+    template_labels: RULE_DESCRIPTION_TEMPLATE_LABELS,
+    source: autoCompleteSourceInput.value.trim(),
+    sheet: autoCompleteSheetInput.value.trim(),
+    variables: autoCompleteVariablesInput.value.trim(),
+    rule_type: getDescriptionTemplateSection('规则类型'),
+    target_field: getDescriptionTemplateSection('目标字段') || getDescriptionTemplateSection('目标'),
+    filter_conditions: getDescriptionTemplateSection('筛选条件') || getDescriptionTemplateSection('筛选'),
+    key_field:
+      getDescriptionTemplateSection('Key字段') ||
+      getDescriptionTemplateSection('Key 字段') ||
+      getDescriptionTemplateSection('Key值选择') ||
+      getDescriptionTemplateSection('Key选择') ||
+      getDescriptionTemplateSection('Key值') ||
+      getDescriptionTemplateSection('选择Key') ||
+      getDescriptionTemplateSection('Key'),
+    reference_object: getDescriptionTemplateSection('引用对象'),
+    compare_fields: getDescriptionTemplateSection('比较字段'),
+    filter_rule_1: getDescriptionTemplateSection('筛选规则1'),
+    filter_rule_2: getDescriptionTemplateSection('筛选规则2'),
+    validation_rule:
+      getDescriptionTemplateSection('校验规则') ||
+      getDescriptionTemplateSection('判定') ||
+      getDescriptionTemplateSection('最终判定') ||
+      getDescriptionTemplateSection('校验判定') ||
+      getDescriptionTemplateSection('断言'),
+    natural_target: getDescriptionTemplateSection('我想检查'),
+    natural_filter: getDescriptionTemplateSection('只检查'),
+    natural_rule: getDescriptionTemplateSection('规则是'),
+    natural_extra: getDescriptionTemplateSection('补充说明'),
+    rule_params: getDescriptionTemplateSection('规则参数'),
+    rule_description_template: AI_RULE_DESCRIPTION_TEMPLATE,
+  }
 }
 
 function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
@@ -628,6 +881,7 @@ function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
   putText('filter_value', workflowHints.filterValue)
   putText('assertion_field', workflowHints.assertionField)
   putText('assertion_value', workflowHints.assertionValue)
+  putText('assertion_expected_field', workflowHints.assertionExpectedField)
   putText('operator', workflowHints.operator)
   putText('expected_value', workflowHints.expectedValue)
   putText('regex_pattern', workflowHints.regexPattern)
@@ -640,6 +894,8 @@ function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
   putText('right_filter_value', workflowHints.rightFilterValue)
   putKeyText('left_key_field', workflowHints.leftKeyField)
   putKeyText('right_key_field', workflowHints.rightKeyField)
+  putText('compare_operator', workflowHints.compareOperator)
+  putText('key_check_mode', workflowHints.keyCheckMode)
   putList('composite_columns', workflowHints.compositeColumns, { dropPlaceholderKey: true })
   putList('compare_fields', workflowHints.compareFields)
 
@@ -651,6 +907,9 @@ function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
   }
   if (workflowHints.assertionOperator.trim()) {
     payload.assertion_operator = workflowHints.assertionOperator as AiRuleWorkflowHints['assertion_operator']
+  }
+  if (workflowHints.assertionValueSource.trim()) {
+    payload.assertion_value_source = workflowHints.assertionValueSource as AiRuleWorkflowHints['assertion_value_source']
   }
   if (workflowHints.expectedValueMode.trim()) {
     payload.expected_value_mode = workflowHints.expectedValueMode as AiRuleWorkflowHints['expected_value_mode']
@@ -666,6 +925,12 @@ function buildWorkflowHintsPayload(): AiRuleWorkflowHints {
   }
   if (workflowHints.rightFilterOperator.trim()) {
     payload.right_filter_operator = workflowHints.rightFilterOperator as AiRuleWorkflowHints['right_filter_operator']
+  }
+  if (workflowHints.compareOperator.trim()) {
+    payload.compare_operator = workflowHints.compareOperator as AiRuleWorkflowHints['compare_operator']
+  }
+  if (workflowHints.keyCheckMode.trim()) {
+    payload.key_check_mode = workflowHints.keyCheckMode as AiRuleWorkflowHints['key_check_mode']
   }
   return payload
 }
@@ -728,18 +993,24 @@ function buildDraftPayloadForWorkflow(
 function loadBusinessRuleExample(): void {
   clearAutoFillTimer()
   manuallyEditedHintKeys.clear()
-  templateWorkflowHints.value = {}
-  description.value = BUSINESS_RULE_EXAMPLE
-  Object.assign(workflowHints, {
-    ...createDefaultSmartRuleWorkflowHintsState(),
-    targetVariableTag: selectedVariableTags.value[0] ?? '',
-    leftVariableTag: selectedVariableTags.value[0] ?? '',
-  })
-  extraHints.value = ''
-  applyDescriptionHints()
-  syncRoleHintsFromSelectedVariables()
-  resetPreview()
-  ElMessage.success('已载入规则描述示例，请选择变量池变量后校验。')
+  const recommendedTemplate = recommendedAiRuleTemplates.value[0]
+  if (recommendedTemplate) {
+    try {
+      const result = applyAiRuleTemplate(
+        recommendedTemplate.id,
+        [...recommendedAiRuleTemplates.value, ...availableAiRuleTemplates.value],
+        selectedTemplateVariables.value,
+      )
+      applyRuleTemplateResult(result)
+      ElMessage.success('已载入最新规则模板，请确认后再 AI 校验。')
+      return
+    } catch (error) {
+      ElMessage.warning(error instanceof Error ? error.message : '载入推荐模板失败，已使用默认案例。')
+    }
+  }
+
+  applyBusinessRuleFallbackExample()
+  ElMessage.success('已载入最新规则模板，请确认后再 AI 校验。')
 }
 
 function handleApplyRuleTemplate(templateId: string): void {
@@ -751,20 +1022,40 @@ function handleApplyRuleTemplate(templateId: string): void {
       [...recommendedAiRuleTemplates.value, ...availableAiRuleTemplates.value],
       selectedTemplateVariables.value,
     )
-    description.value = result.description
-    templateWorkflowHints.value = cloneWorkflowHints(result.workflowHints)
-    applyTemplateWorkflowHints(result.workflowHints)
-    if (result.allowAutoComplete) {
-      allowAutoComplete.value = true
-    }
-    extraHints.value = ''
-    aiStore.clearPromptOptimizeResult()
-    aiStore.clearCurrentDraft()
-    resetPreview()
+    applyRuleTemplateResult(result)
     ElMessage.success('已载入规则模板，请确认描述后再 AI 校验。')
   } catch (error) {
     ElMessage.warning(error instanceof Error ? error.message : '载入规则模板失败。')
   }
+}
+
+function applyRuleTemplateResult(result: AiRuleTemplateApplyResult): void {
+  description.value = result.description
+  templateWorkflowHints.value = cloneWorkflowHints(result.workflowHints)
+  applyTemplateWorkflowHints(result.workflowHints)
+  if (result.allowAutoComplete) {
+    allowAutoComplete.value = true
+  }
+  extraHints.value = ''
+  aiStore.clearPromptOptimizeResult()
+  aiStore.clearCurrentDraft()
+  resetPreview()
+}
+
+function applyBusinessRuleFallbackExample(): void {
+  templateWorkflowHints.value = {}
+  description.value = BUSINESS_RULE_EXAMPLE
+  Object.assign(workflowHints, {
+    ...createDefaultSmartRuleWorkflowHintsState(),
+    targetVariableTag: selectedVariableTags.value[0] ?? '',
+    leftVariableTag: selectedVariableTags.value[0] ?? '',
+  })
+  extraHints.value = ''
+  aiStore.clearPromptOptimizeResult()
+  aiStore.clearCurrentDraft()
+  applyDescriptionHints()
+  syncRoleHintsFromSelectedVariables()
+  resetPreview()
 }
 
 function applyTemplateWorkflowHints(hints: AiRuleWorkflowHints): void {
@@ -802,6 +1093,8 @@ function applyTemplateWorkflowHints(hints: AiRuleWorkflowHints): void {
   setWorkflowHint('rightFilterValue', hints.right_filter_value)
   setWorkflowHint('leftKeyField', hints.left_key_field)
   setWorkflowHint('rightKeyField', hints.right_key_field)
+  setWorkflowHint('compareOperator', hints.compare_operator)
+  setWorkflowHint('keyCheckMode', hints.key_check_mode)
   setWorkflowHint('compareFields', hints.compare_fields)
 }
 
@@ -836,7 +1129,7 @@ async function optimizePrompt(): Promise<void> {
     ElMessage.warning('请先选择一个或多个目标变量。')
     return
   }
-  if (!description.value.trim()) {
+  if (!hasRuleDescription.value) {
     ElMessage.warning('请先输入规则描述。')
     return
   }
@@ -845,12 +1138,18 @@ async function optimizePrompt(): Promise<void> {
   syncRoleHintsFromSelectedVariables()
   try {
     const result = await aiStore.optimizePrompt({
-      raw_description: description.value.trim(),
+      raw_description: buildPromptOptimizeInput(),
       selected_variable_tags: selectedVariableTags.value,
       allow_auto_complete: allowAutoComplete.value,
       context: {
         page: 'personal_workbench',
         mode: 'smart_rule',
+        fixed_template: buildPromptOptimizeTemplateContext(),
+        auto_complete_hints: {
+          source: autoCompleteSourceInput.value,
+          sheet: autoCompleteSheetInput.value,
+          variables: autoCompleteVariablesInput.value,
+        },
       },
     })
     if (result.status === 'optimized') {
@@ -890,9 +1189,11 @@ async function generateDraft(adjustmentHints?: string | Event): Promise<void> {
     ElMessage.warning(
       !isConfigured.value
         ? '请先配置 AI 模型。'
-        : !hasRuleDescription.value
-          ? '请先输入规则描述。'
-          : '请先选择变量池变量，或开启 AI 自动补齐数据源/变量。',
+        : allowAutoComplete.value && autoCompleteMissingItems.value.length
+            ? `请先补齐：${autoCompleteMissingItems.value.join('、')}。`
+          : !hasRuleDescription.value
+            ? '请先输入规则描述。'
+            : '请先选择变量池变量，或开启 AI 自动补齐数据源/变量。',
     )
     return
   }
@@ -1205,12 +1506,16 @@ function formatValue(value: unknown): string {
         v-model:description="description"
         :selected-variable-tags="selectedVariableTags"
         :allow-auto-complete="allowAutoComplete"
+        :auto-complete-source="autoCompleteSourceInput"
+        :auto-complete-sheet="autoCompleteSheetInput"
+        :auto-complete-variables="autoCompleteVariablesInput"
         :variables="workbenchStore.variables"
         :provider-label="providerLabel"
         :is-configured="isConfigured"
         :is-generating="aiStore.isDraftGenerating"
         :is-optimizing="aiStore.isPromptOptimizing"
         :can-generate="canGenerate"
+        :auto-complete-missing-items="autoCompleteMissingItems"
         :max-length="DESCRIPTION_MAX_LENGTH"
         :prompt-text="COMMON_WORKFLOW_PROMPT"
         :templates="availableAiRuleTemplates"
@@ -1218,6 +1523,9 @@ function formatValue(value: unknown): string {
         @update:description="resetPreview"
         @update:selected-variable-tags="updateSelectedVariableTags"
         @update:allow-auto-complete="updateAllowAutoComplete"
+        @update:auto-complete-source="updateAutoCompleteSource"
+        @update:auto-complete-sheet="updateAutoCompleteSheet"
+        @update:auto-complete-variables="updateAutoCompleteVariables"
         @optimize="optimizePrompt"
         @generate="generateDraft"
         @clear="clearInput"
