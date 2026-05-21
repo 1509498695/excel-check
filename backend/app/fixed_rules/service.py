@@ -1,21 +1,14 @@
-"""Compatibility facade for fixed-rules configuration and execution."""
+"""固定规则配置服务门面。
+
+真实加载、保存、归一化、TaskTree 构建、执行和 SVN 更新逻辑分布在同包
+模块中；本文件保留历史 import 路径和 monkeypatch 兼容点。
+"""
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.api.fixed_rules_schemas import (
-    FixedRulesConfig,
-    FixedRulesConfigIssue,
-    UNGROUPED_GROUP_ID,
-    UNGROUPED_GROUP_NAME,
-)
 from backend.app.fixed_rules.config_common import (
-    COMPARE_STYLE_OPERATORS,
     COMPOSITE_KEY_FIELD,
+    COMPARE_STYLE_OPERATORS,
     FIXED_RULES_CONFIG_VERSION,
     SET_STYLE_OPERATORS,
     SUPPORTED_COMPOSITE_ASSERTION_OPERATORS,
@@ -26,179 +19,94 @@ from backend.app.fixed_rules.config_common import (
     SUPPORTED_FIXED_RULE_TYPES,
     SUPPORTED_LOCAL_SOURCE_SUFFIXES,
     SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS,
+    _append_config_issue,
     _build_default_group,
+    _build_single_variable_tag,
+    _build_source_id_from_path,
+    _collect_composite_available_fields,
+    _normalize_columns,
+    _normalize_display_field,
+    _normalize_expected_value_mode_for_operator,
+    _normalize_group_name,
+    _normalize_local_path_replacement_presets,
+    _normalize_local_source_path,
+    _normalize_selected_local_path_replacement_preset,
+    _normalize_selected_svn_path_replacement_preset,
+    _normalize_sequence_numeric,
+    _normalize_svn_path_replacement_presets,
+    _resolve_identifier_against_available,
+    _resolve_identifiers_against_available,
 )
-from backend.app.fixed_rules.config_migration import (
+from backend.app.fixed_rules.config_loader import (
+    _load_fixed_rules_config_payload,
+    build_default_fixed_rules_config,
+    load_fixed_rules_config,
+    load_fixed_rules_config_with_issues,
+    parse_raw_fixed_rules_config,
+)
+from backend.app.fixed_rules.config_migrator import (
     LEGACY_FIXED_RULE_KEYS,
     _ensure_v4_config,
+    _migrate_legacy_payload,
     _parse_fixed_rules_payload,
 )
-from backend.app.fixed_rules.config_validation import (
+from backend.app.fixed_rules.composite_rule_normalizer import (
+    _normalize_composite_conditions,
+    _normalize_composite_rule_config,
+)
+from backend.app.fixed_rules.config_normalizer import (
     _validate_and_normalize_fixed_rules_config,
     validate_and_normalize_fixed_rules_config,
 )
+from backend.app.fixed_rules.config_saver import save_fixed_rules_config
+from backend.app.fixed_rules.dual_composite_normalizer import (
+    _normalize_dual_composite_rule,
+    _normalize_dual_key_field,
+)
 from backend.app.fixed_rules.execution import (
-    execute_fixed_rules_for_project as _execute_fixed_rules_for_project,
-    execute_saved_fixed_rules as _execute_saved_fixed_rules,
+    execute_fixed_rules_for_project,
+    execute_saved_fixed_rules,
+)
+from backend.app.fixed_rules.group_normalizer import _normalize_groups
+from backend.app.fixed_rules.mapping_rule_normalizer import (
+    _has_legacy_mapping_node_content,
+    _normalize_multi_composite_mapping_config,
+    _normalize_multi_composite_mapping_exclusion_ranges,
+    _normalize_multi_composite_mapping_filters,
+)
+from backend.app.fixed_rules.metadata_loader import _load_sheet_columns
+from backend.app.fixed_rules.pipeline_rule_normalizer import (
+    _normalize_multi_composite_pipeline_config,
+)
+from backend.app.fixed_rules.rule_normalizer import _normalize_rules
+from backend.app.fixed_rules.source_normalizer import _normalize_sources
+from backend.app.fixed_rules.source_runtime_validator import (
+    _validate_source_runtime_bindings,
+)
+from backend.app.fixed_rules.svn_update import (
+    _collect_svn_targets,
+    _collect_working_copies,
+)
+from backend.app.fixed_rules.svn_update import (
     run_saved_fixed_rules_svn_update as _run_saved_fixed_rules_svn_update,
 )
-from backend.app.fixed_rules.task_tree import build_fixed_rules_task_tree
+from backend.app.fixed_rules.task_tree_builder import (
+    _build_fixed_rule_params,
+    _get_ordered_rules,
+    _get_primary_rule_target_tag,
+    build_fixed_rules_task_tree,
+)
+from backend.app.fixed_rules.variable_normalizer import _normalize_variables
 from backend.app.loaders.svn_manager import update_svn_working_copy
-from backend.config import settings
 
 
-__all__ = [
-    "COMPARE_STYLE_OPERATORS",
-    "COMPOSITE_KEY_FIELD",
-    "FIXED_RULES_CONFIG_VERSION",
-    "LEGACY_FIXED_RULE_KEYS",
-    "SET_STYLE_OPERATORS",
-    "SUPPORTED_COMPOSITE_ASSERTION_OPERATORS",
-    "SUPPORTED_COMPOSITE_FILTER_OPERATORS",
-    "SUPPORTED_DUAL_COMPOSITE_KEY_CHECK_MODES",
-    "SUPPORTED_DUAL_COMPOSITE_OPERATORS",
-    "SUPPORTED_FIXED_RULE_OPERATORS",
-    "SUPPORTED_FIXED_RULE_TYPES",
-    "SUPPORTED_LOCAL_SOURCE_SUFFIXES",
-    "SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS",
-    "UNGROUPED_GROUP_ID",
-    "UNGROUPED_GROUP_NAME",
-    "build_default_fixed_rules_config",
-    "build_fixed_rules_task_tree",
-    "execute_fixed_rules_for_project",
-    "execute_saved_fixed_rules",
-    "load_fixed_rules_config",
-    "load_fixed_rules_config_with_issues",
-    "parse_raw_fixed_rules_config",
-    "run_saved_fixed_rules_svn_update",
-    "save_fixed_rules_config",
-    "update_svn_working_copy",
-    "validate_and_normalize_fixed_rules_config",
-]
-
-
-def build_default_fixed_rules_config() -> FixedRulesConfig:
-    """返回项目校验的默认配置。"""
-    return FixedRulesConfig(
-        version=FIXED_RULES_CONFIG_VERSION,
-        configured=False,
-        sources=[],
-        variables=[],
-        groups=[_build_default_group()],
-        rules=[],
-        local_path_replacement_presets=[],
-        selected_local_path_replacement_preset=None,
-        svn_path_replacement_presets=[],
-        selected_svn_path_replacement_preset=None,
-    )
-
-
-def load_fixed_rules_config() -> FixedRulesConfig:
-    """从默认路径加载并校验固定规则配置。"""
-    config, _ = _load_fixed_rules_config_payload(allow_runtime_issues=False)
-    return config
-
-
-def parse_raw_fixed_rules_config(raw: dict) -> FixedRulesConfig:
-    """将数据库读出的原始 dict 解析为 FixedRulesConfig，兼容遗留格式。"""
-    return _parse_fixed_rules_payload(raw)
-
-
-def load_fixed_rules_config_with_issues(
-    config: FixedRulesConfig | None = None,
-    *,
-    allow_legacy_mapping_config: bool = False,
-    allow_unsupported_csv: bool = True,
-) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
-    """从文件或传入的配置加载并校验固定规则，返回配置与问题列表。"""
-    if config is not None:
-        return _validate_and_normalize_fixed_rules_config(
-            _ensure_v4_config(config),
-            allow_runtime_issues=True,
-            allow_legacy_mapping_config=allow_legacy_mapping_config,
-            allow_unsupported_csv=allow_unsupported_csv,
-        )
-    return _load_fixed_rules_config_payload(
-        allow_runtime_issues=True,
-        allow_legacy_mapping_config=allow_legacy_mapping_config,
-    )
-
-
-def _load_fixed_rules_config_payload(
-    *,
-    allow_runtime_issues: bool,
-    allow_legacy_mapping_config: bool = False,
-) -> tuple[FixedRulesConfig, list[FixedRulesConfigIssue]]:
-    """从配置文件读取并归一化固定规则配置。"""
-    config_path = settings.fixed_rules_config_path
-    if not config_path.exists():
-        return build_default_fixed_rules_config(), []
-
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"固定规则配置文件不是合法 JSON：{exc}") from exc
-
-    raw_config = _parse_fixed_rules_payload(payload)
-    return _validate_and_normalize_fixed_rules_config(
-        raw_config,
-        allow_runtime_issues=allow_runtime_issues,
-        allow_legacy_mapping_config=allow_legacy_mapping_config,
-    )
-
-
-def save_fixed_rules_config(config: FixedRulesConfig) -> FixedRulesConfig:
-    """校验并保存固定规则配置。"""
-    normalized_config = validate_and_normalize_fixed_rules_config(_ensure_v4_config(config))
-    config_path = settings.fixed_rules_config_path
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        json.dumps(
-            normalized_config.model_dump(mode="json", exclude_none=True),
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return normalized_config
-
-
-def execute_saved_fixed_rules(
-    config: FixedRulesConfig | None = None,
-    selected_rule_ids: list[str] | None = None,
-) -> dict[str, object]:
-    """执行固定规则。如果传入 config 则直接使用，否则从文件加载。"""
-    if config is None:
-        config = load_fixed_rules_config()
-    return _execute_saved_fixed_rules(config, selected_rule_ids=selected_rule_ids)
-
-
-async def execute_fixed_rules_for_project(
-    db: AsyncSession,
-    project_id: int,
-    *,
-    user_scope: str | None = None,
-    selected_rule_ids: list[str] | None = None,
-) -> dict[str, Any]:
-    """以项目级配置执行项目校验，落库后返回执行摘要。"""
-    return await _execute_fixed_rules_for_project(
-        db,
-        project_id,
-        user_scope=user_scope,
-        selected_rule_ids=selected_rule_ids,
-    )
-
-
-def run_saved_fixed_rules_svn_update(
-    config: FixedRulesConfig | None = None,
-    *,
-    user_scope: str | None = None,
-) -> dict[str, object]:
-    """对固定规则配置中的数据源执行 SVN 更新。"""
-    if config is None:
-        config = load_fixed_rules_config()
+def run_saved_fixed_rules_svn_update(config=None, *, user_scope=None):
+    """兼容门面，允许测试继续 monkeypatch service.update_svn_working_copy。"""
     return _run_saved_fixed_rules_svn_update(
         config,
         user_scope=user_scope,
         update_working_copy=update_svn_working_copy,
     )
+
+
+__all__ = [name for name in globals() if not name.startswith("__")]

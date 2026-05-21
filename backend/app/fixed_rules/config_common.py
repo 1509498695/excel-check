@@ -1,4 +1,4 @@
-"""Shared constants and helpers for fixed-rules configuration."""
+"""固定规则配置公共常量与基础归一化辅助。"""
 
 from __future__ import annotations
 
@@ -7,16 +7,19 @@ from pathlib import Path
 
 from backend.app.api.fixed_rules_schemas import (
     FixedRuleGroup,
+    FixedRulesConfigIssue,
     UNGROUPED_GROUP_ID,
     UNGROUPED_GROUP_NAME,
 )
+from backend.app.api.schemas import VariableTag
+from backend.app.rules.domain.operators import (
+    normalize_expected_value_mode,
+    parse_expected_value_set,
+)
+
 
 FIXED_RULES_CONFIG_VERSION = 6
-
-
 COMPOSITE_KEY_FIELD = "__key__"
-
-
 SUPPORTED_FIXED_RULE_TYPES = {
     "fixed_value_compare",
     "regex_check",
@@ -29,11 +32,7 @@ SUPPORTED_FIXED_RULE_TYPES = {
     "multi_composite_pipeline_check",
     "multi_composite_mapping_check",
 }
-
-
 SUPPORTED_FIXED_RULE_OPERATORS = {"eq", "ne", "gt", "lt"}
-
-
 SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
     "eq",
     "ne",
@@ -43,8 +42,6 @@ SUPPORTED_COMPOSITE_FILTER_OPERATORS = {
     "contains",
     "not_contains",
 }
-
-
 SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
     "eq",
     "ne",
@@ -55,8 +52,6 @@ SUPPORTED_COMPOSITE_ASSERTION_OPERATORS = {
     "unique",
     "duplicate_required",
 }
-
-
 SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS = {
     "eq",
     "ne",
@@ -67,63 +62,101 @@ SUPPORTED_MULTI_PIPELINE_ASSERTION_OPERATORS = {
     "unique",
     "duplicate_required",
 }
-
-
 SUPPORTED_DUAL_COMPOSITE_OPERATORS = {"eq", "ne", "gt", "lt", "not_null"}
-
-
 SUPPORTED_DUAL_COMPOSITE_KEY_CHECK_MODES = {"baseline_only", "bidirectional"}
-
-
 COMPARE_STYLE_OPERATORS = {"eq", "ne", "gt", "lt"}
-
-
 SET_STYLE_OPERATORS = {"unique", "duplicate_required"}
-
-
 SUPPORTED_LOCAL_SOURCE_SUFFIXES = {
     "local_excel": {".xls", ".xlsx"},
     "local_csv": {".csv"},
 }
 
-def _build_default_group() -> FixedRuleGroup:
-    """????????"""
-    return FixedRuleGroup(
-        group_id=UNGROUPED_GROUP_ID,
-        group_name=UNGROUPED_GROUP_NAME,
-        builtin=True,
-    )
 
-
-def _build_source_id_from_path(source_path: Path, seen_ids: set[str]) -> str:
-    """?????????????? source_id?"""
-    raw_stem = re.sub(r"[^0-9A-Za-z_-]+", "-", source_path.stem).strip("-").lower()
-    base_id = raw_stem or "source"
-    if base_id not in seen_ids:
-        return base_id
-
-    index = 2
-    while f"{base_id}-{index}" in seen_ids:
-        index += 1
-    return f"{base_id}-{index}"
-
-
-def _build_single_variable_tag(
+def _normalize_expected_value_mode_for_operator(
     *,
-    source_id: str,
-    sheet: str,
-    column: str,
-    seen_tags: set[str],
-) -> str:
-    """???????????????"""
-    base_tag = f"[{source_id}-{sheet.strip() or 'sheet'}-{column.strip() or 'column'}]"
-    if base_tag not in seen_tags:
-        return base_tag
+    operator: str,
+    expected_value: str,
+    expected_value_mode: str | None,
+    context: str,
+) -> str | None:
+    """校验固定值模式；仅 eq/ne 支持规则集。"""
+    try:
+        normalized_mode = normalize_expected_value_mode(expected_value_mode)
+    except ValueError as exc:
+        raise ValueError(f"{context} 的 expected_value_mode 仅支持 single 或 set。") from exc
 
-    index = 2
-    while f"{base_tag[:-1]}-{index}]" in seen_tags:
-        index += 1
-    return f"{base_tag[:-1]}-{index}]"
+    if normalized_mode == "set":
+        if operator not in {"eq", "ne"}:
+            raise ValueError(f"{context} 只有等于/不等于支持规则集比较值。")
+        try:
+            parse_expected_value_set(expected_value)
+        except ValueError as exc:
+            raise ValueError(f"{context} 的规则集至少需要一个固定值。") from exc
+
+    return "set" if normalized_mode == "set" else None
+
+
+def _normalize_sequence_numeric(
+    value: str | None,
+    *,
+    field_name: str,
+    rule_id: str,
+    positive_only: bool = False,
+) -> str:
+    """校验并规范顺序校验使用的数字参数。"""
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValueError(f"规则 '{rule_id}' 缺少 {field_name}。")
+
+    try:
+        numeric = float(normalized)
+    except ValueError as exc:
+        raise ValueError(f"规则 '{rule_id}' 的 {field_name} 必须是合法数字。") from exc
+
+    if positive_only and numeric <= 0:
+        raise ValueError(f"规则 '{rule_id}' 的 {field_name} 必须大于 0。")
+
+    if numeric.is_integer():
+        return str(int(numeric))
+    return format(numeric, "g")
+
+
+def _collect_composite_available_fields(variable: VariableTag) -> list[str]:
+    """??????????????????"""
+    available_fields = [COMPOSITE_KEY_FIELD]
+    key_column = variable.key_column or ""
+    if key_column.strip():
+        available_fields.append(key_column)
+    available_fields.extend(
+        column
+        for column in (variable.columns or [])
+        if column and column.strip()
+    )
+    available_fields = list(dict.fromkeys(available_fields))
+    return available_fields
+
+
+def _normalize_display_field(
+    *,
+    rule_id: str,
+    variable: VariableTag,
+    display_field: str | None,
+) -> str | None:
+    """校验规则结果显示字段，并限制在当前关联变量内。"""
+    normalized_field = (display_field or "").strip()
+    if not normalized_field:
+        return None
+
+    if (variable.variable_kind or "single") == "composite":
+        available_fields = _collect_composite_available_fields(variable)
+    else:
+        available_fields = [variable.column] if variable.column else []
+
+    if normalized_field not in available_fields:
+        raise ValueError(
+            f"规则 '{rule_id}' 的结果显示字段 '{normalized_field}' 不属于当前关联变量。"
+        )
+    return normalized_field
 
 
 def _normalize_local_source_path(
@@ -279,3 +312,86 @@ def _resolve_identifiers_against_available(
         seen_values.add(resolved_value)
 
     return resolved_values
+
+
+def _append_config_issue(
+    issues: list[FixedRulesConfigIssue],
+    issue_keys: set[tuple[str, str | None, str | None, str | None, str]] | None,
+    *,
+    message: str,
+    level: str = "warning",
+    source_id: str | None = None,
+    variable_tag: str | None = None,
+    rule_id: str | None = None,
+) -> None:
+    """?????????????????"""
+    issue_key = (level, source_id, variable_tag, rule_id, message)
+    if issue_keys is not None and issue_key in issue_keys:
+        return
+
+    issues.append(
+        FixedRulesConfigIssue(
+            level=level,
+            source_id=source_id,
+            variable_tag=variable_tag,
+            rule_id=rule_id,
+            message=message,
+        )
+    )
+    if issue_keys is not None:
+        issue_keys.add(issue_key)
+
+
+def _build_default_group() -> FixedRuleGroup:
+    """????????"""
+    return FixedRuleGroup(
+        group_id=UNGROUPED_GROUP_ID,
+        group_name=UNGROUPED_GROUP_NAME,
+        builtin=True,
+    )
+
+
+def _normalize_group_name(group_id: str, group_name: str) -> str:
+    """修正已知的历史乱码分组名称，避免运行态配置继续回显脏数据。"""
+    if group_id == UNGROUPED_GROUP_ID and (
+        not group_name or "æ" in group_name or "?" in group_name
+    ):
+        return UNGROUPED_GROUP_NAME
+
+    if group_id == "basic-checks" and (
+        not group_name or group_name.strip("?") == "" or "æ" in group_name
+    ):
+        return "基础校验"
+
+    return group_name
+
+
+def _build_source_id_from_path(source_path: Path, seen_ids: set[str]) -> str:
+    """?????????????? source_id?"""
+    raw_stem = re.sub(r"[^0-9A-Za-z_-]+", "-", source_path.stem).strip("-").lower()
+    base_id = raw_stem or "source"
+    if base_id not in seen_ids:
+        return base_id
+
+    index = 2
+    while f"{base_id}-{index}" in seen_ids:
+        index += 1
+    return f"{base_id}-{index}"
+
+
+def _build_single_variable_tag(
+    *,
+    source_id: str,
+    sheet: str,
+    column: str,
+    seen_tags: set[str],
+) -> str:
+    """???????????????"""
+    base_tag = f"[{source_id}-{sheet.strip() or 'sheet'}-{column.strip() or 'column'}]"
+    if base_tag not in seen_tags:
+        return base_tag
+
+    index = 2
+    while f"{base_tag[:-1]}-{index}]" in seen_tags:
+        index += 1
+    return f"{base_tag[:-1]}-{index}]"

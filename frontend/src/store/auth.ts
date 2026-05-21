@@ -52,17 +52,20 @@ export const useAuthStore = defineStore('auth', {
       const response = await apiRegister(username, password, projectId)
       setToken(response.data.token)
       this.user = response.data.user
+      this.isReady = true
     },
 
     async login(username: string, password: string): Promise<void> {
       const response = await apiLogin(username, password)
       setToken(response.data.token)
       this.user = response.data.user
+      this.isReady = true
     },
 
     logout(): void {
       clearToken()
       this.user = null
+      this.isReady = true
     },
 
     async fetchMe(): Promise<void> {
@@ -88,6 +91,7 @@ export const useAuthStore = defineStore('auth', {
       const response = await apiSwitchProject(projectId)
       setToken(response.data.token)
       this.user = response.data.user
+      this.isReady = true
     },
   },
 })

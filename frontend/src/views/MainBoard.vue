@@ -10,50 +10,30 @@ import MetricCard from '../components/shell/MetricCard.vue'
 import DataSourcePanel from '../components/workbench/DataSourcePanel.vue'
 import ResultBoardPanel from '../components/workbench/ResultBoardPanel.vue'
 import SourcePathReplacementDialog from '../components/workbench/SourcePathReplacementDialog.vue'
-import WorkbenchRuleImportDrawer from '../components/workbench/WorkbenchRuleImportDrawer.vue'
 import WorkbenchRuleOrchestrationPanel from '../components/workbench/WorkbenchRuleOrchestrationPanel.vue'
 import VariablePoolPanel from '../components/workbench/VariablePoolPanel.vue'
+import { ImportPersonalRulesDialog } from '../features/fixed-rules-import'
 import PageHeader from '../components/shell/PageHeader.vue'
 import PrimaryButton from '../components/shell/PrimaryButton.vue'
 import SecondaryButton from '../components/shell/SecondaryButton.vue'
-import { StatusBadge, type StatusBadgeType } from '../components/shell'
+import type { StatusBadgeType } from '../components/shell'
 import { useWorkbenchStore } from '../store/workbench'
-import type { ExpectedType, SourceType } from '../types/workbench'
+import { useFixedRulesStore } from '../store/fixedRules'
 
 // 保持原有逻辑不变：工作台的数据加载、自动保存、执行与滚动行为全部维持现状。
 const store = useWorkbenchStore()
+const fixedRulesStore = useFixedRulesStore()
 const router = useRouter()
 
 type StepIndex = 1 | 2 | 3 | 4
 type SectionStatus = 'pending' | 'active' | 'done'
 type StatTone = 'pending' | 'active' | 'done' | 'warn' | 'error'
 type SectionKey = 'source' | 'variable' | 'rule' | 'result'
-interface DataSourceDialogPrefill {
-  id?: string
-  type?: SourceType
-  pathOrUrl?: string
-  token?: string
-}
-interface SingleVariablePrefill {
-  source_id?: string
-  sheet?: string
-  column?: string
-  tag?: string
-  expected_type?: ExpectedType | null
-}
-interface CompositeVariablePrefill {
-  source_id?: string
-  sheet?: string
-  columns?: string[]
-  key_column?: string
-  tag?: string
-  append_index_to_key?: boolean
-}
 
 const selectedGuideStep = ref<StepIndex | null>(null)
 const hasManuallySelectedGuideStep = ref(false)
 const selectedRuleIds = ref<string[]>([])
-const importDrawerVisible = ref(false)
+const importDialogVisible = ref(false)
 
 onMounted(async () => {
   // 保留原有业务逻辑：工作台初始化仍并行读取能力与服务端配置。
@@ -94,11 +74,11 @@ const sourceStepRef = ref<HTMLElement | null>(null)
 const variableStepRef = ref<HTMLElement | null>(null)
 const ruleStepRef = ref<HTMLElement | null>(null)
 const resultStepRef = ref<HTMLElement | null>(null)
-const dataSourcePanelRef = ref<{ openCreateDialog: (prefill?: DataSourceDialogPrefill) => void } | null>(null)
+const dataSourcePanelRef = ref<{ openCreateDialog: () => void } | null>(null)
 const sourcePathReplacementDialogRef = ref<{ openDialog: () => void } | null>(null)
 const variablePoolPanelRef = ref<{
-  openSingleCreateTab: (prefill?: SingleVariablePrefill) => Promise<void>
-  openCompositeCreateTab: (prefill?: CompositeVariablePrefill) => Promise<void>
+  openSingleCreateTab: () => Promise<void>
+  openCompositeCreateTab: () => Promise<void>
 } | null>(null)
 const collapsedSections = reactive<Record<SectionKey, boolean>>({
   source: false,
@@ -159,32 +139,6 @@ function getStatusBadgeType(tone: StatTone): StatusBadgeType {
   if (tone === 'error') return 'danger'
   return 'neutral'
 }
-
-function formatAutoSaveTime(savedAt: number | null): string {
-  if (!savedAt) {
-    return ''
-  }
-  return new Date(savedAt).toLocaleTimeString('zh-CN', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
-const autoSaveStatusMeta = computed<{ label: string; type: StatusBadgeType }>(() => {
-  if (store.autoSaveStatus === 'saving') {
-    return { label: '保存中', type: 'pending' }
-  }
-  if (store.autoSaveStatus === 'saved') {
-    const savedTime = formatAutoSaveTime(store.autoSaveSavedAt)
-    return { label: savedTime ? `已保存 ${savedTime}` : '已保存', type: 'success' }
-  }
-  if (store.autoSaveStatus === 'failed') {
-    return { label: '保存失败', type: 'danger' }
-  }
-  return { label: '自动保存待命', type: 'neutral' }
-})
 
 function getMetricIconTone(index: number): (typeof metricIconTones)[number] {
   return metricIconTones[index] ?? 'primary'
@@ -401,59 +355,8 @@ async function handleSvnUpdate(): Promise<void> {
   }
 }
 
-async function retryAutoSave(): Promise<void> {
-  try {
-    await store.retryAutoSave()
-    ElMessage.success('配置已保存。')
-  } catch {
-    ElMessage.warning('自动保存仍失败，请稍后重试。')
-  }
-}
-
 function openDataSourceCreate(): void {
   dataSourcePanelRef.value?.openCreateDialog()
-}
-
-function normalizeString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-function normalizeSourceType(value: unknown): SourceType {
-  return value === 'local_excel' || value === 'local_csv' || value === 'feishu' || value === 'svn'
-    ? value
-    : 'svn'
-}
-
-function normalizeExpectedType(value: unknown): ExpectedType | null | undefined {
-  if (value === 'str' || value === 'json' || value === 'int') {
-    return value
-  }
-  return undefined
-}
-
-function normalizeBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function normalizeStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined
-  }
-  const items = value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean)
-  return items.length ? items : undefined
-}
-
-async function openDataSourcePrefill(prefill: Record<string, unknown>): Promise<void> {
-  await ensureStepExpanded(1)
-  await scrollToStep(1)
-  dataSourcePanelRef.value?.openCreateDialog({
-    id: normalizeString(prefill.id ?? prefill.source_id),
-    type: normalizeSourceType(prefill.type),
-    pathOrUrl: normalizeString(prefill.pathOrUrl ?? prefill.path_or_url),
-    token: normalizeString(prefill.token),
-  })
 }
 
 function openSourcePathReplacementDialog(): void {
@@ -465,37 +368,26 @@ function openUserGuide(): void {
   window.open(guideUrl, '_blank', 'noopener,noreferrer')
 }
 
+async function openImportPersonalRulesDialog(): Promise<void> {
+  if (!store.orchestrationRuleCount) {
+    ElMessage.warning('当前暂无可导入的个人校验规则。')
+    return
+  }
+  await store.saveConfigNow()
+  importDialogVisible.value = true
+}
+
+async function handleImportFinished(): Promise<void> {
+  await fixedRulesStore.loadConfig()
+  ElMessage.success('项目校验配置已刷新。')
+}
+
 function openSingleVariableCreate(): void {
   void variablePoolPanelRef.value?.openSingleCreateTab()
 }
 
 function openCompositeVariableCreate(): void {
   void variablePoolPanelRef.value?.openCompositeCreateTab()
-}
-
-async function openSingleVariablePrefill(prefill: Record<string, unknown>): Promise<void> {
-  await ensureStepExpanded(2)
-  await scrollToStep(2)
-  await variablePoolPanelRef.value?.openSingleCreateTab({
-    source_id: normalizeString(prefill.source_id),
-    sheet: normalizeString(prefill.sheet),
-    column: normalizeString(prefill.column),
-    tag: normalizeString(prefill.tag),
-    expected_type: normalizeExpectedType(prefill.expected_type),
-  })
-}
-
-async function openCompositeVariablePrefill(prefill: Record<string, unknown>): Promise<void> {
-  await ensureStepExpanded(2)
-  await scrollToStep(2)
-  await variablePoolPanelRef.value?.openCompositeCreateTab({
-    source_id: normalizeString(prefill.source_id),
-    sheet: normalizeString(prefill.sheet),
-    columns: normalizeStringArray(prefill.columns),
-    key_column: normalizeString(prefill.key_column),
-    tag: normalizeString(prefill.tag),
-    append_index_to_key: normalizeBoolean(prefill.append_index_to_key),
-  })
 }
 
 async function handleStepperClick(step: StepIndex): Promise<void> {
@@ -519,21 +411,6 @@ function buildOrderedSelectedRuleIds(nextSelectedRuleIdSet: Set<string>): string
   return store.orchestrationRules
     .map((rule) => rule.rule_id)
     .filter((ruleId) => nextSelectedRuleIdSet.has(ruleId))
-}
-
-function selectAppliedRuleIds(ruleIds: string[]): void {
-  const nextSelectedRuleIdSet = new Set(selectedRuleIds.value)
-  ruleIds.forEach((ruleId) => nextSelectedRuleIdSet.add(ruleId))
-  selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
-}
-
-function handleAiDraftApplied(ruleIds: string[]): void {
-  selectAppliedRuleIds(ruleIds)
-}
-
-async function handleAiDraftAppliedAndExecute(ruleIds: string[]): Promise<void> {
-  selectAppliedRuleIds(ruleIds)
-  await runExecution()
 }
 
 function handleToggleRuleSelection(ruleId: string): void {
@@ -560,15 +437,6 @@ function handleToggleVisibleRuleSelection(payload: {
   })
   selectedRuleIds.value = buildOrderedSelectedRuleIds(nextSelectedRuleIdSet)
 }
-
-function openRuleImportDrawer(): void {
-  if (!selectedRuleIds.value.length) {
-    ElMessage.warning('请先勾选需要导入项目校验的规则。')
-    return
-  }
-  importDrawerVisible.value = true
-}
-
 </script>
 
 <template>
@@ -576,7 +444,6 @@ function openRuleImportDrawer(): void {
     <!-- TopBar：极简，左面包屑+标题，右动作 -->
     <PageHeader breadcrumb="主页 / 个人校验" title="配置表个人校验">
       <template #actions>
-        <StatusBadge :type="autoSaveStatusMeta.type" :label="autoSaveStatusMeta.label" />
         <SecondaryButton
           :disabled="store.isUpdatingSvn || !store.canRunSvnUpdate"
           @click="handleSvnUpdate"
@@ -615,17 +482,6 @@ function openRuleImportDrawer(): void {
         </SecondaryButton>
       </template>
     </PageHeader>
-
-    <div
-      v-if="store.autoSaveStatus === 'failed'"
-      class="mx-8 mt-4 flex flex-col gap-3 rounded-field border border-danger/40 bg-danger-soft/40 px-4 py-3 text-[13px] text-danger sm:flex-row sm:items-center sm:justify-between"
-      role="status"
-    >
-      <span>{{ store.autoSaveError || '自动保存失败，当前修改可能尚未保存。' }}</span>
-      <SecondaryButton size="sm" @click="retryAutoSave">
-        重试保存
-      </SecondaryButton>
-    </div>
 
     <!-- 主滚动区 -->
     <div class="personal-check-content flex flex-1 flex-col gap-6 overflow-y-auto px-8 py-8">
@@ -787,14 +643,14 @@ function openRuleImportDrawer(): void {
             :selected-rule-ids="selectedRuleIds"
             @toggle-rule-selection="handleToggleRuleSelection"
             @toggle-visible-rule-selection="handleToggleVisibleRuleSelection"
-            @open-source-prefill="openDataSourcePrefill"
-            @open-single-variable-prefill="openSingleVariablePrefill"
-            @open-composite-variable-prefill="openCompositeVariablePrefill"
-            @ai-draft-applied="handleAiDraftApplied"
-            @ai-draft-applied-and-execute="handleAiDraftAppliedAndExecute"
-            @open-import-selected-rules="openRuleImportDrawer"
           />
           <div class="personal-rule-actions">
+            <SecondaryButton
+              :disabled="store.isExecuting || !store.orchestrationRuleCount"
+              @click="openImportPersonalRulesDialog"
+            >
+              一键导入到项目校验
+            </SecondaryButton>
             <PrimaryButton
               :disabled="store.isExecuting"
               @click="runExecution"
@@ -861,9 +717,10 @@ function openRuleImportDrawer(): void {
         :store="store"
         variant="workbench"
       />
-      <WorkbenchRuleImportDrawer
-        v-model:visible="importDrawerVisible"
-        :selected-rule-ids="selectedRuleIds"
+      <ImportPersonalRulesDialog
+        v-model="importDialogVisible"
+        :initial-rule-ids="selectedRuleIds"
+        @imported="handleImportFinished"
       />
     </div>
   </div>

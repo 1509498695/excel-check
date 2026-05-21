@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useAuthStore } from '../store/auth'
+import { preloadRouteComponent } from '../router/routePreload'
 
 // 保持原有逻辑不变：登录校验、鉴权调用与跳转链路保持现状。
 const route = useRoute()
@@ -14,6 +15,17 @@ const username = ref('')
 const password = ref('')
 const isLoading = ref(false)
 
+function getLoginTargetPath(): string {
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  return redirect.startsWith('/') ? redirect : '/'
+}
+
+onMounted(() => {
+  window.setTimeout(() => {
+    preloadRouteComponent(getLoginTargetPath())
+  }, 0)
+})
+
 async function handleLogin(): Promise<void> {
   if (!username.value.trim() || !password.value) {
     ElMessage.warning('用户名与密码均为必填')
@@ -21,12 +33,12 @@ async function handleLogin(): Promise<void> {
   }
 
   isLoading.value = true
+  preloadRouteComponent(getLoginTargetPath())
   try {
     // 保留原有业务逻辑：登录继续调用原 auth store 鉴权链路。
     await auth.login(username.value.trim(), password.value)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-    await router.replace(redirect.startsWith('/') ? redirect : '/')
     ElMessage.success('登录成功')
+    router.push(getLoginTargetPath())
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '登录失败')
   } finally {

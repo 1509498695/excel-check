@@ -8,436 +8,128 @@ import {
   fetchExecutionResults,
   fetchSourceCapabilities,
   fetchSourceMetadata,
-  fetchWorkbenchConfig,
-  saveWorkbenchConfig,
   triggerWorkbenchSvnUpdate,
 } from '../api/workbench'
-import type { CompositeCondition, FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
+import type { FixedRuleDefinition, FixedRuleGroup } from '../types/fixedRules'
 import type { AiRuleDraftPayload } from '../types/ai'
 import type {
-  AbnormalResult,
   DataSource,
   ExecuteResponse,
-  ExecutionMeta,
   SourceMetadata,
-  SourceType,
   TaskTree,
   ValidationRule,
   VariablePreviewData,
   VariableTag,
-  WorkbenchSvnUpdateItem,
 } from '../types/workbench'
+import {
+  collectCompositeAvailableFields,
+  createWorkbenchDemoRules,
+  normalizeDualCompositeFilters,
+  resolveFieldAgainstAvailable,
+} from './workbench/rules'
+import {
+  buildWorkbenchTaskTreePayload,
+  selectAllRuleGroups,
+  selectCanExecuteOrchestration,
+  selectCurrentOrchestrationGroupPageCount,
+  selectCurrentOrchestrationGroupRules,
+  selectCurrentOrchestrationGroupRuleTotal,
+  selectEngineValidationRules,
+  selectFilteredRuleGroups,
+  selectGroupOrchestrationCounts,
+  selectHasBlockingSourceIssues,
+  selectInvalidOrchestrationGroupIds,
+  selectInvalidOrchestrationRuleIds,
+  selectPagedCurrentOrchestrationGroupRules,
+  selectResultPageCount,
+  selectSelectedRuleGroup,
+  selectSingleVariables,
+  selectTaskTree,
+} from './workbench/selectors'
+import {
+  getPresetListByGroup,
+  getSelectedPresetByGroup,
+  replaceSourceBasePathAction,
+  setPresetListByGroup,
+  setSelectedPresetByGroup,
+} from './workbench/pathReplacementActions'
+import {
+  getAutoSavePayload,
+  loadFromServerAction,
+  saveConfigNowAction,
+  scheduleAutoSaveAction,
+} from './workbench/persistenceActions'
+import { collectAffectedSourceIds } from './workbench/sourceActions'
+import { normalizeStoredVariable } from './workbench/variableActions'
+import { resetExecutionState } from './workbench/executionActions'
+import { createWorkbenchState, type WorkbenchState } from './workbench/state'
 import {
   collectVariableTagsBySourceIds,
   createEntityId,
   ensureDefaultGroup,
-  isCompositeVariable,
-  isValidMultiCompositeMappingConfig,
-  isValidMultiCompositePipelineConfig,
-  isSingleVariable,
-  isValidCompositeConfig,
-  isValidCompositeCondition,
   normalizeCompositeConfig,
-  normalizeCompositeCondition,
+  normalizeExpectedValue,
   normalizeExpectedValueMode,
   normalizeMultiCompositeMappingConfig,
   normalizeMultiCompositePipelineConfig,
-  normalizeExpectedValue,
   pruneRulesByRemovedTags,
   RULE_ORCHESTRATION_PAGE_SIZE,
   UNGROUPED_GROUP,
 } from '../utils/ruleOrchestrationModel'
-import { buildTaskTreePayload } from '../utils/taskTree'
 import {
-  extractSourceBasename,
-  getSourceLocator,
-  isAffectedVariable,
-  isLocalPathManagedSource,
-  isSvnPathManagedSource,
-  joinDirectoryAndBasename,
-  joinSvnDirectoryAndBasename,
   normalizeReplacementPreset,
   type SourcePathReplacementGroup,
 } from '../utils/sourcePathReplacement'
 import { saveApiFile } from '../utils/download'
-import { orchestrationRulesToValidationRules } from '../utils/workbenchOrchestrationRules'
 import {
   buildAiDraftPreviewTaskTreePayload,
   getAiDraftRulesToApply,
 } from '../utils/aiDraftWorkflow'
 import { SAMPLE_SOURCE_PATH } from '../utils/workbenchMeta'
 
-type AutoSaveStatus = 'idle' | 'saving' | 'saved' | 'failed'
-
-interface WorkbenchState {
-  sources: DataSource[]
-  variables: VariableTag[]
-  ruleGroups: FixedRuleGroup[]
-  orchestrationRules: FixedRuleDefinition[]
-  selectedGroupId: string
-  groupKeyword: string
-  orchestrationCurrentPage: number
-  capabilities: SourceType[]
-  isExecuting: boolean
-  isResultPageLoading: boolean
-  isResultExporting: boolean
-  isUpdatingSvn: boolean
-  pageError: string
-  abnormalResults: AbnormalResult[]
-  abnormalResultTotal: number
-  executionMeta: ExecutionMeta | null
-  resultId: number | null
-  resultCurrentPage: number
-  resultPageSize: number
-  svnUpdateResults: WorkbenchSvnUpdateItem[]
-  svnUpdateSummary: string
-  activeTag: string | null
-  preferredSourceId: string | null
-  sourceMetadataMap: Record<string, SourceMetadata>
-  variablePreviewMap: Record<string, VariablePreviewData>
-  sourceIssues: Record<string, string>
-  localPathReplacementPresets: string[]
-  selectedLocalPathReplacementPreset: string | null
-  svnPathReplacementPresets: string[]
-  selectedSvnPathReplacementPreset: string | null
-  autoSaveStatus: AutoSaveStatus
-  autoSaveError: string
-  autoSaveSavedAt: number | null
-}
-
-function formatAutoSaveError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  return '自动保存失败，请稍后重试。'
-}
-
-function createWorkbenchDemoRules(): FixedRuleDefinition[] {
-  const gid = UNGROUPED_GROUP.group_id
-  return [
-    {
-      rule_id: createEntityId('wb-rule'),
-      group_id: gid,
-      rule_name: 'items-ID-非空校验',
-      target_variable_tag: '[items-id]',
-      rule_type: 'not_null',
-    },
-    {
-      rule_id: createEntityId('wb-rule'),
-      group_id: gid,
-      rule_name: 'items-ID-唯一校验',
-      target_variable_tag: '[items-id]',
-      rule_type: 'unique',
-    },
-    {
-      rule_id: createEntityId('wb-rule'),
-      group_id: gid,
-      rule_name: 'items-ID-大于-0',
-      target_variable_tag: '[items-id]',
-      rule_type: 'fixed_value_compare',
-      operator: 'gt',
-      expected_value: '0',
-    },
-    {
-      rule_id: createEntityId('wb-rule'),
-      group_id: gid,
-      rule_name: 'drops-RefID-大于-0',
-      target_variable_tag: '[drops-ref]',
-      rule_type: 'fixed_value_compare',
-      operator: 'gt',
-      expected_value: '0',
-    },
-  ]
-}
-
-function getPresetListByGroup(
-  state: Pick<
-    WorkbenchState,
-    | 'localPathReplacementPresets'
-    | 'selectedLocalPathReplacementPreset'
-    | 'svnPathReplacementPresets'
-    | 'selectedSvnPathReplacementPreset'
-  >,
-  group: SourcePathReplacementGroup,
-): string[] {
-  return group === 'svn' ? state.svnPathReplacementPresets : state.localPathReplacementPresets
-}
-
-function setPresetListByGroup(
-  state: WorkbenchState,
-  group: SourcePathReplacementGroup,
-  presets: string[],
-): void {
-  if (group === 'svn') {
-    state.svnPathReplacementPresets = presets
-    return
-  }
-  state.localPathReplacementPresets = presets
-}
-
-function getSelectedPresetByGroup(
-  state: Pick<
-    WorkbenchState,
-    | 'selectedLocalPathReplacementPreset'
-    | 'selectedSvnPathReplacementPreset'
-  >,
-  group: SourcePathReplacementGroup,
-): string | null {
-  return group === 'svn'
-    ? state.selectedSvnPathReplacementPreset
-    : state.selectedLocalPathReplacementPreset
-}
-
-function setSelectedPresetByGroup(
-  state: WorkbenchState,
-  group: SourcePathReplacementGroup,
-  selectedPreset: string | null,
-): void {
-  if (group === 'svn') {
-    state.selectedSvnPathReplacementPreset = selectedPreset
-    return
-  }
-  state.selectedLocalPathReplacementPreset = selectedPreset
-}
-
-function isValidSequenceStep(value: string | undefined): boolean {
-  const normalized = value?.trim() ?? ''
-  if (!normalized) {
-    return false
-  }
-  const numeric = Number(normalized)
-  return Number.isFinite(numeric) && numeric > 0
-}
-
-function isValidSequenceStartValue(value: string | undefined): boolean {
-  const normalized = value?.trim() ?? ''
-  if (!normalized) {
-    return false
-  }
-  return Number.isFinite(Number(normalized))
-}
-
-function resolveFieldAgainstAvailable(
-  requestedField: string | undefined,
-  availableFields: string[],
-): string | null {
-  const rawField = requestedField ?? ''
-  if (availableFields.includes(rawField)) {
-    return rawField
-  }
-
-  const normalizedField = rawField.trim()
-  if (!normalizedField) {
-    return null
-  }
-
-  const matchedFields = availableFields.filter((field) => field.trim() === normalizedField)
-  return matchedFields.length === 1 ? matchedFields[0] : null
-}
-
-function collectCompositeAvailableFields(variable: VariableTag | undefined): string[] {
-  const fields = new Set<string>(['__key__'])
-  const keyColumn = variable?.key_column
-  if (keyColumn?.trim()) {
-    fields.add(keyColumn)
-  }
-  ;(variable?.columns ?? []).forEach((column) => {
-    if (column?.trim()) {
-      fields.add(column)
-    }
-  })
-  return [...fields]
-}
-
-function isValidDualCompositeFilters(
-  filters: CompositeCondition[] | undefined,
-  availableFields: string[],
-): boolean {
-  return (filters ?? []).every((condition) => {
-    if (!isValidCompositeCondition(condition, 'filter')) {
-      return false
-    }
-    if (!resolveFieldAgainstAvailable(condition.field, availableFields)) {
-      return false
-    }
-    if (
-      condition.value_source === 'field' &&
-      !resolveFieldAgainstAvailable(condition.expected_field, availableFields)
-    ) {
-      return false
-    }
-    return true
-  })
-}
-
-function normalizeDualCompositeFilters(
-  filters: CompositeCondition[] | undefined,
-  availableFields: string[],
-): CompositeCondition[] {
-  return (filters ?? []).map((condition) => {
-    const normalized = normalizeCompositeCondition(condition)
-    return {
-      ...normalized,
-      field: resolveFieldAgainstAvailable(normalized.field, availableFields) ?? normalized.field,
-      expected_field:
-        normalized.value_source === 'field'
-          ? resolveFieldAgainstAvailable(normalized.expected_field, availableFields) ??
-            normalized.expected_field
-          : normalized.expected_field,
-    }
-  })
-}
-
-function isValidDualCompositeRule(rule: FixedRuleDefinition, variableMap: Map<string, VariableTag>): boolean {
-  const targetTag = rule.target_variable_tag.trim()
-  const referenceTag = rule.reference_variable_tag?.trim() ?? ''
-  const targetVariable = variableMap.get(targetTag)
-  const referenceVariable = variableMap.get(referenceTag)
-
-  if (!targetTag || !referenceTag) {
-    return false
-  }
-  if (!isCompositeVariable(targetVariable) || !isCompositeVariable(referenceVariable)) {
-    return false
-  }
-  if (!rule.key_check_mode || !['baseline_only', 'bidirectional'].includes(rule.key_check_mode)) {
-    return false
-  }
-  if (!rule.comparisons?.length) {
-    return false
-  }
-
-  const leftFieldList = collectCompositeAvailableFields(targetVariable)
-  const rightFieldList = collectCompositeAvailableFields(referenceVariable)
-  if (!resolveFieldAgainstAvailable(rule.left_key_field ?? '__key__', leftFieldList)) {
-    return false
-  }
-  if (!resolveFieldAgainstAvailable(rule.right_key_field ?? '__key__', rightFieldList)) {
-    return false
-  }
-  if (targetTag === referenceTag && (!rule.left_filters?.length || !rule.right_filters?.length)) {
-    return false
-  }
-  if (!isValidDualCompositeFilters(rule.left_filters, leftFieldList)) {
-    return false
-  }
-  if (!isValidDualCompositeFilters(rule.right_filters, rightFieldList)) {
-    return false
-  }
-
-  return rule.comparisons.every((comparison) => {
-    if (!comparison.comparison_id?.trim()) {
-      return false
-    }
-    if (!resolveFieldAgainstAvailable(comparison.left_field, leftFieldList)) {
-      return false
-    }
-    if (!resolveFieldAgainstAvailable(comparison.right_field, rightFieldList)) {
-      return false
-    }
-    return ['eq', 'ne', 'gt', 'lt', 'not_null'].includes(comparison.operator)
-  })
-}
-
 export const useWorkbenchStore = defineStore('workbench', {
-  state: (): WorkbenchState => ({
-    sources: [],
-    variables: [],
-    ruleGroups: [{ ...UNGROUPED_GROUP }],
-    orchestrationRules: [],
-    selectedGroupId: UNGROUPED_GROUP.group_id,
-    groupKeyword: '',
-    orchestrationCurrentPage: 1,
-    capabilities: [],
-    isExecuting: false,
-    isResultPageLoading: false,
-    isResultExporting: false,
-    isUpdatingSvn: false,
-    pageError: '',
-    abnormalResults: [],
-    abnormalResultTotal: 0,
-    executionMeta: null,
-    resultId: null,
-    resultCurrentPage: 1,
-    resultPageSize: 20,
-    svnUpdateResults: [],
-    svnUpdateSummary: '',
-    activeTag: null,
-    preferredSourceId: null,
-    sourceMetadataMap: {},
-    variablePreviewMap: {},
-    sourceIssues: {},
-    localPathReplacementPresets: [],
-    selectedLocalPathReplacementPreset: null,
-    svnPathReplacementPresets: [],
-    selectedSvnPathReplacementPreset: null,
-    autoSaveStatus: 'idle',
-    autoSaveError: '',
-    autoSaveSavedAt: null,
-  }),
+  state: (): WorkbenchState => createWorkbenchState(),
 
   getters: {
     /** 供引擎执行的 ValidationRule 列表（由编排规则映射）。 */
     engineValidationRules(): ValidationRule[] {
-      return orchestrationRulesToValidationRules(this.variables, this.orchestrationRules)
+      return selectEngineValidationRules(this)
     },
 
     taskTree(): TaskTree {
-      return {
-        sources: this.sources,
-        variables: this.variables,
-        rules: this.engineValidationRules,
-      }
+      return selectTaskTree(this)
     },
 
     allRuleGroups(): FixedRuleGroup[] {
-      return ensureDefaultGroup(this.ruleGroups)
+      return selectAllRuleGroups(this)
     },
 
     filteredRuleGroups(): FixedRuleGroup[] {
-      const keyword = this.groupKeyword.trim().toLowerCase()
-      if (!keyword) {
-        return this.allRuleGroups
-      }
-      return this.allRuleGroups.filter((group) => group.group_name.toLowerCase().includes(keyword))
+      return selectFilteredRuleGroups(this)
     },
 
     selectedRuleGroup(): FixedRuleGroup {
-      return (
-        this.allRuleGroups.find((group) => group.group_id === this.selectedGroupId) ??
-        this.allRuleGroups[0]
-      )
+      return selectSelectedRuleGroup(this)
     },
 
     groupOrchestrationCounts(): Record<string, number> {
-      return this.orchestrationRules.reduce<Record<string, number>>((accumulator, rule) => {
-        accumulator[rule.group_id] = (accumulator[rule.group_id] ?? 0) + 1
-        return accumulator
-      }, {})
+      return selectGroupOrchestrationCounts(this)
     },
 
     currentOrchestrationGroupRules(): FixedRuleDefinition[] {
-      const groupId = this.selectedRuleGroup.group_id
-      return this.orchestrationRules.filter((rule) => rule.group_id === groupId)
+      return selectCurrentOrchestrationGroupRules(this)
     },
 
     pagedCurrentOrchestrationGroupRules(): FixedRuleDefinition[] {
-      const start = (this.orchestrationCurrentPage - 1) * RULE_ORCHESTRATION_PAGE_SIZE
-      return this.currentOrchestrationGroupRules.slice(
-        start,
-        start + RULE_ORCHESTRATION_PAGE_SIZE,
-      )
+      return selectPagedCurrentOrchestrationGroupRules(this)
     },
 
     currentOrchestrationGroupRuleTotal(): number {
-      return this.currentOrchestrationGroupRules.length
+      return selectCurrentOrchestrationGroupRuleTotal(this)
     },
 
     currentOrchestrationGroupPageCount(): number {
-      return Math.max(
-        1,
-        Math.ceil(this.currentOrchestrationGroupRuleTotal / RULE_ORCHESTRATION_PAGE_SIZE),
-      )
+      return selectCurrentOrchestrationGroupPageCount(this)
     },
 
     orchestrationRuleCount(): number {
@@ -445,124 +137,15 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     invalidOrchestrationRuleIds(): string[] {
-      const validGroupIds = new Set(this.allRuleGroups.map((group) => group.group_id))
-      const variableMap = new Map(this.variables.map((variable) => [variable.tag, variable] as const))
-
-      return this.orchestrationRules
-        .filter((rule) => {
-          if (!validGroupIds.has(rule.group_id)) {
-            return true
-          }
-          if (!rule.rule_name.trim()) {
-            return true
-          }
-
-          if (rule.rule_type === 'multi_composite_pipeline_check') {
-            return !isValidMultiCompositePipelineConfig(rule.pipeline_config, variableMap)
-          }
-          if (rule.rule_type === 'multi_composite_mapping_check') {
-            return !isValidMultiCompositeMappingConfig(rule.mapping_config, variableMap)
-          }
-
-          const targetTag = rule.target_variable_tag.trim()
-          const variable = variableMap.get(targetTag)
-          if (!targetTag || !variable) {
-            return true
-          }
-
-          if (isSingleVariable(variable)) {
-            if (
-              rule.rule_type === 'composite_condition_check' ||
-              rule.rule_type === 'dual_composite_compare'
-            ) {
-              return true
-            }
-
-            if (rule.rule_type === 'cross_table_mapping') {
-              const referenceTag = rule.reference_variable_tag?.trim() ?? ''
-              if (!referenceTag) {
-                return true
-              }
-
-              const referenceVariable = variableMap.get(referenceTag)
-              return !isSingleVariable(referenceVariable)
-            }
-
-            if (rule.rule_type === 'sequence_order_check') {
-              if (!rule.sequence_direction || !['asc', 'desc'].includes(rule.sequence_direction)) {
-                return true
-              }
-              if (!rule.sequence_start_mode || !['auto', 'manual'].includes(rule.sequence_start_mode)) {
-                return true
-              }
-              if (!isValidSequenceStep(rule.sequence_step)) {
-                return true
-              }
-              if (rule.sequence_start_mode === 'manual' && !isValidSequenceStartValue(rule.sequence_start_value)) {
-                return true
-              }
-              return false
-            }
-
-            if (rule.rule_type === 'regex_check') {
-              return !normalizeExpectedValue(rule.expected_value)
-            }
-
-            if (rule.rule_type !== 'fixed_value_compare') {
-              return false
-            }
-
-            if (!rule.operator) {
-              return true
-            }
-
-            const expectedValue = normalizeExpectedValue(rule.expected_value)
-            if (!expectedValue) {
-              return true
-            }
-
-            if (
-              (rule.operator === 'gt' || rule.operator === 'lt') &&
-              Number.isNaN(Number(expectedValue))
-            ) {
-              return true
-            }
-
-            return false
-          }
-
-          if (!isCompositeVariable(variable)) {
-            return true
-          }
-
-          if (rule.rule_type === 'composite_condition_check') {
-            return !isValidCompositeConfig(rule.composite_config)
-          }
-          if (rule.rule_type === 'dual_composite_compare') {
-            return !isValidDualCompositeRule(rule, variableMap)
-          }
-          return true
-        })
-        .map((rule) => rule.rule_id)
+      return selectInvalidOrchestrationRuleIds(this)
     },
 
     invalidOrchestrationGroupIds(): string[] {
-      const invalidRuleIds = new Set(this.invalidOrchestrationRuleIds)
-      const invalidGroupIds = new Set<string>()
-      this.orchestrationRules.forEach((rule) => {
-        if (invalidRuleIds.has(rule.rule_id)) {
-          invalidGroupIds.add(rule.group_id)
-        }
-      })
-      return [...invalidGroupIds]
+      return selectInvalidOrchestrationGroupIds(this)
     },
 
     canExecuteOrchestration(): boolean {
-      return (
-        this.orchestrationRules.length > 0 &&
-        this.invalidOrchestrationRuleIds.length === 0 &&
-        !this.hasBlockingSourceIssues
-      )
+      return selectCanExecuteOrchestration(this)
     },
 
     canRunSvnUpdate(): boolean {
@@ -570,11 +153,11 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     hasBlockingSourceIssues(state): boolean {
-      return Object.keys(state.sourceIssues).length > 0
+      return selectHasBlockingSourceIssues(state)
     },
 
     singleVariables(state): VariableTag[] {
-      return state.variables.filter((variable) => (variable.variable_kind ?? 'single') === 'single')
+      return selectSingleVariables(state)
     },
 
     resultCount(state): number {
@@ -582,7 +165,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     resultPageCount(state): number {
-      return Math.max(1, Math.ceil(state.abnormalResultTotal / state.resultPageSize))
+      return selectResultPageCount(state)
     },
   },
 
@@ -592,13 +175,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     clearExecutionResult(): void {
-      this.executionMeta = null
-      this.abnormalResults = []
-      this.abnormalResultTotal = 0
-      this.resultId = null
-      this.resultCurrentPage = 1
-      this.isResultPageLoading = false
-      this.isResultExporting = false
+      Object.assign(this, resetExecutionState())
     },
 
     clearSvnUpdateResult(): void {
@@ -782,11 +359,7 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     upsertSource(source: DataSource, originalId?: string): void {
       const sourceCopy = { ...source }
-      const affectedSourceIds = new Set<string>([sourceCopy.id])
-
-      if (originalId) {
-        affectedSourceIds.add(originalId)
-      }
+      const affectedSourceIds = collectAffectedSourceIds(sourceCopy, originalId)
 
       affectedSourceIds.forEach((sourceId) => {
         delete this.sourceIssues[sourceId]
@@ -862,10 +435,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     upsertVariable(variable: VariableTag, originalTag?: string): void {
-      const variableCopy = {
-        ...variable,
-        append_index_to_key: variable.append_index_to_key ?? false,
-      }
+      const variableCopy = normalizeStoredVariable(variable)
 
       if (originalTag) {
         const index = this.variables.findIndex((item) => item.tag === originalTag)
@@ -991,7 +561,9 @@ export const useWorkbenchStore = defineStore('workbench', {
 
     ensureOrchestrationGroupByName(groupName: string): string {
       const normalizedName = groupName.trim() || 'AI生成规则组'
-      const existingGroup = this.ruleGroups.find((group) => group.group_name === normalizedName)
+      const existingGroup = this.ruleGroups.find(
+        (group) => group.group_name === normalizedName,
+      )
       if (existingGroup) {
         return existingGroup.group_id
       }
@@ -1175,14 +747,7 @@ export const useWorkbenchStore = defineStore('workbench', {
       page?: number,
       size?: number,
     ): TaskTree {
-      return buildTaskTreePayload(
-        this.sources,
-        this.variables,
-        this.engineValidationRules,
-        selectedRuleIds,
-        page,
-        size,
-      )
+      return buildWorkbenchTaskTreePayload(this, selectedRuleIds, page, size)
     },
 
     async executeValidation(selectedRuleIds?: string[]): Promise<void> {
@@ -1272,34 +837,11 @@ export const useWorkbenchStore = defineStore('workbench', {
       }
     },
 
-    async saveConfigNow(): Promise<void> {
-      const runId = ((this as any)._autoSaveRunId ?? 0) + 1
-      ;(this as any)._autoSaveRunId = runId
-      this.autoSaveStatus = 'saving'
-      this.autoSaveError = ''
-
-      try {
-        await saveWorkbenchConfig(this._getAutoSavePayload())
-        if ((this as any)._autoSaveRunId === runId) {
-          this.autoSaveStatus = 'saved'
-          this.autoSaveError = ''
-          this.autoSaveSavedAt = Date.now()
-        }
-      } catch (error) {
-        if ((this as any)._autoSaveRunId === runId) {
-          this.autoSaveStatus = 'failed'
-          this.autoSaveError = formatAutoSaveError(error)
-        }
-        throw error
-      }
-    },
-
-    async retryAutoSave(): Promise<void> {
-      await this.saveConfigNow()
-    },
-
     async applyAiRuleDraft(draft: AiRuleDraftPayload): Promise<string[]> {
-      const rulesToApply = getAiDraftRulesToApply(this.orchestrationRules, draft.rules_to_add)
+      const rulesToApply = getAiDraftRulesToApply(
+        this.orchestrationRules,
+        draft.rules_to_add,
+      )
       if (!rulesToApply.length) {
         throw new Error('规则已存在，无需重复添加。')
       }
@@ -1331,6 +873,10 @@ export const useWorkbenchStore = defineStore('workbench', {
       return executeTaskTree(payload)
     },
 
+    async saveConfigNow(): Promise<void> {
+      await saveConfigNowAction(this)
+    },
+
     async runSvnUpdate(): Promise<void> {
       this.isUpdatingSvn = true
       this.pageError = ''
@@ -1354,188 +900,15 @@ export const useWorkbenchStore = defineStore('workbench', {
       failedCount: number
       affectedSourceIds: string[]
     }> {
-      const normalizedBaseDirectory = normalizeReplacementPreset(baseDirectory, group)
-      const candidateSources: Array<{
-        sourceId: string
-        source: DataSource
-        nextSource: DataSource
-        nextPath: string
-      }> = []
-      const affectedSourceIds = new Set<string>()
-      let updatedCount = 0
-      let skippedCount = 0
-
-      this.sources.slice().forEach((source) => {
-        const isManagedSource =
-          group === 'svn' ? isSvnPathManagedSource(source) : isLocalPathManagedSource(source)
-        if (!isManagedSource) {
-          skippedCount += 1
-          return
-        }
-
-        const currentLocator = getSourceLocator(source)
-        const basename = extractSourceBasename(currentLocator)
-        if (!basename) {
-          skippedCount += 1
-          return
-        }
-
-        const nextPath =
-          group === 'svn'
-            ? joinSvnDirectoryAndBasename(normalizedBaseDirectory, basename)
-            : joinDirectoryAndBasename(normalizedBaseDirectory, basename)
-        candidateSources.push({
-          sourceId: source.id,
-          source,
-          nextSource: {
-            ...source,
-            path: group === 'svn' ? undefined : nextPath,
-            url: group === 'svn' ? nextPath : source.url,
-            pathOrUrl: nextPath,
-          },
-          nextPath,
-        })
-      })
-
-      if (!candidateSources.length) {
-        return {
-          updatedCount,
-          skippedCount,
-          failedCount: 0,
-          affectedSourceIds: [],
-        }
-      }
-
-      const validationFailures: string[] = []
-      const metadataValidatedSourceIds = new Set<string>()
-      for (const candidate of candidateSources) {
-        try {
-          await fetchSourceMetadata(candidate.nextSource)
-          metadataValidatedSourceIds.add(candidate.sourceId)
-        } catch (error) {
-          const reason =
-            error instanceof Error ? error.message : '读取数据源元数据失败。'
-          validationFailures.push(
-            `- ${candidate.sourceId} -> ${candidate.nextPath}：${reason}`,
-          )
-        }
-      }
-
-      for (const candidate of candidateSources) {
-        if (!metadataValidatedSourceIds.has(candidate.sourceId)) {
-          continue
-        }
-        const affectedVariables = this.variables.filter(
-          (variable) => variable.source_id === candidate.sourceId,
-        )
-
-        for (const variable of affectedVariables) {
-          const isComposite = (variable.variable_kind ?? 'single') === 'composite'
-          try {
-            if (isComposite) {
-              await fetchCompositePreview({
-                source: candidate.nextSource,
-                sheet: variable.sheet,
-                columns: variable.columns ?? [],
-                key_column: variable.key_column ?? '',
-                append_index_to_key: variable.append_index_to_key ?? false,
-              })
-            } else {
-              await fetchColumnPreview({
-                source: candidate.nextSource,
-                sheet: variable.sheet,
-                column: variable.column ?? '',
-              })
-            }
-          } catch (error) {
-            const reason =
-              error instanceof Error ? error.message : '变量预览校验失败。'
-            validationFailures.push(
-              `- ${candidate.sourceId} / ${variable.tag}：${reason}`,
-            )
-          }
-        }
-      }
-
-      if (validationFailures.length) {
-        throw new Error(
-          [
-            `以下${group === 'svn' ? 'SVN 路径' : '本地路径'}替换失败，本次未生效：`,
-            ...validationFailures,
-          ].join('\n'),
-        )
-      }
-
-      candidateSources.forEach((candidate) => {
-        this.upsertSource(candidate.nextSource, candidate.sourceId)
-        delete this.sourceIssues[candidate.sourceId]
-        affectedSourceIds.add(candidate.sourceId)
-        updatedCount += 1
-      })
-
-      this.addPathReplacementPreset(group, normalizedBaseDirectory)
-      this.setSelectedPathReplacementPreset(group, normalizedBaseDirectory)
-      await this.saveConfigNow()
-
-      let failedCount = 0
-      for (const sourceId of affectedSourceIds) {
-        try {
-          await this.loadSourceMetadata(sourceId)
-          delete this.sourceIssues[sourceId]
-        } catch (error) {
-          failedCount += 1
-          this.sourceIssues[sourceId] =
-            error instanceof Error ? error.message : '刷新数据源元数据失败。'
-        }
-      }
-
-      this.clearExecutionResult()
-      this.clearPageError()
-
-      const activeVariable = this.variables.find((variable) => variable.tag === this.activeTag)
-      if (isAffectedVariable(activeVariable, affectedSourceIds)) {
-        try {
-          await this.loadVariablePreview(activeVariable, undefined, true)
-        } catch {
-          // 变量预览失败时保留数据源级提示即可，避免重复打断页面交互。
-        }
-      }
-
-      return {
-        updatedCount,
-        skippedCount,
-        failedCount,
-        affectedSourceIds: [...affectedSourceIds],
-      }
+      return replaceSourceBasePathAction(this, group, baseDirectory)
     },
 
     _getAutoSavePayload(): Record<string, unknown> {
-      return {
-        sources: this.sources,
-        variables: this.variables,
-        ruleGroups: this.ruleGroups,
-        orchestrationRules: this.orchestrationRules,
-        local_path_replacement_presets: this.localPathReplacementPresets,
-        selected_local_path_replacement_preset: this.selectedLocalPathReplacementPreset,
-        svn_path_replacement_presets: this.svnPathReplacementPresets,
-        selected_svn_path_replacement_preset: this.selectedSvnPathReplacementPreset,
-      }
+      return getAutoSavePayload(this)
     },
 
     _scheduleAutoSave(): void {
-      if ((this as any)._autoSaveTimer) {
-        clearTimeout((this as any)._autoSaveTimer)
-      }
-      if (this.autoSaveStatus !== 'saving') {
-        this.autoSaveStatus = 'idle'
-      }
-      this.autoSaveError = ''
-      ;(this as any)._autoSaveTimer = setTimeout(() => {
-        ;(this as any)._autoSaveTimer = null
-        this.saveConfigNow().catch(() => {
-          // 自动保存失败已记录到状态中，页面用非阻断提示展示。
-        })
-      }, 2000)
+      scheduleAutoSaveAction(this as WorkbenchState & { _autoSaveTimer?: ReturnType<typeof setTimeout> })
     },
 
     triggerAutoSave(): void {
@@ -1543,81 +916,7 @@ export const useWorkbenchStore = defineStore('workbench', {
     },
 
     async loadFromServer(): Promise<void> {
-      try {
-        const response = await fetchWorkbenchConfig()
-        const data = response.data
-
-        this.sources = []
-        this.variables = []
-        this.ruleGroups = [{ ...UNGROUPED_GROUP }]
-        this.orchestrationRules = []
-        this.abnormalResults = []
-        this.abnormalResultTotal = 0
-        this.executionMeta = null
-        this.resultId = null
-        this.resultCurrentPage = 1
-        this.isResultPageLoading = false
-        this.isResultExporting = false
-        this.isUpdatingSvn = false
-        this.svnUpdateResults = []
-        this.svnUpdateSummary = ''
-        this.sourceMetadataMap = {}
-        this.variablePreviewMap = {}
-        this.sourceIssues = {}
-        this.activeTag = null
-        this.preferredSourceId = null
-        this.localPathReplacementPresets = []
-        this.selectedLocalPathReplacementPreset = null
-        this.svnPathReplacementPresets = []
-        this.selectedSvnPathReplacementPreset = null
-        this.autoSaveStatus = 'idle'
-        this.autoSaveError = ''
-        this.autoSaveSavedAt = null
-
-        if (data && typeof data === 'object') {
-          if (Array.isArray(data.sources)) this.sources = data.sources as DataSource[]
-          if (Array.isArray(data.variables)) this.variables = data.variables as VariableTag[]
-          if (Array.isArray(data.ruleGroups))
-            this.ruleGroups = data.ruleGroups as FixedRuleGroup[]
-          if (Array.isArray(data.orchestrationRules))
-            this.orchestrationRules = data.orchestrationRules as FixedRuleDefinition[]
-          const legacyPresetPayload =
-            (data as Record<string, unknown>).path_replacement_presets ??
-            (data as Record<string, unknown>).pathReplacementPresets
-          const localPresetPayload =
-            (data as Record<string, unknown>).local_path_replacement_presets ?? legacyPresetPayload
-          const svnPresetPayload =
-            (data as Record<string, unknown>).svn_path_replacement_presets
-          if (Array.isArray(localPresetPayload)) {
-            this.localPathReplacementPresets = (localPresetPayload as unknown[])
-              .map((preset) => normalizeReplacementPreset(String(preset ?? ''), 'local'))
-              .filter(Boolean)
-          }
-          if (Array.isArray(svnPresetPayload)) {
-            this.svnPathReplacementPresets = (svnPresetPayload as unknown[])
-              .map((preset) => normalizeReplacementPreset(String(preset ?? ''), 'svn'))
-              .filter(Boolean)
-          }
-          const legacySelectedPreset =
-            (data as Record<string, unknown>).selected_path_replacement_preset ??
-            (data as Record<string, unknown>).selectedPathReplacementPreset
-          const localSelectedPreset =
-            (data as Record<string, unknown>).selected_local_path_replacement_preset ??
-            legacySelectedPreset
-          const svnSelectedPreset =
-            (data as Record<string, unknown>).selected_svn_path_replacement_preset
-          this.selectedLocalPathReplacementPreset =
-            typeof localSelectedPreset === 'string'
-              ? normalizeReplacementPreset(localSelectedPreset, 'local')
-              : null
-          this.selectedSvnPathReplacementPreset =
-            typeof svnSelectedPreset === 'string'
-              ? normalizeReplacementPreset(svnSelectedPreset, 'svn')
-              : null
-        }
-      } catch {
-        /* 首次加载无数据正常 */
-      }
+      await loadFromServerAction(this)
     },
   },
 })

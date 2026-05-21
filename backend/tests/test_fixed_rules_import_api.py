@@ -1,4 +1,4 @@
-"""个人校验规则导入项目校验接口测试。"""
+"""个人校验规则导入项目校验接口回归测试。"""
 
 from __future__ import annotations
 
@@ -6,583 +6,799 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from backend.app.database import async_session_factory
-from backend.app.models import WorkbenchConfigRecord
+from backend.app.fixed_rules.db_service import load_fixed_rules_config_from_db
+from backend.app.models import User, WorkbenchConfigRecord
 from backend.tests.conftest import seed_fixed_rules_config
 
-
-def _create_workbook(path: Path, columns: dict[str, list[object]]) -> Path:
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        pd.DataFrame(columns).to_excel(writer, sheet_name="items", index=False)
-    return path
+import pytest
 
 
-async def _seed_workbench_config(
-    project_id: int,
-    user_id: int,
-    config: dict[str, object],
-) -> None:
+pytestmark = pytest.mark.anyio
+
+
+def _create_workbook(target_path: Path) -> Path:
+    with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+        pd.DataFrame({"INT_ID": [1, 2, 3], "Name": ["a", "b", "c"]}).to_excel(
+            writer,
+            sheet_name="items",
+            index=False,
+        )
+    return target_path
+
+
+def _source(source_id: str, path: Path | str) -> dict[str, object]:
+    locator = str(path)
+    return {
+        "id": source_id,
+        "type": "local_excel",
+        "path": locator,
+        "pathOrUrl": locator,
+    }
+
+
+def _variable(source_id: str, tag: str = "[items-Name]") -> dict[str, object]:
+    return {
+        "tag": tag,
+        "source_id": source_id,
+        "sheet": "items",
+        "variable_kind": "single",
+        "column": "Name",
+        "expected_type": "str",
+    }
+
+
+def _composite_variable(source_id: str, tag: str = "[items-composite]") -> dict[str, object]:
+    return {
+        "tag": tag,
+        "source_id": source_id,
+        "sheet": "items",
+        "variable_kind": "composite",
+        "columns": ["INT_ID", "Name"],
+        "key_column": "INT_ID",
+        "append_index_to_key": False,
+        "expected_type": "json",
+    }
+
+
+def _rule(tag: str = "[items-Name]", rule_id: str = "rule-not-null") -> dict[str, object]:
+    return {
+        "rule_id": rule_id,
+        "group_id": "ungrouped",
+        "rule_name": "Name 非空",
+        "target_variable_tag": tag,
+        "rule_type": "not_null",
+    }
+
+
+def _workbench_payload(workbook_path: Path) -> dict[str, object]:
+    return {
+        "sources": [_source("personal-source", workbook_path)],
+        "variables": [_variable("personal-source")],
+        "ruleGroups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "orchestrationRules": [_rule()],
+    }
+
+
+async def _seed_workbench_config(project_id: int, user_id: int, payload: dict[str, object]) -> None:
     async with async_session_factory() as session:
         session.add(
             WorkbenchConfigRecord(
                 project_id=project_id,
                 user_id=user_id,
-                config_json=json.dumps(config, ensure_ascii=False),
+                config_json=json.dumps(payload, ensure_ascii=False),
             )
         )
         await session.commit()
 
 
-async def _get_test_user_id() -> int:
+async def _current_user_id() -> int:
     async with async_session_factory() as session:
         from sqlalchemy import select
-
-        from backend.app.models import User
 
         result = await session.execute(select(User.id).where(User.username == "testuser"))
         return int(result.scalar_one())
 
 
-def _workbench_config(
-    workbook_path: Path,
-    *,
-    source_id: str = "src_items",
-    variable_tag: str = "[personal-items-composite]",
-    rule_id: str = "personal-rule-composite",
-    rule_type: str = "composite_condition_check",
-) -> dict[str, object]:
-    if rule_type == "not_null":
-        variable = {
-            "tag": "[personal-items-id]",
-            "source_id": source_id,
-            "sheet": "items",
-            "variable_kind": "single",
-            "column": "INT_ID",
-            "expected_type": "str",
-        }
-        rule = {
-            "rule_id": rule_id,
-            "group_id": "personal-group",
-            "rule_name": "INT_ID 非空",
-            "target_variable_tag": "[personal-items-id]",
-            "rule_type": "not_null",
-        }
-    else:
-        variable = {
-            "tag": variable_tag,
-            "source_id": source_id,
-            "sheet": "items",
-            "variable_kind": "composite",
-            "columns": ["INT_ID", "INT_Faction", "INT_Group"],
-            "key_column": "INT_ID",
-            "append_index_to_key": False,
-            "expected_type": "json",
-        }
-        rule = {
-            "rule_id": rule_id,
-            "group_id": "personal-group",
-            "rule_name": "阵营分组检查",
-            "target_variable_tag": variable_tag,
-            "rule_type": "composite_condition_check",
-            "composite_config": {
-                "global_filters": [],
-                "branches": [
-                    {
-                        "branch_id": "branch-1",
-                        "filters": [
-                            {
-                                "condition_id": "filter-1",
-                                "field": "INT_Faction",
-                                "operator": "eq",
-                                "value_source": "literal",
-                                "expected_value": "0",
-                            }
-                        ],
-                        "assertions": [
-                            {
-                                "condition_id": "assert-1",
-                                "field": "INT_Group",
-                                "operator": "not_null",
-                            }
-                        ],
-                    }
-                ],
-            },
-        }
+async def test_workbench_import_draft_returns_personal_rules(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(workbook_path))
 
-    return {
-        "sources": [
-            {
-                "id": source_id,
-                "type": "local_excel",
-                "pathOrUrl": str(workbook_path),
-            }
-        ],
-        "variables": [variable],
-        "ruleGroups": [
-            {"group_id": "personal-group", "group_name": "个人导入组", "builtin": False}
-        ],
-        "orchestrationRules": [rule],
-    }
+    response = await auth_client.get("/api/v1/fixed-rules/import/workbench/draft")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["importable_rules"][0]["rule_id"] == "rule-not-null"
+    assert data["source_mappings"][0]["recommended_action"] == "new"
 
 
-def _project_config(
-    workbook_path: Path,
-    *,
-    source_id: str = "src_items",
-    variables: list[dict[str, object]] | None = None,
-    rules: list[dict[str, object]] | None = None,
-) -> dict[str, object]:
-    return {
+async def test_workbench_import_preview_does_not_persist_project_config(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(workbook_path))
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["summary"]["rules_new"] == 1
+    assert data["blocking_errors"] == []
+    async with async_session_factory() as session:
+        assert await load_fixed_rules_config_from_db(session, test_project_id) is None
+
+
+async def test_workbench_import_commit_saves_project_config(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(workbook_path))
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/commit",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["rules"][0]["rule_id"] == "rule-not-null"
+    assert response.json()["meta"]["import_summary"]["rules_new"] == 1
+
+
+async def test_workbench_import_commit_failure_does_not_overwrite_project_config(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(workbook_path))
+    original_config = {
         "version": 6,
         "configured": True,
-        "sources": [
+        "sources": [_source("project-source", workbook_path)],
+        "variables": [_variable("project-source", "[project-Name]")],
+        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "rules": [_rule("[project-Name]", "project-rule")],
+        "local_path_replacement_presets": [],
+        "selected_local_path_replacement_preset": None,
+        "svn_path_replacement_presets": [],
+        "selected_svn_path_replacement_preset": None,
+    }
+    await seed_fixed_rules_config(original_config, test_project_id)
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/commit",
+        json={
+            "scope": {"mode": "all"},
+            "source_mappings": [
+                {
+                    "personal_source_id": "personal-source",
+                    "action": "replace",
+                    "next_source": _source("personal-source", tmp_path / "missing.xlsx"),
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    async with async_session_factory() as session:
+        persisted = await load_fixed_rules_config_from_db(session, test_project_id)
+    assert persisted is not None
+    assert persisted["rules"][0]["rule_id"] == "project-rule"
+
+
+async def test_workbench_import_modified_source_path_is_validated_and_committed(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    release_path = _create_workbook(tmp_path / "release.xlsx")
+    missing_dev_path = tmp_path / "dev-missing.xlsx"
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(missing_dev_path))
+    payload = {
+        "scope": {"mode": "all"},
+        "source_mappings": [
             {
-                "id": source_id,
-                "type": "local_excel",
-                "pathOrUrl": str(workbook_path),
+                "personal_source_id": "personal-source",
+                "action": "replace",
+                "next_source": _source("personal-source", release_path),
+                "confirmed": True,
             }
         ],
-        "variables": variables or [],
-        "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
-        "rules": rules or [],
-        "local_path_replacement_presets": [],
-        "svn_path_replacement_presets": [],
     }
 
-
-@pytest.mark.anyio
-async def test_import_preview_reuses_project_source_and_composite_superset(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    personal_path = _create_workbook(
-        tmp_path / "personal.xlsx",
-        {"INT_ID": [1], "INT_Faction": [0], "INT_Group": [10]},
-    )
-    project_path = _create_workbook(
-        tmp_path / "project.xlsx",
-        {"INT_ID": [1], "INT_Faction": [0], "INT_Group": [10], "STR_Name": ["a"]},
-    )
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(test_project_id, user_id, _workbench_config(personal_path))
-    await seed_fixed_rules_config(
-        _project_config(
-            project_path,
-            variables=[
-                {
-                    "tag": "[project-items-wide]",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "composite",
-                    "columns": ["INT_ID", "INT_Faction", "INT_Group", "STR_Name"],
-                    "key_column": "INT_ID",
-                    "append_index_to_key": False,
-                    "expected_type": "json",
-                }
-            ],
-        ),
-        test_project_id,
-    )
-
-    response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
-        json={"selected_rule_ids": ["personal-rule-composite"]},
-    )
-
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["summary"] == {"total": 1, "ready": 1, "duplicate": 0, "skipped": 0}
-    assert data["sources"][0]["final_source"]["pathOrUrl"] == str(project_path)
-    assert data["variables"][0]["mode"] == "project"
-    assert data["variables"][0]["final_tag"] == "[project-items-wide]"
-    assert data["rules"][0]["candidate_rule"]["target_variable_tag"] == "[project-items-wide]"
-
-    import_response = await auth_client.post(
-        "/api/v1/fixed-rules/import-from-workbench",
-        json={"selected_rule_ids": ["personal-rule-composite"]},
-    )
-
-    assert import_response.status_code == 200
-    imported = import_response.json()["data"]
-    assert len(imported["sources"]) == 1
-    assert imported["sources"][0]["pathOrUrl"] == str(project_path)
-    assert len(imported["variables"]) == 1
-    assert imported["rules"][0]["target_variable_tag"] == "[project-items-wide]"
-
-
-@pytest.mark.anyio
-async def test_import_source_override_adds_custom_source_without_changing_project_source(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    personal_path = _create_workbook(tmp_path / "personal.xlsx", {"INT_ID": [1]})
-    project_path = _create_workbook(tmp_path / "project.xlsx", {"INT_ID": [1]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
-        _workbench_config(personal_path, rule_type="not_null", rule_id="personal-rule-not-null"),
-    )
-    await seed_fixed_rules_config(_project_config(project_path), test_project_id)
-
-    payload = {
-        "selected_rule_ids": ["personal-rule-not-null"],
-        "source_overrides": {
-            "src_items": {
-                "id": "src_items_import",
-                "type": "local_excel",
-                "pathOrUrl": str(personal_path),
-            }
-        },
-    }
-    response = await auth_client.post("/api/v1/fixed-rules/import-from-workbench", json=payload)
-
-    assert response.status_code == 200
-    imported = response.json()["data"]
-    source_map = {source["id"]: source for source in imported["sources"]}
-    assert source_map["src_items"]["pathOrUrl"] == str(project_path)
-    assert source_map["src_items_import"]["pathOrUrl"] == str(personal_path)
-    imported_variable = next(
-        variable for variable in imported["variables"] if variable["tag"] == "[personal-items-id]"
-    )
-    assert imported_variable["source_id"] == "src_items_import"
-
-
-@pytest.mark.anyio
-async def test_import_preview_skips_when_project_source_lacks_required_field(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    personal_path = _create_workbook(
-        tmp_path / "personal.xlsx",
-        {"INT_ID": [1], "INT_Faction": [0], "INT_Group": [10]},
-    )
-    project_path = _create_workbook(
-        tmp_path / "project.xlsx",
-        {"INT_ID": [1], "INT_Faction": [0]},
-    )
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(test_project_id, user_id, _workbench_config(personal_path))
-    await seed_fixed_rules_config(_project_config(project_path), test_project_id)
-
-    response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
-        json={"selected_rule_ids": ["personal-rule-composite"]},
-    )
-
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["summary"]["ready"] == 0
-    assert data["summary"]["skipped"] == 1
-    assert "INT_Group" in data["rules"][0]["reason"]
-
-
-@pytest.mark.anyio
-async def test_import_preview_skips_duplicate_rule(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    workbook_path = _create_workbook(tmp_path / "shared.xlsx", {"INT_ID": [1]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
-        _workbench_config(workbook_path, rule_type="not_null", rule_id="personal-rule-not-null"),
-    )
-    variable = {
-        "tag": "[personal-items-id]",
-        "source_id": "src_items",
-        "sheet": "items",
-        "variable_kind": "single",
-        "column": "INT_ID",
-        "expected_type": "str",
-    }
-    await seed_fixed_rules_config(
-        _project_config(
-            workbook_path,
-            variables=[variable],
-            rules=[
-                {
-                    "rule_id": "project-rule-not-null",
-                    "group_id": "ungrouped",
-                    "rule_name": "已有非空",
-                    "target_variable_tag": "[personal-items-id]",
-                    "rule_type": "not_null",
-                }
-            ],
-        ),
-        test_project_id,
-    )
-
-    response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
-        json={"selected_rule_ids": ["personal-rule-not-null"]},
-    )
-
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["summary"] == {"total": 1, "ready": 0, "duplicate": 1, "skipped": 0}
-
-
-@pytest.mark.anyio
-async def test_import_preview_can_rename_conflicting_variable_after_source_override(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    personal_path = _create_workbook(tmp_path / "personal.xlsx", {"INT_ID": [1]})
-    project_path = _create_workbook(tmp_path / "project.xlsx", {"INT_ID": [1]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
-        _workbench_config(personal_path, rule_type="not_null", rule_id="personal-rule-not-null"),
-    )
-    await seed_fixed_rules_config(
-        _project_config(
-            project_path,
-            variables=[
-                {
-                    "tag": "[personal-items-id]",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "single",
-                    "column": "INT_ID",
-                    "expected_type": "str",
-                }
-            ],
-        ),
-        test_project_id,
-    )
-
-    response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
-        json={
-            "selected_rule_ids": ["personal-rule-not-null"],
-            "source_overrides": {
-                "src_items": {
-                    "id": "src_items_import",
-                    "type": "local_excel",
-                    "pathOrUrl": str(personal_path),
-                }
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["summary"] == {"total": 1, "ready": 0, "duplicate": 0, "skipped": 1}
-    variable = data["variables"][0]
-    assert variable["issue_code"] == "tag_conflict"
-    assert variable["can_rename"] is True
-    assert variable["suggested_tag"] == "[personal-items-id_import]"
-    assert "修改变量池标签" in variable["issue"]
-
-
-@pytest.mark.anyio
-async def test_import_variable_tag_override_adds_custom_source_variable_and_rewrites_rule(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    personal_path = _create_workbook(tmp_path / "personal.xlsx", {"INT_ID": [1]})
-    project_path = _create_workbook(tmp_path / "project.xlsx", {"INT_ID": [1]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
-        _workbench_config(personal_path, rule_type="not_null", rule_id="personal-rule-not-null"),
-    )
-    await seed_fixed_rules_config(
-        _project_config(
-            project_path,
-            variables=[
-                {
-                    "tag": "[personal-items-id]",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "single",
-                    "column": "INT_ID",
-                    "expected_type": "str",
-                }
-            ],
-        ),
-        test_project_id,
-    )
-
-    payload = {
-        "selected_rule_ids": ["personal-rule-not-null"],
-        "source_overrides": {
-            "src_items": {
-                "id": "src_items_import",
-                "type": "local_excel",
-                "pathOrUrl": str(personal_path),
-            }
-        },
-        "variable_tag_overrides": {
-            "[personal-items-id]": "[personal-items-id_import]",
-        },
-    }
     preview_response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json=payload,
+    )
+    commit_response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/commit",
         json=payload,
     )
 
     assert preview_response.status_code == 200
-    preview = preview_response.json()["data"]
-    assert preview["summary"] == {"total": 1, "ready": 1, "duplicate": 0, "skipped": 0}
-    assert preview["variables"][0]["mode"] == "new"
-    assert preview["variables"][0]["final_tag"] == "[personal-items-id_import]"
-    assert (
-        preview["rules"][0]["candidate_rule"]["target_variable_tag"]
-        == "[personal-items-id_import]"
+    preview_data = preview_response.json()["data"]
+    assert preview_data["blocking_errors"] == []
+    assert preview_data["variable_previews"][0]["status"] == "ok"
+    assert commit_response.status_code == 200
+    committed_source = commit_response.json()["data"]["sources"][0]
+    assert committed_source["pathOrUrl"] == str(release_path)
+
+
+async def test_workbench_import_preview_blocks_missing_complex_rule_variable(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    payload = _workbench_payload(workbook_path)
+    payload["variables"] = []
+    payload["orchestrationRules"] = [
+        {
+            "rule_id": "pipeline-missing",
+            "group_id": "ungrouped",
+            "rule_name": "串行缺变量",
+            "target_variable_tag": "[missing]",
+            "rule_type": "multi_composite_pipeline_check",
+            "pipeline_config": {
+                "nodes": [
+                    {
+                        "node_id": "node-1",
+                        "variable_tag": "[missing]",
+                        "filters": [],
+                        "assertions": [
+                            {
+                                "condition_id": "assert-1",
+                                "field": "__key__",
+                                "operator": "not_null",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+    ]
+    await _seed_workbench_config(test_project_id, user_id, payload)
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
     )
 
-    import_response = await auth_client.post(
-        "/api/v1/fixed-rules/import-from-workbench",
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["blocking_errors"]
+    assert "missing" in data["blocking_errors"][0]
+
+
+async def test_workbench_import_preview_auto_replaces_same_id_different_path(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    payload = _workbench_payload(personal_path)
+    payload["sources"] = [_source("shared-source", personal_path)]
+    payload["variables"] = [_variable("shared-source")]
+    await _seed_workbench_config(test_project_id, user_id, payload)
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("shared-source", project_path)],
+            "variables": [],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["blocking_errors"] == []
+    assert data["source_results"][0]["status"] == "new"
+    assert data["source_results"][0]["next_id"] == "shared-source-import-2"
+
+
+async def test_workbench_import_variable_tag_conflict_can_be_renamed(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(personal_path))
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_variable("project-source")],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={
+            "scope": {"mode": "all"},
+            "source_mappings": [],
+            "conflict_resolutions": {
+                "variable_tags": {"[items-Name]": "[items-Name-import]"},
+                "rule_names": {},
+                "group_names": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["blocking_errors"] == []
+    imported_rule = next(
+        rule
+        for rule in data["next_config_preview"]["rules"]
+        if rule["rule_id"] == "rule-not-null"
+    )
+    assert imported_rule["target_variable_tag"] == "[items-Name-import]"
+
+
+async def test_workbench_import_variable_tag_conflict_auto_gets_import_suffix(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(personal_path))
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_variable("project-source")],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["blocking_errors"] == []
+    imported_rule = next(
+        rule
+        for rule in data["next_config_preview"]["rules"]
+        if rule["rule_id"] == "rule-not-null"
+    )
+    assert imported_rule["target_variable_tag"] == "[items-Name-导入]"
+    assert data["variable_results"][0]["next_id"] == "[items-Name-导入]"
+
+
+async def test_workbench_import_rule_name_conflict_gets_import_suffix(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(personal_path))
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_variable("project-source", "[project-Name]")],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [_rule("[project-Name]", "project-rule")],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    rule_results = response.json()["data"]["rule_results"]
+    imported_result = next(item for item in rule_results if item["item_id"] == "rule-not-null")
+    assert imported_result["status"] == "renamed"
+    assert imported_result["details"]["rule_name"] == "Name 非空-导入"
+    assert imported_result["details"]["duplicate_rule"] is True
+    assert imported_result["details"]["duplicate_action"] == "rename"
+
+
+async def test_workbench_import_duplicate_rule_can_be_skipped(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(personal_path))
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_variable("project-source", "[project-Name]")],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [_rule("[project-Name]", "project-rule")],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+    payload = {
+        "scope": {"mode": "all"},
+        "source_mappings": [],
+        "duplicate_rule_actions": {"rule-not-null": "skip"},
+    }
+
+    preview_response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json=payload,
+    )
+    commit_response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/commit",
         json=payload,
     )
 
-    assert import_response.status_code == 200
-    imported = import_response.json()["data"]
-    source_map = {source["id"]: source for source in imported["sources"]}
-    assert source_map["src_items"]["pathOrUrl"] == str(project_path)
-    assert source_map["src_items_import"]["pathOrUrl"] == str(personal_path)
-    variable_map = {variable["tag"]: variable for variable in imported["variables"]}
-    assert variable_map["[personal-items-id]"]["source_id"] == "src_items"
-    assert variable_map["[personal-items-id_import]"]["source_id"] == "src_items_import"
-    assert imported["rules"][0]["target_variable_tag"] == "[personal-items-id_import]"
+    assert preview_response.status_code == 200
+    preview_data = preview_response.json()["data"]
+    skipped_result = next(item for item in preview_data["rule_results"] if item["item_id"] == "rule-not-null")
+    assert skipped_result["status"] == "skipped"
+    assert skipped_result["details"]["duplicate_rule"] is True
+    assert preview_data["summary"]["rules_skipped"] == 1
+    assert [rule["rule_id"] for rule in preview_data["next_config_preview"]["rules"]] == ["project-rule"]
+    assert [source["id"] for source in preview_data["next_config_preview"]["sources"]] == ["project-source"]
+    assert commit_response.status_code == 200
+    assert [rule["rule_id"] for rule in commit_response.json()["data"]["rules"]] == ["project-rule"]
 
 
-@pytest.mark.anyio
-async def test_import_variable_tag_override_reuses_existing_compatible_project_variable(
+async def test_workbench_import_group_name_conflict_gets_import_suffix(
     auth_client,
-    test_project_id,
+    test_project_id: int,
     tmp_path: Path,
-):
-    workbook_path = _create_workbook(tmp_path / "shared.xlsx", {"INT_ID": [1]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
-        _workbench_config(workbook_path, rule_type="not_null", rule_id="personal-rule-not-null"),
-    )
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    payload = _workbench_payload(personal_path)
+    payload["ruleGroups"] = [{"group_id": "personal-group", "group_name": "共享规则组", "builtin": False}]
+    payload["orchestrationRules"] = [
+        {**_rule(), "group_id": "personal-group"},
+    ]
+    await _seed_workbench_config(test_project_id, user_id, payload)
     await seed_fixed_rules_config(
-        _project_config(
-            workbook_path,
-            variables=[
-                {
-                    "tag": "[project-items-id]",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "single",
-                    "column": "INT_ID",
-                    "expected_type": "str",
-                }
-            ],
-        ),
-        test_project_id,
-    )
-
-    response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
-        json={
-            "selected_rule_ids": ["personal-rule-not-null"],
-            "variable_tag_overrides": {
-                "[personal-items-id]": "[project-items-id]",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["summary"] == {"total": 1, "ready": 1, "duplicate": 0, "skipped": 0}
-    assert data["variables"][0]["mode"] == "project"
-    assert data["variables"][0]["final_tag"] == "[project-items-id]"
-    assert data["rules"][0]["candidate_rule"]["target_variable_tag"] == "[project-items-id]"
-
-
-@pytest.mark.anyio
-async def test_import_preview_skips_duplicate_new_variable_tag_overrides(
-    auth_client,
-    test_project_id,
-    tmp_path: Path,
-):
-    workbook_path = _create_workbook(tmp_path / "shared.xlsx", {"INT_A": [1], "INT_B": [2]})
-    user_id = await _get_test_user_id()
-    await _seed_workbench_config(
-        test_project_id,
-        user_id,
         {
-            "sources": [
-                {
-                    "id": "src_items",
-                    "type": "local_excel",
-                    "pathOrUrl": str(workbook_path),
-                }
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_variable("project-source", "[project-Name]")],
+            "groups": [
+                {"group_id": "project-group", "group_name": "共享规则组", "builtin": False},
             ],
-            "variables": [
-                {
-                    "tag": "var_a",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "single",
-                    "column": "INT_A",
-                    "expected_type": "str",
-                },
-                {
-                    "tag": "var_b",
-                    "source_id": "src_items",
-                    "sheet": "items",
-                    "variable_kind": "single",
-                    "column": "INT_B",
-                    "expected_type": "str",
-                },
-            ],
-            "ruleGroups": [
-                {"group_id": "personal-group", "group_name": "个人导入组", "builtin": False}
-            ],
-            "orchestrationRules": [
-                {
-                    "rule_id": "rule-a",
-                    "group_id": "personal-group",
-                    "rule_name": "A 非空",
-                    "target_variable_tag": "var_a",
-                    "rule_type": "not_null",
-                },
-                {
-                    "rule_id": "rule-b",
-                    "group_id": "personal-group",
-                    "rule_name": "B 非空",
-                    "target_variable_tag": "var_b",
-                    "rule_type": "not_null",
-                },
-            ],
+            "rules": [],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
         },
+        test_project_id,
     )
-    await seed_fixed_rules_config(_project_config(workbook_path), test_project_id)
 
     response = await auth_client.post(
-        "/api/v1/fixed-rules/import-preview",
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    groups = response.json()["data"]["next_config_preview"]["groups"]
+    assert any(group["group_name"] == "共享规则组-导入" for group in groups)
+    group_result = response.json()["data"]["group_results"][0]
+    assert group_result["status"] == "new"
+    assert group_result["details"]["group_name"] == "共享规则组-导入"
+
+
+async def test_workbench_import_rule_scope_only_imports_selected_dependencies(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    path_a = _create_workbook(tmp_path / "personal-a.xlsx")
+    path_b = _create_workbook(tmp_path / "personal-b.xlsx")
+    payload = {
+        "sources": [_source("source-a", path_a), _source("source-b", path_b)],
+        "variables": [_variable("source-a", "[items-A]"), _variable("source-b", "[items-B]")],
+        "ruleGroups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "orchestrationRules": [
+            _rule("[items-A]", "rule-a"),
+            _rule("[items-B]", "rule-b"),
+        ],
+    }
+    await _seed_workbench_config(test_project_id, user_id, payload)
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "rules", "rule_ids": ["rule-b"]}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [rule["rule_id"] for rule in data["next_config_preview"]["rules"]] == ["rule-b"]
+    assert [source["id"] for source in data["next_config_preview"]["sources"]] == ["source-b"]
+    assert [variable["tag"] for variable in data["next_config_preview"]["variables"]] == ["[items-B]"]
+
+
+async def test_workbench_import_draft_filters_selected_rule_dependencies(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    path_a = _create_workbook(tmp_path / "personal-a.xlsx")
+    path_b = _create_workbook(tmp_path / "personal-b.xlsx")
+    payload = {
+        "sources": [_source("source-a", path_a), _source("source-b", path_b)],
+        "variables": [_variable("source-a", "[items-A]"), _variable("source-b", "[items-B]")],
+        "ruleGroups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "orchestrationRules": [
+            _rule("[items-A]", "rule-a"),
+            _rule("[items-B]", "rule-b"),
+        ],
+    }
+    await _seed_workbench_config(test_project_id, user_id, payload)
+
+    response = await auth_client.get(
+        "/api/v1/fixed-rules/import/workbench/draft",
+        params=[("selected_rule_ids", "rule-b")],
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [rule["rule_id"] for rule in data["importable_rules"]] == ["rule-b"]
+    assert [source["id"] for source in data["importable_sources"]] == ["source-b"]
+    assert [variable["tag"] for variable in data["importable_variables"]] == ["[items-B]"]
+
+
+async def test_workbench_import_draft_filters_selected_group_dependencies(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    path_a = _create_workbook(tmp_path / "personal-a.xlsx")
+    path_b = _create_workbook(tmp_path / "personal-b.xlsx")
+    payload = {
+        "sources": [_source("source-a", path_a), _source("source-b", path_b)],
+        "variables": [_variable("source-a", "[items-A]"), _variable("source-b", "[items-B]")],
+        "ruleGroups": [
+            {"group_id": "group-a", "group_name": "A 组", "builtin": False},
+            {"group_id": "group-b", "group_name": "B 组", "builtin": False},
+        ],
+        "orchestrationRules": [
+            {**_rule("[items-A]", "rule-a"), "group_id": "group-a"},
+            {**_rule("[items-B]", "rule-b"), "group_id": "group-b"},
+        ],
+    }
+    await _seed_workbench_config(test_project_id, user_id, payload)
+
+    response = await auth_client.get(
+        "/api/v1/fixed-rules/import/workbench/draft",
+        params=[("selected_group_ids", "group-b")],
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [group["group_id"] for group in data["importable_groups"]] == ["group-b"]
+    assert [rule["rule_id"] for rule in data["importable_rules"]] == ["rule-b"]
+    assert [source["id"] for source in data["importable_sources"]] == ["source-b"]
+
+
+async def test_workbench_import_preview_accepts_top_level_selected_rule_ids(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    path_a = _create_workbook(tmp_path / "personal-a.xlsx")
+    path_b = _create_workbook(tmp_path / "personal-b.xlsx")
+    payload = {
+        "sources": [_source("source-a", path_a), _source("source-b", path_b)],
+        "variables": [_variable("source-a", "[items-A]"), _variable("source-b", "[items-B]")],
+        "ruleGroups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "orchestrationRules": [
+            _rule("[items-A]", "rule-a"),
+            _rule("[items-B]", "rule-b"),
+        ],
+    }
+    await _seed_workbench_config(test_project_id, user_id, payload)
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
         json={
-            "selected_rule_ids": ["rule-a", "rule-b"],
-            "variable_tag_overrides": {
-                "var_a": "shared_import",
-                "var_b": "shared_import",
-            },
+            "scope": {"mode": "all"},
+            "selected_rule_ids": ["rule-b"],
+            "source_mappings": [],
         },
     )
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["summary"] == {"total": 2, "ready": 0, "duplicate": 0, "skipped": 2}
-    assert {variable["issue_code"] for variable in data["variables"]} == {
-        "duplicate_target_tag"
+    assert [rule["rule_id"] for rule in data["next_config_preview"]["rules"]] == ["rule-b"]
+    assert [source["id"] for source in data["next_config_preview"]["sources"]] == ["source-b"]
+
+
+async def test_workbench_import_rejects_foreign_user_or_project(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    workbook_path = _create_workbook(tmp_path / "personal.xlsx")
+    await _seed_workbench_config(test_project_id, user_id, _workbench_payload(workbook_path))
+
+    user_response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={
+            "scope": {"mode": "all"},
+            "source_mappings": [],
+            "user_id": user_id + 1,
+        },
+    )
+    project_response = await auth_client.get(
+        "/api/v1/fixed-rules/import/workbench/draft",
+        params={"project_id": test_project_id + 1},
+    )
+
+    assert user_response.status_code == 403
+    assert project_response.status_code == 403
+
+
+async def test_workbench_import_pipeline_and_mapping_rewrite_renamed_variable_tag(
+    auth_client,
+    test_project_id: int,
+    tmp_path: Path,
+) -> None:
+    user_id = await _current_user_id()
+    personal_path = _create_workbook(tmp_path / "personal.xlsx")
+    project_path = _create_workbook(tmp_path / "project.xlsx")
+    payload = {
+        "sources": [_source("personal-source", personal_path)],
+        "variables": [_composite_variable("personal-source")],
+        "ruleGroups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+        "orchestrationRules": [
+            {
+                "rule_id": "pipeline-rule",
+                "group_id": "ungrouped",
+                "rule_name": "串行规则",
+                "target_variable_tag": "[items-composite]",
+                "rule_type": "multi_composite_pipeline_check",
+                "pipeline_config": {
+                    "nodes": [
+                        {
+                            "node_id": "node-1",
+                            "variable_tag": "[items-composite]",
+                            "filters": [],
+                            "assertions": [
+                                {
+                                    "condition_id": "assert-1",
+                                    "field": "Name",
+                                    "operator": "not_null",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            {
+                "rule_id": "mapping-rule",
+                "group_id": "ungrouped",
+                "rule_name": "映射规则",
+                "target_variable_tag": "[items-composite]",
+                "rule_type": "multi_composite_mapping_check",
+                "mapping_config": {
+                    "nodes": [
+                        {
+                            "node_id": "node-1",
+                            "variable_tag": "[items-composite]",
+                            "filters": [
+                                {
+                                    "condition_id": "filter-1",
+                                    "field": "Name",
+                                    "operator": "not_null",
+                                    "exclusion_ranges": [],
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+        ],
     }
+    await _seed_workbench_config(test_project_id, user_id, payload)
+    await seed_fixed_rules_config(
+        {
+            "version": 6,
+            "configured": True,
+            "sources": [_source("project-source", project_path)],
+            "variables": [_composite_variable("project-source")],
+            "groups": [{"group_id": "ungrouped", "group_name": "未分组", "builtin": True}],
+            "rules": [],
+            "local_path_replacement_presets": [],
+            "selected_local_path_replacement_preset": None,
+            "svn_path_replacement_presets": [],
+            "selected_svn_path_replacement_preset": None,
+        },
+        test_project_id,
+    )
+
+    response = await auth_client.post(
+        "/api/v1/fixed-rules/import/workbench/preview",
+        json={"scope": {"mode": "all"}, "source_mappings": []},
+    )
+
+    assert response.status_code == 200
+    rules = response.json()["data"]["next_config_preview"]["rules"]
+    pipeline_rule = next(rule for rule in rules if rule["rule_id"] == "pipeline-rule")
+    mapping_rule = next(rule for rule in rules if rule["rule_id"] == "mapping-rule")
+    assert pipeline_rule["target_variable_tag"] == "[items-composite-导入]"
+    assert pipeline_rule["pipeline_config"]["nodes"][0]["variable_tag"] == "[items-composite-导入]"
+    assert mapping_rule["target_variable_tag"] == "[items-composite-导入]"
+    assert mapping_rule["mapping_config"]["nodes"][0]["variable_tag"] == "[items-composite-导入]"

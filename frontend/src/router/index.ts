@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '../store/auth'
+import { routeComponents } from './routePreload'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -8,43 +9,43 @@ export const router = createRouter({
     {
       path: '/login',
       name: 'login',
-      component: () => import('../views/LoginView.vue'),
+      component: routeComponents.login,
       meta: { guest: true },
     },
     {
       path: '/register',
       name: 'register',
-      component: () => import('../views/RegisterView.vue'),
+      component: routeComponents.register,
       meta: { guest: true },
     },
     {
       path: '/',
       name: 'main-board',
-      component: () => import('../views/MainBoard.vue'),
+      component: routeComponents.mainBoard,
       meta: { auth: true },
     },
     {
       path: '/fixed-rules',
       name: 'fixed-rules-board',
-      component: () => import('../views/FixedRulesBoard.vue'),
+      component: routeComponents.fixedRules,
       meta: { auth: true },
     },
     {
       path: '/admin',
       name: 'admin',
-      component: () => import('../views/AdminView.vue'),
+      component: routeComponents.admin,
       meta: { auth: true, admin: true },
     },
     {
       path: '/profile',
       name: 'profile',
-      component: () => import('../views/ProfileView.vue'),
+      component: routeComponents.profile,
       meta: { auth: true },
     },
     {
       path: '/user-guide',
       name: 'user-guide',
-      component: () => import('../views/UserGuideView.vue'),
+      component: routeComponents.userGuide,
       meta: { auth: true, activeNav: 'profile' },
     },
   ],
